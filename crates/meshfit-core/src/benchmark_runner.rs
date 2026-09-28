@@ -55,10 +55,12 @@ pub fn build_benchmark_request_from_facts(
         placement: executable.placement,
     };
 
+    let context_tokens = executable.context_tokens;
+
     Ok(BenchmarkRequestIR {
         executable,
         identity,
-        context_tokens: executable.context_tokens,
+        context_tokens,
         concurrency,
         config,
     })
