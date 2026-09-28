@@ -8,10 +8,93 @@ use std::{
 use serde_json::{json, Value};
 
 use crate::{
-    benchmark::{BenchmarkBundle, BenchmarkRequestIR, RequestMeasurement},
-    compiler::ExecutionScope,
+    benchmark::{BenchmarkBundle, BenchmarkConfig, BenchmarkRequestIR, RequestMeasurement},
+    compiler::{ExecutablePlanIR, ExecutionScope},
+    discovery::{discover_local, topology_identity_from_discovery, LocalDiscovery},
     evidence::BenchmarkProvenance,
+    identity::{ExecutionIdentity, ModelArtifactIdentity, RuntimeIdentity},
+    runtime_discovery::discover_runtimes,
 };
+
+pub fn build_benchmark_request_from_facts(
+    executable: ExecutablePlanIR,
+    local: LocalDiscovery,
+    model: ModelArtifactIdentity,
+    mut runtime: RuntimeIdentity,
+    context_tokens: u32,
+    concurrency: u32,
+    config: BenchmarkConfig,
+) -> Result<BenchmarkRequestIR, String> {
+    if executable.working_node != local.node.id {
+        return Err(format!(
+            "executable targets node '{}' but discovery describes '{}'",
+            executable.working_node, local.node.id
+        ));
+    }
+
+    if executable.model_id != model.model_id {
+        return Err(format!(
+            "executable model '{}' does not match artifact identity '{}'",
+            executable.model_id, model.model_id
+        ));
+    }
+
+    if executable.runtime != runtime.runtime {
+        return Err(format!(
+            "executable runtime '{}' does not match discovered runtime '{}'",
+            executable.runtime, runtime.runtime
+        ));
+    }
+
+    runtime.flags = executable.identity_flags.clone();
+
+    let identity = ExecutionIdentity {
+        hardware: local.hardware_identity.clone(),
+        model,
+        runtime,
+        topology: topology_identity_from_discovery(&local),
+        placement: executable.placement,
+    };
+
+    Ok(BenchmarkRequestIR {
+        executable,
+        identity,
+        context_tokens,
+        concurrency,
+        config,
+    })
+}
+
+pub fn prepare_local_benchmark_request(
+    executable: ExecutablePlanIR,
+    model: ModelArtifactIdentity,
+    context_tokens: u32,
+    concurrency: u32,
+    config: BenchmarkConfig,
+) -> Result<BenchmarkRequestIR, String> {
+    let local = discover_local();
+    let discovered_runtimes = discover_runtimes();
+    let runtime = discovered_runtimes
+        .runtimes
+        .into_iter()
+        .find(|runtime| runtime.runtime == executable.runtime)
+        .ok_or_else(|| {
+            format!(
+                "runtime '{}' is not installed or could not be discovered on PATH",
+                executable.runtime
+            )
+        })?;
+
+    build_benchmark_request_from_facts(
+        executable,
+        local,
+        model,
+        runtime,
+        context_tokens,
+        concurrency,
+        config,
+    )
+}
 
 pub fn validate_local_benchmark_request(
     request: &BenchmarkRequestIR,
