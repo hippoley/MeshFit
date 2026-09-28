@@ -1,9 +1,9 @@
-use std::{env, fs, process};
+use std::{env, fs, path::Path, process};
 
 use meshfit_core::{
     discover_local, discover_runtimes, inspect_model_artifact, probe_peer, solve, EvidenceStore,
     InfrastructureSnapshot, LinkKind, LocalDiscovery, PeerProbeResult, PlacementReport,
-    PlacementTargetIR, Prediction, PredictionQuery, ScenarioIR,
+    PlacementTargetIR, Prediction, PredictionQuery, ScenarioIR, SnapshotManifest,
 };
 
 fn main() {
@@ -61,6 +61,50 @@ fn run() -> Result<(), String> {
                 revision,
             )?;
             let yaml = serde_yaml::to_string(&identity).map_err(|e| e.to_string())?;
+            print!("{yaml}");
+        }
+        "snapshot-manifest" => {
+            let manifest_path = args
+                .get(2)
+                .ok_or_else(|| "usage: meshfit snapshot-manifest <manifest.yaml>".to_string())?;
+            let manifest_raw = fs::read_to_string(manifest_path)
+                .map_err(|e| format!("read {manifest_path}: {e}"))?;
+            let manifest: SnapshotManifest = serde_yaml::from_str(&manifest_raw)
+                .map_err(|e| format!("parse {manifest_path}: {e}"))?;
+            let base_dir = Path::new(manifest_path)
+                .parent()
+                .unwrap_or_else(|| Path::new("."));
+
+            let mut discoveries = Vec::new();
+            for discovery_file in &manifest.discovery_files {
+                let path = base_dir.join(discovery_file);
+                let raw = fs::read_to_string(&path)
+                    .map_err(|e| format!("read {}: {e}", path.display()))?;
+                let discovery: LocalDiscovery = serde_yaml::from_str(&raw)
+                    .map_err(|e| format!("parse {}: {e}", path.display()))?;
+                discoveries.push(discovery);
+            }
+
+            let mut snapshot = InfrastructureSnapshot::from_discoveries(discoveries)
+                .map_err(|e| e.to_string())?;
+
+            for probe_spec in &manifest.probes {
+                let path = base_dir.join(&probe_spec.probe_file);
+                let raw = fs::read_to_string(&path)
+                    .map_err(|e| format!("read {}: {e}", path.display()))?;
+                let probe: PeerProbeResult = serde_yaml::from_str(&raw)
+                    .map_err(|e| format!("parse {}: {e}", path.display()))?;
+                snapshot
+                    .add_peer_probe(
+                        &probe_spec.from_node,
+                        &probe_spec.to_node,
+                        &probe,
+                        probe_spec.kind,
+                    )
+                    .map_err(|e| e.to_string())?;
+            }
+
+            let yaml = serde_yaml::to_string(&snapshot).map_err(|e| e.to_string())?;
             print!("{yaml}");
         }
         "snapshot" => {
@@ -237,6 +281,6 @@ fn print_prediction(prediction: &Prediction) {
 
 fn print_help() {
     println!(
-        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
+        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
     );
 }
