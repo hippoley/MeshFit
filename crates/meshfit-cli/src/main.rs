@@ -1,9 +1,10 @@
 use std::{env, fs, path::Path, process};
 
 use meshfit_core::{
-    discover_local, discover_runtimes, inspect_model_artifact, probe_peer, solve, EvidenceStore,
-    InfrastructureSnapshot, LinkKind, LocalDiscovery, PeerProbeResult, PlacementReport,
-    PlacementTargetIR, Prediction, PredictionQuery, ScenarioIR, SnapshotManifest,
+    compile_plan, discover_local, discover_runtimes, inspect_model_artifact, probe_peer, solve,
+    CompileRequest, EvidenceStore, InfrastructureSnapshot, LinkKind, LocalDiscovery,
+    PeerProbeResult, PlacementKind, PlacementReport, PlacementTargetIR, Prediction,
+    PredictionQuery, ScenarioIR, SnapshotManifest,
 };
 
 fn main() {
@@ -142,6 +143,81 @@ fn run() -> Result<(), String> {
             let yaml = serde_yaml::to_string(&snapshot).map_err(|e| e.to_string())?;
             print!("{yaml}");
         }
+        "compile" => {
+            let request_path = args
+                .get(2)
+                .ok_or_else(|| "usage: meshfit compile <request.yaml>".to_string())?;
+            let raw = fs::read_to_string(request_path)
+                .map_err(|e| format!("read {request_path}: {e}"))?;
+            let request: CompileRequest = serde_yaml::from_str(&raw)
+                .map_err(|e| format!("parse {request_path}: {e}"))?;
+            let executable = compile_plan(&request).map_err(|e| e.to_string())?;
+            let yaml = serde_yaml::to_string(&executable).map_err(|e| e.to_string())?;
+            print!("{yaml}");
+        }
+        "compile-snapshot" => {
+            let snapshot_path = args
+                .get(2)
+                .ok_or_else(|| "usage: meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]".to_string())?;
+            let target_path = args
+                .get(3)
+                .ok_or_else(|| "missing target.yaml".to_string())?;
+            let plan_id = args
+                .get(4)
+                .ok_or_else(|| "missing plan-id".to_string())?;
+            let model_path = args
+                .get(5)
+                .ok_or_else(|| "missing model-path".to_string())?;
+            let gpu_layers = args.get(6).map(|value| {
+                value
+                    .parse::<u32>()
+                    .map_err(|e| format!("invalid gpu-layers '{value}': {e}"))
+            }).transpose()?;
+
+            let snapshot_raw = fs::read_to_string(snapshot_path)
+                .map_err(|e| format!("read {snapshot_path}: {e}"))?;
+            let target_raw = fs::read_to_string(target_path)
+                .map_err(|e| format!("read {target_path}: {e}"))?;
+            let snapshot: InfrastructureSnapshot = serde_yaml::from_str(&snapshot_raw)
+                .map_err(|e| format!("parse {snapshot_path}: {e}"))?;
+            let target: PlacementTargetIR = serde_yaml::from_str(&target_raw)
+                .map_err(|e| format!("parse {target_path}: {e}"))?;
+
+            let scenario = target.clone().into_scenario(snapshot.infrastructure.clone());
+            let report = solve(&scenario);
+            let plan = report
+                .feasible
+                .iter()
+                .find(|plan| &plan.id == plan_id)
+                .cloned()
+                .ok_or_else(|| format!("plan-id '{plan_id}' is not feasible in the current snapshot"))?;
+
+            let tensor_parallel_size = if plan.placement == PlacementKind::TensorParallel
+                && plan.nodes.len() == 1
+            {
+                snapshot
+                    .infrastructure
+                    .node(&plan.nodes[0])
+                    .map(|node| node.accelerators.len() as u32)
+                    .filter(|count| *count > 0)
+            } else {
+                None
+            };
+
+            let request = CompileRequest {
+                plan,
+                model_path: model_path.clone(),
+                model_id: target.model.id.clone(),
+                context_tokens: target.workload.context_tokens,
+                tensor_parallel_size,
+                gpu_layers,
+                extra_args: vec![],
+            };
+
+            let executable = compile_plan(&request).map_err(|e| e.to_string())?;
+            let yaml = serde_yaml::to_string(&executable).map_err(|e| e.to_string())?;
+            print!("{yaml}");
+        }
         "plan-snapshot" => {
             let snapshot_path = args
                 .get(2)
@@ -208,8 +284,9 @@ fn print_report(report: &PlacementReport) {
     println!("------");
     for (idx, plan) in report.pareto.iter().enumerate() {
         println!(
-            "{:02}  {:?}  nodes={}  runtime={}  compute={:.1}  cost=${:.2}/h  headroom={:.1}GB",
+            "{:02}  id={}  {:?}  nodes={}  runtime={}  compute={:.1}  cost=${:.2}/h  headroom={:.1}GB",
             idx + 1,
+            plan.id,
             plan.placement,
             plan.nodes.join("+"),
             plan.runtime,
@@ -281,6 +358,6 @@ fn print_prediction(prediction: &Prediction) {
 
 fn print_help() {
     println!(
-        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
+        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
     );
 }
