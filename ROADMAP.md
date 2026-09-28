@@ -37,12 +37,12 @@ MeshFit's roadmap is ordered by the shortest path to a real closed loop.
 
 ## 4. Execute and measure — v0.3
 
-- [ ] llama.cpp plan compiler
-- [ ] vLLM plan compiler
-- [ ] launch plan
-- [ ] benchmark harness
-- [ ] TTFT / TPOT
-- [ ] decode / prefill tok/s
+- [x] llama.cpp plan compiler — single-host and explicit CPU-offload launch specs implemented
+- [x] vLLM plan compiler — single-host and same-node TP launch specs implemented
+- [x] executable launch plan contract — program/args/service endpoint
+- [x] benchmark bundle contract + evidence conversion — real process/HTTP runner still pending
+- [x] TTFT / TPOT metric derivation contract — real measurement runner pending
+- [x] decode tok/s derivation contract — prefill and real measurement runner pending
 - [ ] peak memory
 - [ ] evidence bundle
 
