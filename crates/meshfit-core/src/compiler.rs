@@ -8,6 +8,8 @@ pub struct CompileRequest {
     pub model_path: String,
     pub model_id: String,
     pub context_tokens: u32,
+    #[serde(default = "default_listen_port")]
+    pub listen_port: u16,
     #[serde(default)]
     pub tensor_parallel_size: Option<u32>,
     #[serde(default)]
@@ -22,9 +24,23 @@ pub enum ExecutionScope {
     RequiresOrchestrator,
 }
 
+fn default_listen_port() -> u16 {
+    18080
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct ServiceContract {
+    pub scheme: String,
+    pub host: String,
+    pub port: u16,
+    pub health_path: String,
+    pub chat_completions_path: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ExecutablePlanIR {
     pub source_plan_id: String,
+    pub model_id: String,
     pub runtime: String,
     pub scope: ExecutionScope,
     pub program: String,
@@ -32,6 +48,7 @@ pub struct ExecutablePlanIR {
     #[serde(default)]
     pub env: Vec<(String, String)>,
     pub working_node: String,
+    pub service: ServiceContract,
     #[serde(default)]
     pub assumptions: Vec<String>,
 }
@@ -89,6 +106,10 @@ fn compile_llama_cpp(request: &CompileRequest) -> Result<ExecutablePlanIR, Compi
         request.model_path.clone(),
         "-c".into(),
         request.context_tokens.to_string(),
+        "--host".into(),
+        "127.0.0.1".into(),
+        "--port".into(),
+        request.listen_port.to_string(),
     ];
 
     match request.plan.placement {
@@ -111,12 +132,20 @@ fn compile_llama_cpp(request: &CompileRequest) -> Result<ExecutablePlanIR, Compi
 
     Ok(ExecutablePlanIR {
         source_plan_id: request.plan.id.clone(),
+        model_id: request.model_id.clone(),
         runtime: "llama.cpp".into(),
         scope: ExecutionScope::LocalProcess,
         program: "llama-server".into(),
         args,
         env: vec![],
         working_node: request.plan.nodes[0].clone(),
+        service: ServiceContract {
+            scheme: "http".into(),
+            host: "127.0.0.1".into(),
+            port: request.listen_port,
+            health_path: "/health".into(),
+            chat_completions_path: "/v1/chat/completions".into(),
+        },
         assumptions: vec![
             "llama-server is available on PATH and supports current -ngl semantics".into(),
             "v0.3 compiler emits a launch contract; it does not claim runtime compatibility until executed".into(),
@@ -169,17 +198,29 @@ fn compile_vllm(request: &CompileRequest) -> Result<ExecutablePlanIR, CompileErr
         request.context_tokens.to_string(),
         "--tensor-parallel-size".into(),
         tp_size.to_string(),
+        "--host".into(),
+        "127.0.0.1".into(),
+        "--port".into(),
+        request.listen_port.to_string(),
     ];
     args.extend(request.extra_args.clone());
 
     Ok(ExecutablePlanIR {
         source_plan_id: request.plan.id.clone(),
+        model_id: request.model_id.clone(),
         runtime: "vllm".into(),
         scope: ExecutionScope::LocalProcess,
         program: "vllm".into(),
         args,
         env: vec![],
         working_node: request.plan.nodes[0].clone(),
+        service: ServiceContract {
+            scheme: "http".into(),
+            host: "127.0.0.1".into(),
+            port: request.listen_port,
+            health_path: "/health".into(),
+            chat_completions_path: "/v1/chat/completions".into(),
+        },
         assumptions: vec![
             "vllm is available on PATH".into(),
             "tensor-parallel size is supplied explicitly from device-count evidence; MeshFit does not infer it from memory ratios".into(),
@@ -213,6 +254,7 @@ mod tests {
             model_path: "/models/demo.gguf".into(),
             model_id: "demo".into(),
             context_tokens: 32768,
+            listen_port: 18080,
             tensor_parallel_size: None,
             gpu_layers: None,
             extra_args: vec![],
@@ -230,6 +272,7 @@ mod tests {
             model_path: "/models/demo.gguf".into(),
             model_id: "demo".into(),
             context_tokens: 32768,
+            listen_port: 18080,
             tensor_parallel_size: None,
             gpu_layers: None,
             extra_args: vec![],
@@ -246,6 +289,7 @@ mod tests {
             model_path: "Qwen/Qwen3-32B".into(),
             model_id: "qwen3-32b".into(),
             context_tokens: 32768,
+            listen_port: 18080,
             tensor_parallel_size: Some(2),
             gpu_layers: None,
             extra_args: vec![],
@@ -267,6 +311,7 @@ mod tests {
             model_path: "Qwen/Qwen3-32B".into(),
             model_id: "qwen3-32b".into(),
             context_tokens: 32768,
+            listen_port: 18080,
             tensor_parallel_size: Some(2),
             gpu_layers: None,
             extra_args: vec![],
