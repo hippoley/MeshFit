@@ -94,7 +94,7 @@ fn compile_llama_cpp(request: &CompileRequest) -> Result<ExecutablePlanIR, Compi
     match request.plan.placement {
         PlacementKind::SingleHost => {
             args.push("-ngl".into());
-            args.push("999".into());
+            args.push("all".into());
         }
         PlacementKind::CpuOffload => {
             let gpu_layers = request.gpu_layers.ok_or_else(|| CompileError {
@@ -118,7 +118,7 @@ fn compile_llama_cpp(request: &CompileRequest) -> Result<ExecutablePlanIR, Compi
         env: vec![],
         working_node: request.plan.nodes[0].clone(),
         assumptions: vec![
-            "llama-server is available on PATH".into(),
+            "llama-server is available on PATH and supports current -ngl semantics".into(),
             "v0.3 compiler emits a launch contract; it does not claim runtime compatibility until executed".into(),
         ],
     })
