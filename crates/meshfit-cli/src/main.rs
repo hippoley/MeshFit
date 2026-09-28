@@ -148,22 +148,12 @@ fn run() -> Result<(), String> {
         "benchmark-auto" => {
             let executable_path = args
                 .get(2)
-                .ok_or_else(|| "usage: meshfit benchmark-auto <executable.yaml> <model-identity.yaml> <context> <concurrency> [prompt]".to_string())?;
+                .ok_or_else(|| "usage: meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [prompt]".to_string())?;
             let model_identity_path = args
                 .get(3)
                 .ok_or_else(|| "missing model-identity.yaml".to_string())?;
-            let context_tokens = args
-                .get(4)
-                .ok_or_else(|| "missing context".to_string())?
-                .parse::<u32>()
-                .map_err(|e| format!("invalid context: {e}"))?;
-            let concurrency = args
-                .get(5)
-                .ok_or_else(|| "missing concurrency".to_string())?
-                .parse::<u32>()
-                .map_err(|e| format!("invalid concurrency: {e}"))?;
             let prompt = args
-                .get(6)
+                .get(4)
                 .cloned()
                 .unwrap_or_else(|| "Explain MeshFit in one sentence.".to_string());
 
@@ -179,8 +169,7 @@ fn run() -> Result<(), String> {
             let request = prepare_local_benchmark_request(
                 executable,
                 model,
-                context_tokens,
-                concurrency,
+                1,
                 BenchmarkConfig {
                     prompt,
                     max_tokens: 64,
@@ -438,6 +427,6 @@ fn print_prediction(prediction: &Prediction) {
 
 fn print_help() {
     println!(
-        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> <context> <concurrency> [prompt]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
+        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [prompt]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
     );
 }
