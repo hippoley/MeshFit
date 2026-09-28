@@ -466,6 +466,34 @@ mod tests {
     }
 
     #[test]
+    fn single_gpu_vllm_binds_only_selected_cuda_device() {
+        let executable = compile_plan(&CompileRequest {
+            plan: plan(
+                "vllm",
+                PlacementKind::SingleHost,
+                vec!["node-a"],
+                vec![accelerator("node-a", "gpu1")],
+            ),
+            model_path: "Qwen/Qwen3-8B".into(),
+            model_id: "qwen3-8b".into(),
+            context_tokens: 8192,
+            listen_port: 18080,
+            gpu_layers: None,
+            extra_args: vec![],
+        })
+        .unwrap();
+
+        assert_eq!(
+            executable.env,
+            vec![("CUDA_VISIBLE_DEVICES".into(), "1".into())]
+        );
+        assert!(executable
+            .identity_flags
+            .iter()
+            .any(|flag| flag == "CUDA_VISIBLE_DEVICES=1"));
+    }
+
+    #[test]
     fn rejects_fake_cross_node_vllm_launcher() {
         let error = compile_plan(&CompileRequest {
             plan: plan(
