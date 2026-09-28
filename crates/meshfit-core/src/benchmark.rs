@@ -1,0 +1,305 @@
+use serde::{Deserialize, Serialize};
+
+use crate::{
+    compiler::ExecutablePlanIR,
+    evidence::{BenchmarkProvenance, BenchmarkRecord, MetricKind, MetricObservation},
+    identity::ExecutionIdentity,
+};
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BenchmarkConfig {
+    pub prompt: String,
+    #[serde(default = "default_max_tokens")]
+    pub max_tokens: u32,
+    #[serde(default = "default_warmup_requests")]
+    pub warmup_requests: u32,
+    #[serde(default = "default_measured_requests")]
+    pub measured_requests: u32,
+    #[serde(default = "default_timeout_ms")]
+    pub request_timeout_ms: u64,
+}
+
+fn default_max_tokens() -> u32 {
+    64
+}
+
+fn default_warmup_requests() -> u32 {
+    1
+}
+
+fn default_measured_requests() -> u32 {
+    3
+}
+
+fn default_timeout_ms() -> u64 {
+    120_000
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BenchmarkRequestIR {
+    pub executable: ExecutablePlanIR,
+    pub identity: ExecutionIdentity,
+    pub context_tokens: u32,
+    pub concurrency: u32,
+    pub config: BenchmarkConfig,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct RequestMeasurement {
+    pub ttft_ms: f64,
+    pub total_ms: f64,
+    pub output_tokens: u32,
+    #[serde(default)]
+    pub peak_vram_gb: Option<f64>,
+    #[serde(default)]
+    pub peak_ram_gb: Option<f64>,
+}
+
+impl RequestMeasurement {
+    pub fn decode_tokens_per_second(&self) -> Option<f64> {
+        if self.output_tokens <= 1 || self.total_ms <= self.ttft_ms {
+            return None;
+        }
+
+        let decode_seconds = (self.total_ms - self.ttft_ms) / 1000.0;
+        if decode_seconds <= 0.0 {
+            return None;
+        }
+
+        Some((self.output_tokens - 1) as f64 / decode_seconds)
+    }
+
+    pub fn tpot_ms(&self) -> Option<f64> {
+        if self.output_tokens <= 1 {
+            return None;
+        }
+
+        Some((self.total_ms - self.ttft_ms) / (self.output_tokens - 1) as f64)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BenchmarkBundle {
+    pub benchmark_id: String,
+    pub request: BenchmarkRequestIR,
+    #[serde(default)]
+    pub measurements: Vec<RequestMeasurement>,
+    pub provenance: BenchmarkProvenance,
+}
+
+impl BenchmarkBundle {
+    pub fn validate(&self) -> Result<(), String> {
+        if self.measurements.is_empty() {
+            return Err("benchmark bundle contains no measured requests".into());
+        }
+
+        if self.request.config.measured_requests as usize != self.measurements.len() {
+            return Err(format!(
+                "expected {} measured requests but bundle contains {}",
+                self.request.config.measured_requests,
+                self.measurements.len()
+            ));
+        }
+
+        for (idx, measurement) in self.measurements.iter().enumerate() {
+            if measurement.ttft_ms < 0.0 {
+                return Err(format!("measurement {idx} has negative TTFT"));
+            }
+            if measurement.total_ms < measurement.ttft_ms {
+                return Err(format!(
+                    "measurement {idx} total duration is lower than TTFT"
+                ));
+            }
+            if measurement.output_tokens == 0 {
+                return Err(format!("measurement {idx} has zero output tokens"));
+            }
+        }
+
+        Ok(())
+    }
+
+    pub fn to_benchmark_records(&self) -> Result<Vec<BenchmarkRecord>, String> {
+        self.validate()?;
+
+        let mut records = Vec::new();
+
+        for (idx, measurement) in self.measurements.iter().enumerate() {
+            let mut observations = vec![
+                MetricObservation {
+                    metric: MetricKind::TtftMs,
+                    value: measurement.ttft_ms,
+                },
+                MetricObservation {
+                    metric: MetricKind::ThroughputTokensPerSecond,
+                    value: measurement.output_tokens as f64 / (measurement.total_ms / 1000.0),
+                },
+            ];
+
+            if let Some(tpot_ms) = measurement.tpot_ms() {
+                observations.push(MetricObservation {
+                    metric: MetricKind::TpotMs,
+                    value: tpot_ms,
+                });
+            }
+
+            if let Some(decode_tps) = measurement.decode_tokens_per_second() {
+                observations.push(MetricObservation {
+                    metric: MetricKind::DecodeTokensPerSecond,
+                    value: decode_tps,
+                });
+            }
+
+            if let Some(peak_vram_gb) = measurement.peak_vram_gb {
+                observations.push(MetricObservation {
+                    metric: MetricKind::PeakVramGb,
+                    value: peak_vram_gb,
+                });
+            }
+
+            if let Some(peak_ram_gb) = measurement.peak_ram_gb {
+                observations.push(MetricObservation {
+                    metric: MetricKind::PeakRamGb,
+                    value: peak_ram_gb,
+                });
+            }
+
+            records.push(BenchmarkRecord {
+                id: format!("{}-{}", self.benchmark_id, idx + 1),
+                identity: self.request.identity.clone(),
+                context_tokens: self.request.context_tokens,
+                concurrency: self.request.concurrency,
+                observations,
+                provenance: self.provenance.clone(),
+            });
+        }
+
+        Ok(records)
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use crate::{
+        compiler::{ExecutionScope, ServiceContract},
+        identity::{
+            HardwareIdentity, ModelArtifactIdentity, RuntimeIdentity, TopologyIdentity,
+        },
+        ir::{PlacementKind, PlanIR},
+    };
+
+    fn request() -> BenchmarkRequestIR {
+        BenchmarkRequestIR {
+            executable: ExecutablePlanIR {
+                source_plan_id: "plan-1".into(),
+                model_id: "demo".into(),
+                runtime: "vllm".into(),
+                scope: ExecutionScope::LocalProcess,
+                program: "vllm".into(),
+                args: vec![],
+                env: vec![],
+                working_node: "node-a".into(),
+                service: ServiceContract {
+                    scheme: "http".into(),
+                    host: "127.0.0.1".into(),
+                    port: 18080,
+                    health_path: "/health".into(),
+                    chat_completions_path: "/v1/chat/completions".into(),
+                },
+                assumptions: vec![],
+            },
+            identity: ExecutionIdentity {
+                hardware: HardwareIdentity {
+                    architecture: "x86_64".into(),
+                    operating_system: "linux".into(),
+                    cpu_model: None,
+                    ram_mib: Some(65_536),
+                    devices: vec![],
+                },
+                model: ModelArtifactIdentity {
+                    model_id: "demo".into(),
+                    format: "gguf".into(),
+                    quantization: "q4".into(),
+                    artifact_sha256: Some("abc".into()),
+                    revision: None,
+                },
+                runtime: RuntimeIdentity {
+                    runtime: "vllm".into(),
+                    version: "test".into(),
+                    build_commit: None,
+                    flags: vec![],
+                },
+                topology: TopologyIdentity { links: vec![] },
+                placement: PlacementKind::SingleHost,
+            },
+            context_tokens: 4096,
+            concurrency: 1,
+            config: BenchmarkConfig {
+                prompt: "hello".into(),
+                max_tokens: 64,
+                warmup_requests: 1,
+                measured_requests: 1,
+                request_timeout_ms: 120_000,
+            },
+        }
+    }
+
+    #[test]
+    fn derives_tpot_and_decode_rate() {
+        let measurement = RequestMeasurement {
+            ttft_ms: 100.0,
+            total_ms: 1100.0,
+            output_tokens: 11,
+            peak_vram_gb: None,
+            peak_ram_gb: None,
+        };
+
+        assert_eq!(measurement.tpot_ms(), Some(100.0));
+        assert_eq!(measurement.decode_tokens_per_second(), Some(10.0));
+    }
+
+    #[test]
+    fn converts_bundle_into_provenance_bound_records() {
+        let bundle = BenchmarkBundle {
+            benchmark_id: "bench-1".into(),
+            request: request(),
+            measurements: vec![RequestMeasurement {
+                ttft_ms: 100.0,
+                total_ms: 1100.0,
+                output_tokens: 11,
+                peak_vram_gb: Some(12.5),
+                peak_ram_gb: Some(8.0),
+            }],
+            provenance: BenchmarkProvenance {
+                source: "meshfit-benchmark".into(),
+                source_url: None,
+                commit: Some("abc".into()),
+                captured_at: None,
+            },
+        };
+
+        let records = bundle.to_benchmark_records().unwrap();
+        assert_eq!(records.len(), 1);
+        assert!(records[0]
+            .observations
+            .iter()
+            .any(|o| o.metric == MetricKind::DecodeTokensPerSecond));
+    }
+
+    #[test]
+    fn rejects_empty_benchmark_bundle() {
+        let bundle = BenchmarkBundle {
+            benchmark_id: "bench-empty".into(),
+            request: request(),
+            measurements: vec![],
+            provenance: BenchmarkProvenance {
+                source: "meshfit-benchmark".into(),
+                source_url: None,
+                commit: None,
+                captured_at: None,
+            },
+        };
+
+        assert!(bundle.validate().is_err());
+    }
+}
