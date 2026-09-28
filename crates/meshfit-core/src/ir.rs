@@ -235,6 +235,24 @@ pub struct PlacementReport {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PlacementTargetIR {
+    pub model: ModelIR,
+    pub runtimes: Vec<RuntimeIR>,
+    pub workload: WorkloadIR,
+}
+
+impl PlacementTargetIR {
+    pub fn into_scenario(self, infrastructure: InfrastructureIR) -> ScenarioIR {
+        ScenarioIR {
+            infrastructure,
+            model: self.model,
+            runtimes: self.runtimes,
+            workload: self.workload,
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ScenarioIR {
     pub infrastructure: InfrastructureIR,
     pub model: ModelIR,
