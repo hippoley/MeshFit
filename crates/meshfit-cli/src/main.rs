@@ -2,8 +2,9 @@ use std::{env, fs, path::Path, process};
 
 use meshfit_core::{
     compile_plan, discover_local, discover_runtimes, inspect_model_artifact, probe_peer, solve,
-    run_local_benchmark, BenchmarkBundle, BenchmarkRequestIR, CompileRequest, EvidenceStore,
-    InfrastructureSnapshot, LinkKind, LocalDiscovery, PeerProbeResult, PlacementKind,
+    prepare_local_benchmark_request, run_local_benchmark, BenchmarkBundle, BenchmarkConfig,
+    BenchmarkRequestIR, CompileRequest, EvidenceStore, ExecutablePlanIR, InfrastructureSnapshot,
+    LinkKind, LocalDiscovery, ModelArtifactIdentity, PeerProbeResult, PlacementKind,
     PlacementReport, PlacementTargetIR, Prediction, PredictionQuery, ScenarioIR,
     SnapshotManifest,
 };
@@ -142,6 +143,57 @@ fn run() -> Result<(), String> {
             }
 
             let yaml = serde_yaml::to_string(&snapshot).map_err(|e| e.to_string())?;
+            print!("{yaml}");
+        }
+        "benchmark-auto" => {
+            let executable_path = args
+                .get(2)
+                .ok_or_else(|| "usage: meshfit benchmark-auto <executable.yaml> <model-identity.yaml> <context> <concurrency> [prompt]".to_string())?;
+            let model_identity_path = args
+                .get(3)
+                .ok_or_else(|| "missing model-identity.yaml".to_string())?;
+            let context_tokens = args
+                .get(4)
+                .ok_or_else(|| "missing context".to_string())?
+                .parse::<u32>()
+                .map_err(|e| format!("invalid context: {e}"))?;
+            let concurrency = args
+                .get(5)
+                .ok_or_else(|| "missing concurrency".to_string())?
+                .parse::<u32>()
+                .map_err(|e| format!("invalid concurrency: {e}"))?;
+            let prompt = args
+                .get(6)
+                .cloned()
+                .unwrap_or_else(|| "Explain MeshFit in one sentence.".to_string());
+
+            let executable_raw = fs::read_to_string(executable_path)
+                .map_err(|e| format!("read {executable_path}: {e}"))?;
+            let model_raw = fs::read_to_string(model_identity_path)
+                .map_err(|e| format!("read {model_identity_path}: {e}"))?;
+            let executable: ExecutablePlanIR = serde_yaml::from_str(&executable_raw)
+                .map_err(|e| format!("parse {executable_path}: {e}"))?;
+            let model: ModelArtifactIdentity = serde_yaml::from_str(&model_raw)
+                .map_err(|e| format!("parse {model_identity_path}: {e}"))?;
+
+            let request = prepare_local_benchmark_request(
+                executable,
+                model,
+                context_tokens,
+                concurrency,
+                BenchmarkConfig {
+                    prompt,
+                    max_tokens: 64,
+                    warmup_requests: 1,
+                    measured_requests: 3,
+                    request_timeout_ms: 120_000,
+                    startup_timeout_ms: 300_000,
+                },
+            )?;
+
+            let local_node_id = request.executable.working_node.clone();
+            let bundle = run_local_benchmark(request, &local_node_id)?;
+            let yaml = serde_yaml::to_string(&bundle).map_err(|e| e.to_string())?;
             print!("{yaml}");
         }
         "benchmark-local" => {
@@ -386,6 +438,6 @@ fn print_prediction(prediction: &Prediction) {
 
 fn print_help() {
     println!(
-        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
+        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> <context> <concurrency> [prompt]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
     );
 }
