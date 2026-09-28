@@ -4,6 +4,7 @@ request:
     source_plan_id: node-b:vllm:SingleHost
     model_id: qwen-demo
     placement: single_host
+    context_tokens: 4096
     runtime: vllm
     scope: LocalProcess
     program: vllm
