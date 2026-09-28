@@ -98,6 +98,9 @@ pub struct BenchmarkBundle {
 
 impl BenchmarkBundle {
     pub fn validate(&self) -> Result<(), String> {
+        if self.request.executable.context_tokens != self.request.context_tokens {
+            return Err("benchmark context does not match executable plan context".into());
+        }
         if self.request.executable.runtime != self.request.identity.runtime.runtime {
             return Err("benchmark executable runtime does not match execution identity".into());
         }
