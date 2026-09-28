@@ -18,6 +18,11 @@ request:
       - 127.0.0.1
       - --port
       - "18080"
+    identity_flags:
+      - --max-model-len
+      - "4096"
+      - --tensor-parallel-size
+      - "1"
     env: []
     working_node: node-b
     service:
@@ -61,6 +66,7 @@ request:
     warmup_requests: 1
     measured_requests: 2
     request_timeout_ms: 120000
+    startup_timeout_ms: 300000
 measurements:
   - ttft_ms: 100
     total_ms: 1100
