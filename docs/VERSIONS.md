@@ -1,12 +1,18 @@
 # Versioned Delivery Plan
 
-MeshFit develops by evidence gates rather than feature count.
+MeshFit develops by **Reality Gates**, not feature count.
+
+The product goal is:
+
+> discover a real heterogeneous compute estate → search feasible placements → compile an executable plan → benchmark reality → calibrate future placement decisions.
 
 ## v0.1 — Structural Placement
 
 **Question:** What plans are structurally possible?
 
-Deliverables:
+Status: **implemented, build verification still pending**
+
+Delivered:
 
 - HardwareIR
 - FabricIR
@@ -21,127 +27,187 @@ Deliverables:
 - explicit rejection/exclusion reasons
 - executable YAML scenario
 
-Not included:
-
-- tok/s prediction
-- TTFT prediction
-- automatic hardware discovery
-- runtime launch
-- adaptive scheduling
-
 Exit gate:
 
 > One heterogeneous scenario produces explainable feasible, rejected, Pareto, and excluded results.
 
 ---
 
-## v0.2 — Prediction + Evidence
+## v0.2 — Evidence Identity
 
-**Question:** Among feasible plans, what performance should we expect?
+**Question:** Can benchmark evidence be trusted and matched to the exact execution that produced it?
 
-Add:
+Status: **in progress**
 
-- EvidenceIR
-- benchmark provenance
-- prediction intervals
-- confidence
-- memory calibration
-- latency / throughput predictors
-- cost model
-- estimate vs observed reports
+Delivered / current:
 
-Principle:
+- EvidenceStore
+- BenchmarkRecord
+- provenance
+- exact-match prediction
+- structured Hardware / Model Artifact / Runtime / Topology identity
+- stable execution fingerprint
+- explicit Unavailable when evidence is missing
 
-> No naked performance number without provenance and uncertainty.
+Remaining:
+
+- benchmark artifact schema validation
+- model artifact hash capture
+- runtime/driver capture from real execution
+- repeated-run statistics
 
 Exit gate:
 
-> At least one physical machine has predicted vs observed memory, TTFT, and decode throughput.
+> Changing runtime, driver, model artifact, quantization, topology, context, or concurrency prevents accidental evidence reuse.
 
 ---
 
-## v0.3 — Plan Compiler
+## v0.2.5 — Discovery & Fabric Snapshot
 
-**Question:** Can MeshFit turn a decision into something executable?
+**Question:** Can MeshFit build its input from reality instead of hand-written YAML?
 
-Add compilers for a narrow set first:
+This milestone was moved earlier because automatic discovery is part of the core user story.
 
-- llama.cpp
-- vLLM
+Add:
 
-Then:
+- CPU / RAM discovery
+- NVIDIA GPU + free VRAM + driver
+- Apple Silicon / unified memory
+- initial AMD / Intel device discovery
+- PCIe / NVLink topology
+- runtime versions
+- host identity
+- link RTT
+- optional bandwidth measurement
+- generated InfrastructureIR + ExecutionIdentity snapshot
 
-- SGLang
-- MLX
-- exo / llama.cpp RPC
+Not yet:
+
+- uncertainty-driven active probing
+- continuous telemetry
+
+Exit gate:
+
+> Two real machines can generate a reproducible MeshFit snapshot without manually typing their hardware specification.
+
+---
+
+## v0.3 — Plan Compiler + Benchmark Harness
+
+**Question:** Can a MeshFit decision become a real execution and produce evidence?
+
+Start narrow:
+
+- llama.cpp compiler
+- vLLM compiler
 
 Output:
 
-- launch commands
-- environment
+- launch command / config
 - device mapping
 - TP/PP settings
 - model/quant selection
 - assumptions
+- evidence bundle path
+
+Benchmark harness captures:
+
+- TTFT
+- TPOT
+- prefill tok/s
+- decode tok/s
+- throughput
+- peak VRAM / RAM
+- runtime identity
+- artifact identity
+- topology identity
 
 Exit gate:
 
-> At least one generated plan launches successfully without manual topology translation.
+> At least one generated plan launches successfully and writes a provenance-complete benchmark record without manual topology translation.
 
 ---
 
-## v0.4 — Active Probe Planner
+## v0.4 — Calibrated Prediction
 
-**Question:** What evidence is missing before we trust the plan?
+**Question:** Among feasible plans, what performance should we expect?
 
-Add probes:
+Only now add stronger predictors because real evidence exists.
 
-- GPU/RAM discovery
-- PCIe/NVLink topology
+Add:
+
+- exact empirical aggregation
+- p50 / p95
+- variance
+- prediction intervals
+- cost model
+- memory calibration
+- latency / throughput predictors
+- estimate-vs-observed reports
+- carefully bounded cross-hardware transfer
+
+Principle:
+
+> No naked performance number without provenance, uncertainty, and transfer distance.
+
+Exit gate:
+
+> At least two real placements have predicted vs observed memory, TTFT, and decode throughput with recorded error.
+
+---
+
+## v0.5 — Active Probe Planner
+
+**Question:** What is the minimum additional measurement needed to choose between plans?
+
+Add probes chosen by uncertainty:
+
 - iperf3
-- RTT/jitter
-- runtime version/capability
+- RTT / jitter
+- GPU microbenchmark
+- storage throughput
+- runtime capability probe
 - model artifact inspection
-- controlled microbenchmarks
 
-MeshFit should ask for the **minimum probe that reduces decision uncertainty**.
+MeshFit should request the **minimum probe that can change the decision**.
 
 Exit gate:
 
-> A previously ambiguous placement decision changes based on measured probe evidence.
+> A previously ambiguous placement choice changes because a targeted probe supplied missing evidence.
 
 ---
 
-## v0.5 — Adaptive Placement
+## v0.6 — Adaptive Placement
 
 **Question:** Should placement change when reality changes?
 
 Add:
 
 - live telemetry
-- failure events
-- load changes
-- cost changes
-- model/workload changes
+- failures
+- workload shifts
+- cloud cost changes
+- runtime degradation
 - re-placement proposals
+- counterfactual before/after evidence
 
-This version remains a control/intelligence layer; execution stays delegated to runtimes and orchestrators.
+Execution remains delegated to runtimes/orchestrators.
 
 Exit gate:
 
-> A measured runtime change triggers a justified placement change with before/after evidence.
+> A measured runtime change triggers a justified re-placement proposal with before/after evidence.
 
 ---
 
 ## Later research tracks
 
-Only after the earlier gates are real:
+Only after the earlier Reality Gates are real:
 
 - KV placement
 - prefill/decode disaggregation
 - expert placement for MoE
 - multi-objective policy learning
 - community calibration corpus
-- counterfactual placement evidence
 - energy-aware placement
-- reliability / failure-domain optimization
+- reliability/failure-domain optimization
+- learned placement policies
