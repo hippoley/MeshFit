@@ -1,0 +1,24 @@
+hardware_identity:
+  architecture: arm64
+  operating_system: macos
+  cpu_model: Apple M3 Ultra
+  ram_mib: 131072
+  devices:
+    - vendor: apple
+      model: M3 Ultra
+      backend: metal
+      memory_mib: 131072
+      driver_version: null
+node:
+  id: node-c
+  site: office
+  ram_gb: 128
+  accelerators:
+    - id: gpu0
+      backend: metal
+      memory_gb: 128
+      free_memory_gb: 110
+      relative_compute: 0
+  hourly_cost_usd: 0
+local_fabric: []
+warnings: []
