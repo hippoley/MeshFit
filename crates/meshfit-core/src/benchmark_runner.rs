@@ -197,13 +197,7 @@ pub fn validate_request_against_live_facts(
     }
 
     if let Some(expected_sha) = request.identity.model.artifact_sha256.as_deref() {
-        let path = std::path::Path::new(
-            request
-                .executable
-                .args
-                .get(1)
-                .ok_or_else(|| "executable plan does not expose a model path".to_string())?,
-        );
+        let path = std::path::Path::new(&request.executable.model_source);
 
         if !path.is_file() {
             return Err(
