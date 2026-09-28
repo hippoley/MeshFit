@@ -111,6 +111,10 @@ pub fn validate_local_benchmark_request(
         ));
     }
 
+    if request.executable.context_tokens != request.context_tokens {
+        return Err("benchmark context does not match executable plan context".into());
+    }
+
     if request.executable.runtime != request.identity.runtime.runtime {
         return Err("executable runtime does not match ExecutionIdentity runtime".into());
     }
@@ -455,10 +459,14 @@ fn run_streaming_request(request: &BenchmarkRequestIR) -> Result<RequestMeasurem
 }
 
 pub fn has_non_empty_content_delta(value: &Value) -> bool {
-    value
-        .pointer("/choices/0/delta/content")
-        .and_then(Value::as_str)
-        .is_some_and(|content| !content.is_empty())
+    ["/choices/0/delta/content", "/choices/0/delta/reasoning_content"]
+        .iter()
+        .any(|path| {
+            value
+                .pointer(path)
+                .and_then(Value::as_str)
+                .is_some_and(|content| !content.is_empty())
+        })
 }
 
 fn sanitize_id(raw: &str) -> String {
