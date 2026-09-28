@@ -211,6 +211,7 @@ mod tests {
                 scope: ExecutionScope::LocalProcess,
                 program: "vllm".into(),
                 args: vec![],
+                identity_flags: vec![],
                 env: vec![],
                 working_node: "node-a".into(),
                 service: ServiceContract {
