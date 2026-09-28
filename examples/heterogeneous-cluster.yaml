@@ -1,0 +1,39 @@
+sites:
+  local-dc:
+    nodes:
+      - id: local-4090
+        gpu: [RTX4090, RTX4090]
+        ram_gb: 512
+        hourly_cost_usd: 0
+    network: 10GbE
+
+  office:
+    nodes:
+      - id: office-mac
+        accelerator: Apple-M3-Ultra
+        unified_memory_gb: 128
+        hourly_cost_usd: 0
+    rtt_ms: 6
+    network: 1GbE
+
+  aws-tokyo:
+    nodes:
+      - id: aws-h100
+        gpu: [H100-80GB, H100-80GB]
+        hourly_cost_usd: 6.74
+    rtt_ms: 48
+    network: 100GbE
+
+  azure-hk:
+    nodes:
+      - id: azure-a100
+        gpu: [A100-80GB]
+        hourly_cost_usd: 1.80
+    rtt_ms: 22
+    network: 25GbE
+
+constraints:
+  context_tokens: 32768
+  concurrency: 20
+  p95_latency_ms: 2000
+  budget_per_day_usd: 200
