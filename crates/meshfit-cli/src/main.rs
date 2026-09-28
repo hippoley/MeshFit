@@ -209,6 +209,7 @@ fn run() -> Result<(), String> {
                 model_path: model_path.clone(),
                 model_id: target.model.id.clone(),
                 context_tokens: target.workload.context_tokens,
+                listen_port: 18080,
                 tensor_parallel_size,
                 gpu_layers,
                 extra_args: vec![],
