@@ -72,10 +72,17 @@ pub enum LinkKind {
     Unknown,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+#[serde(tag = "scope", rename_all = "snake_case")]
+pub enum FabricEndpointIR {
+    Node { node: String },
+    Accelerator { node: String, accelerator: String },
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct FabricEdgeIR {
-    pub from: String,
-    pub to: String,
+    pub from: FabricEndpointIR,
+    pub to: FabricEndpointIR,
     pub kind: LinkKind,
     #[serde(default)]
     pub bandwidth_gbps: Option<f64>,
@@ -99,10 +106,24 @@ impl InfrastructureIR {
         self.nodes.iter().find(|n| n.id == id)
     }
 
-    pub fn link(&self, a: &str, b: &str) -> Option<&FabricEdgeIR> {
-        self.links
-            .iter()
-            .find(|l| (l.from == a && l.to == b) || (l.from == b && l.to == a))
+    pub fn node_link(&self, a: &str, b: &str) -> Option<&FabricEdgeIR> {
+        self.links.iter().find(|link| {
+            let forward = matches!(
+                (&link.from, &link.to),
+                (
+                    FabricEndpointIR::Node { node: from },
+                    FabricEndpointIR::Node { node: to }
+                ) if from == a && to == b
+            );
+            let reverse = matches!(
+                (&link.from, &link.to),
+                (
+                    FabricEndpointIR::Node { node: from },
+                    FabricEndpointIR::Node { node: to }
+                ) if from == b && to == a
+            );
+            forward || reverse
+        })
     }
 }
 
