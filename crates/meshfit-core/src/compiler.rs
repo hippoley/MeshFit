@@ -9,6 +9,8 @@ pub struct CompileRequest {
     pub model_id: String,
     pub context_tokens: u32,
     #[serde(default)]
+    pub tensor_parallel_size: Option<u32>,
+    #[serde(default)]
     pub extra_args: Vec<String>,
 }
 
@@ -147,10 +149,10 @@ fn compile_vllm(request: &CompileRequest) -> Result<ExecutablePlanIR, CompileErr
     }
 
     let tp_size = match request.plan.placement {
-        PlacementKind::TensorParallel => {
-            let inferred = request.plan.accelerator_memory_gb / request.plan.required_memory_gb;
-            inferred.ceil().max(2.0) as u32
-        }
+        PlacementKind::TensorParallel => request.tensor_parallel_size.ok_or_else(|| CompileError {
+            code: "missing_tensor_parallel_size".into(),
+            message: "tensor-parallel compilation requires an explicit device count".into(),
+        })?,
         _ => 1,
     };
 
@@ -174,7 +176,7 @@ fn compile_vllm(request: &CompileRequest) -> Result<ExecutablePlanIR, CompileErr
         working_node: request.plan.nodes[0].clone(),
         assumptions: vec![
             "vllm is available on PATH".into(),
-            "tensor-parallel size is inferred conservatively from the current PlanIR; device-count-aware compilation is a follow-up".into(),
+            "tensor-parallel size is supplied explicitly from device-count evidence; MeshFit does not infer it from memory ratios".into(),
         ],
     })
 }
@@ -205,6 +207,7 @@ mod tests {
             model_path: "/models/demo.gguf".into(),
             model_id: "demo".into(),
             context_tokens: 32768,
+            tensor_parallel_size: None,
             extra_args: vec![],
         })
         .unwrap();
@@ -220,6 +223,7 @@ mod tests {
             model_path: "Qwen/Qwen3-32B".into(),
             model_id: "qwen3-32b".into(),
             context_tokens: 32768,
+            tensor_parallel_size: Some(2),
             extra_args: vec![],
         })
         .unwrap();
@@ -239,6 +243,7 @@ mod tests {
             model_path: "Qwen/Qwen3-32B".into(),
             model_id: "qwen3-32b".into(),
             context_tokens: 32768,
+            tensor_parallel_size: Some(2),
             extra_args: vec![],
         })
         .unwrap_err();
