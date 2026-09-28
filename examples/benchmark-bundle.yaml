@@ -1,0 +1,78 @@
+benchmark_id: demo-bench
+request:
+  executable:
+    source_plan_id: node-b:vllm:SingleHost
+    model_id: qwen-demo
+    runtime: vllm
+    scope: LocalProcess
+    program: vllm
+    args:
+      - serve
+      - Qwen/Qwen3-32B
+      - --max-model-len
+      - "4096"
+      - --tensor-parallel-size
+      - "1"
+      - --host
+      - 127.0.0.1
+      - --port
+      - "18080"
+    env: []
+    working_node: node-b
+    service:
+      scheme: http
+      host: 127.0.0.1
+      port: 18080
+      health_path: /health
+      chat_completions_path: /v1/chat/completions
+    assumptions: []
+  identity:
+    hardware:
+      architecture: x86_64
+      operating_system: linux
+      cpu_model: EPYC
+      ram_mib: 65536
+      devices:
+        - vendor: nvidia
+          model: H100
+          backend: cuda
+          memory_mib: 81920
+          driver_version: "580.65"
+    model:
+      model_id: qwen-demo
+      format: safetensors
+      quantization: awq4
+      artifact_sha256: demo-sha
+      revision: main
+    runtime:
+      runtime: vllm
+      version: demo
+      build_commit: null
+      flags: []
+    topology:
+      links: []
+    placement: single_host
+  context_tokens: 4096
+  concurrency: 1
+  config:
+    prompt: "Hello from MeshFit"
+    max_tokens: 64
+    warmup_requests: 1
+    measured_requests: 2
+    request_timeout_ms: 120000
+measurements:
+  - ttft_ms: 100
+    total_ms: 1100
+    output_tokens: 11
+    peak_vram_gb: 20
+    peak_ram_gb: 8
+  - ttft_ms: 120
+    total_ms: 1120
+    output_tokens: 11
+    peak_vram_gb: 20.2
+    peak_ram_gb: 8.1
+provenance:
+  source: synthetic-example-not-real-benchmark
+  source_url: null
+  commit: demo
+  captured_at: null
