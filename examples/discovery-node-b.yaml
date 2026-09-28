@@ -1,0 +1,24 @@
+hardware_identity:
+  architecture: x86_64
+  operating_system: linux
+  cpu_model: Intel Xeon
+  ram_mib: 262144
+  devices:
+    - vendor: nvidia
+      model: NVIDIA H100 80GB HBM3
+      backend: cuda
+      memory_mib: 81920
+      driver_version: '580.65'
+node:
+  id: node-b
+  site: local
+  ram_gb: 256
+  accelerators:
+    - id: gpu0
+      backend: cuda
+      memory_gb: 80
+      free_memory_gb: 78
+      relative_compute: 0
+  hourly_cost_usd: 0
+local_fabric: []
+warnings: []
