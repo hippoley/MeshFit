@@ -48,7 +48,8 @@ pub struct BenchmarkRequestIR {
 pub struct RequestMeasurement {
     pub ttft_ms: f64,
     pub total_ms: f64,
-    pub output_tokens: u32,
+    #[serde(default)]
+    pub output_tokens: Option<u32>,
     #[serde(default)]
     pub peak_vram_gb: Option<f64>,
     #[serde(default)]
@@ -57,7 +58,8 @@ pub struct RequestMeasurement {
 
 impl RequestMeasurement {
     pub fn decode_tokens_per_second(&self) -> Option<f64> {
-        if self.output_tokens <= 1 || self.total_ms <= self.ttft_ms {
+        let output_tokens = self.output_tokens?;
+        if output_tokens <= 1 || self.total_ms <= self.ttft_ms {
             return None;
         }
 
@@ -66,15 +68,16 @@ impl RequestMeasurement {
             return None;
         }
 
-        Some((self.output_tokens - 1) as f64 / decode_seconds)
+        Some((output_tokens - 1) as f64 / decode_seconds)
     }
 
     pub fn tpot_ms(&self) -> Option<f64> {
-        if self.output_tokens <= 1 {
+        let output_tokens = self.output_tokens?;
+        if output_tokens <= 1 || self.total_ms < self.ttft_ms {
             return None;
         }
 
-        Some((self.total_ms - self.ttft_ms) / (self.output_tokens - 1) as f64)
+        Some((self.total_ms - self.ttft_ms) / (output_tokens - 1) as f64)
     }
 }
 
@@ -113,7 +116,7 @@ impl BenchmarkBundle {
                     "measurement {idx} total duration is lower than TTFT"
                 ));
             }
-            if measurement.output_tokens == 0 {
+            if measurement.output_tokens == Some(0) {
                 return Err(format!("measurement {idx} has zero output tokens"));
             }
         }
@@ -127,16 +130,17 @@ impl BenchmarkBundle {
         let mut records = Vec::new();
 
         for (idx, measurement) in self.measurements.iter().enumerate() {
-            let mut observations = vec![
-                MetricObservation {
-                    metric: MetricKind::TtftMs,
-                    value: measurement.ttft_ms,
-                },
-                MetricObservation {
+            let mut observations = vec![MetricObservation {
+                metric: MetricKind::TtftMs,
+                value: measurement.ttft_ms,
+            }];
+
+            if let Some(output_tokens) = measurement.output_tokens {
+                observations.push(MetricObservation {
                     metric: MetricKind::ThroughputTokensPerSecond,
-                    value: measurement.output_tokens as f64 / (measurement.total_ms / 1000.0),
-                },
-            ];
+                    value: output_tokens as f64 / (measurement.total_ms / 1000.0),
+                });
+            }
 
             if let Some(tpot_ms) = measurement.tpot_ms() {
                 observations.push(MetricObservation {
@@ -252,13 +256,27 @@ mod tests {
         let measurement = RequestMeasurement {
             ttft_ms: 100.0,
             total_ms: 1100.0,
-            output_tokens: 11,
+            output_tokens: Some(11),
             peak_vram_gb: None,
             peak_ram_gb: None,
         };
 
         assert_eq!(measurement.tpot_ms(), Some(100.0));
         assert_eq!(measurement.decode_tokens_per_second(), Some(10.0));
+    }
+
+    #[test]
+    fn missing_usage_does_not_invent_token_rate() {
+        let measurement = RequestMeasurement {
+            ttft_ms: 100.0,
+            total_ms: 1100.0,
+            output_tokens: None,
+            peak_vram_gb: None,
+            peak_ram_gb: None,
+        };
+
+        assert_eq!(measurement.tpot_ms(), None);
+        assert_eq!(measurement.decode_tokens_per_second(), None);
     }
 
     #[test]
@@ -269,7 +287,7 @@ mod tests {
             measurements: vec![RequestMeasurement {
                 ttft_ms: 100.0,
                 total_ms: 1100.0,
-                output_tokens: 11,
+                output_tokens: Some(11),
                 peak_vram_gb: Some(12.5),
                 peak_ram_gb: Some(8.0),
             }],
