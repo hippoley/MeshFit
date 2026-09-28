@@ -39,7 +39,7 @@ local_fabric:
       scope: accelerator
       node: node-a
       accelerator: gpu1
-    kind: nvlink
+    kind: pcie
     bandwidth_gbps: null
     latency_ms: null
     jitter_ms: 0
