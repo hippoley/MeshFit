@@ -68,7 +68,7 @@ mod tests {
 
         assert_eq!(
             identity.artifact_sha256.as_deref(),
-            Some("81c7d2a5113f7c00c24548341cbf6ef43e4cfd8577d62e1a1e727cff5fb10ab5")
+            Some("1700d6ad0d90692a1ee5680de2e002e9c32d7923afa67834f4a04a85d604a034")
         );
 
         let _ = fs::remove_file(path);
