@@ -41,6 +41,7 @@ pub struct ServiceContract {
 pub struct ExecutablePlanIR {
     pub source_plan_id: String,
     pub model_id: String,
+    pub placement: PlacementKind,
     pub runtime: String,
     pub scope: ExecutionScope,
     pub program: String,
@@ -110,6 +111,8 @@ fn compile_llama_cpp(request: &CompileRequest) -> Result<ExecutablePlanIR, Compi
         "127.0.0.1".into(),
         "--port".into(),
         request.listen_port.to_string(),
+        "--alias".into(),
+        request.model_id.clone(),
     ];
 
     match request.plan.placement {
@@ -133,6 +136,7 @@ fn compile_llama_cpp(request: &CompileRequest) -> Result<ExecutablePlanIR, Compi
     Ok(ExecutablePlanIR {
         source_plan_id: request.plan.id.clone(),
         model_id: request.model_id.clone(),
+        placement: request.plan.placement,
         runtime: "llama.cpp".into(),
         scope: ExecutionScope::LocalProcess,
         program: "llama-server".into(),
@@ -202,12 +206,15 @@ fn compile_vllm(request: &CompileRequest) -> Result<ExecutablePlanIR, CompileErr
         "127.0.0.1".into(),
         "--port".into(),
         request.listen_port.to_string(),
+        "--served-model-name".into(),
+        request.model_id.clone(),
     ];
     args.extend(request.extra_args.clone());
 
     Ok(ExecutablePlanIR {
         source_plan_id: request.plan.id.clone(),
         model_id: request.model_id.clone(),
+        placement: request.plan.placement,
         runtime: "vllm".into(),
         scope: ExecutionScope::LocalProcess,
         program: "vllm".into(),
