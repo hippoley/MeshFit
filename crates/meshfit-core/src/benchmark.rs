@@ -98,6 +98,24 @@ pub struct BenchmarkBundle {
 
 impl BenchmarkBundle {
     pub fn validate(&self) -> Result<(), String> {
+        if self.request.executable.runtime != self.request.identity.runtime.runtime {
+            return Err("benchmark executable runtime does not match execution identity".into());
+        }
+        if self.request.executable.model_id != self.request.identity.model.model_id {
+            return Err("benchmark executable model does not match execution identity".into());
+        }
+        if self.request.executable.placement != self.request.identity.placement {
+            return Err("benchmark executable placement does not match execution identity".into());
+        }
+        if self.request.executable.identity_flags != self.request.identity.runtime.flags {
+            return Err("benchmark executable identity flags do not match runtime identity flags".into());
+        }
+        if self.request.identity.model.artifact_sha256.is_none()
+            && self.request.identity.model.revision.is_none()
+        {
+            return Err("benchmark model identity lacks artifact hash or revision".into());
+        }
+
         if self.measurements.is_empty() {
             return Err("benchmark bundle contains no measured requests".into());
         }
@@ -314,6 +332,30 @@ mod tests {
             .observations
             .iter()
             .any(|o| o.metric == MetricKind::DecodeTokensPerSecond));
+    }
+
+    #[test]
+    fn rejects_identity_flag_mismatch() {
+        let mut bundle = BenchmarkBundle {
+            benchmark_id: "bench-flags".into(),
+            request: request(),
+            measurements: vec![RequestMeasurement {
+                ttft_ms: 100.0,
+                total_ms: 1100.0,
+                output_tokens: Some(11),
+                peak_vram_gb: None,
+                peak_ram_gb: None,
+            }],
+            provenance: BenchmarkProvenance {
+                source: "meshfit-benchmark".into(),
+                source_url: None,
+                commit: None,
+                captured_at: None,
+            },
+        };
+        bundle.request.executable.identity_flags = vec!["--tensor-parallel-size".into(), "2".into()];
+
+        assert!(bundle.validate().is_err());
     }
 
     #[test]
