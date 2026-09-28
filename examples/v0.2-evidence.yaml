@@ -1,9 +1,40 @@
 records:
   - id: h100-run-001
-    hardware_fingerprint: 2xh100-nvlink
-    model_id: qwen-72b-q4
-    runtime: vllm
-    placement: tensor_parallel
+    identity:
+      hardware:
+        architecture: x86_64
+        operating_system: linux
+        cpu_model: EPYC
+        ram_mib: 262144
+        devices:
+          - vendor: nvidia
+            model: H100
+            backend: cuda
+            memory_mib: 81920
+            driver_version: '580.65'
+          - vendor: nvidia
+            model: H100
+            backend: cuda
+            memory_mib: 81920
+            driver_version: '580.65'
+      model:
+        model_id: qwen-72b-q4
+        format: safetensors
+        quantization: awq4
+        artifact_sha256: demo-model-sha
+        revision: main
+      runtime:
+        runtime: vllm
+        version: '0.10.2'
+        flags: ['--tensor-parallel-size=2']
+      topology:
+        links:
+          - from: gpu0
+            to: gpu1
+            kind: nvlink
+            bandwidth_mbps: 900000
+            latency_micros: 5
+      placement: tensor_parallel
     context_tokens: 32768
     concurrency: 20
     observations:
@@ -11,17 +42,46 @@ records:
         value: 68.4
       - metric: ttft_ms
         value: 1280
-      - metric: peak_vram_gb
-        value: 74.2
     provenance:
       source: synthetic-example-not-real-benchmark
       commit: demo-001
 
   - id: h100-run-002
-    hardware_fingerprint: 2xh100-nvlink
-    model_id: qwen-72b-q4
-    runtime: vllm
-    placement: tensor_parallel
+    identity:
+      hardware:
+        architecture: x86_64
+        operating_system: linux
+        cpu_model: EPYC
+        ram_mib: 262144
+        devices:
+          - vendor: nvidia
+            model: H100
+            backend: cuda
+            memory_mib: 81920
+            driver_version: '580.65'
+          - vendor: nvidia
+            model: H100
+            backend: cuda
+            memory_mib: 81920
+            driver_version: '580.65'
+      model:
+        model_id: qwen-72b-q4
+        format: safetensors
+        quantization: awq4
+        artifact_sha256: demo-model-sha
+        revision: main
+      runtime:
+        runtime: vllm
+        version: '0.10.2'
+        flags: ['--tensor-parallel-size=2']
+      topology:
+        links:
+          - from: gpu0
+            to: gpu1
+            kind: nvlink
+            bandwidth_mbps: 900000
+            latency_micros: 5
+      placement: tensor_parallel
     context_tokens: 32768
     concurrency: 20
     observations:
@@ -29,8 +89,6 @@ records:
         value: 71.6
       - metric: ttft_ms
         value: 1340
-      - metric: peak_vram_gb
-        value: 73.8
     provenance:
       source: synthetic-example-not-real-benchmark
       commit: demo-002
