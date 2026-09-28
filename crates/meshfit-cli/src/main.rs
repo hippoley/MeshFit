@@ -1,8 +1,9 @@
 use std::{env, fs, process};
 
 use meshfit_core::{
-    discover_local, probe_peer, solve, EvidenceStore, InfrastructureSnapshot, LinkKind, LocalDiscovery,
-    PeerProbeResult, PlacementReport, Prediction, PredictionQuery, ScenarioIR,
+    discover_local, discover_runtimes, inspect_model_artifact, probe_peer, solve, EvidenceStore,
+    InfrastructureSnapshot, LinkKind, LocalDiscovery, PeerProbeResult, PlacementReport, Prediction,
+    PredictionQuery, ScenarioIR,
 };
 
 fn main() {
@@ -30,6 +31,36 @@ fn run() -> Result<(), String> {
             let measure_bandwidth = args.iter().any(|arg| arg == "--bandwidth");
             let result = probe_peer(peer, measure_bandwidth);
             let yaml = serde_yaml::to_string(&result).map_err(|e| e.to_string())?;
+            print!("{yaml}");
+        }
+        "runtimes" => {
+            let result = discover_runtimes();
+            let yaml = serde_yaml::to_string(&result).map_err(|e| e.to_string())?;
+            print!("{yaml}");
+        }
+        "inspect-model" => {
+            let path = args
+                .get(2)
+                .ok_or_else(|| "usage: meshfit inspect-model <path> <model-id> <format> <quantization> [revision]".to_string())?;
+            let model_id = args
+                .get(3)
+                .ok_or_else(|| "missing model-id".to_string())?;
+            let format = args
+                .get(4)
+                .ok_or_else(|| "missing format".to_string())?;
+            let quantization = args
+                .get(5)
+                .ok_or_else(|| "missing quantization".to_string())?;
+            let revision = args.get(6).cloned();
+
+            let identity = inspect_model_artifact(
+                path,
+                model_id.clone(),
+                format.clone(),
+                quantization.clone(),
+                revision,
+            )?;
+            let yaml = serde_yaml::to_string(&identity).map_err(|e| e.to_string())?;
             print!("{yaml}");
         }
         "snapshot" => {
@@ -185,6 +216,6 @@ fn print_prediction(prediction: &Prediction) {
 
 fn print_help() {
     println!(
-        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
+        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
     );
 }
