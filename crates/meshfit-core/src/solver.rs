@@ -175,8 +175,19 @@ fn enumerate_two_node_tp(
                 continue;
             };
 
-            if link.latency_ms > CROSS_NODE_MAX_LATENCY_MS
-                || link.bandwidth_gbps < CROSS_NODE_MIN_BANDWIDTH_GBPS
+            let (Some(latency_ms), Some(bandwidth_gbps)) =
+                (link.latency_ms, link.bandwidth_gbps)
+            else {
+                rejected.push(RejectionIR {
+                    candidate,
+                    code: "unmeasured_link".into(),
+                    reason: "fabric relation is known but bandwidth/latency have not been measured".into(),
+                });
+                continue;
+            };
+
+            if latency_ms > CROSS_NODE_MAX_LATENCY_MS
+                || bandwidth_gbps < CROSS_NODE_MIN_BANDWIDTH_GBPS
             {
                 rejected.push(RejectionIR {
                     candidate,
@@ -185,8 +196,8 @@ fn enumerate_two_node_tp(
                         "cross-node TP gate requires <= {:.1}ms and >= {:.0}Gbps; measured {:.1}ms / {:.1}Gbps",
                         CROSS_NODE_MAX_LATENCY_MS,
                         CROSS_NODE_MIN_BANDWIDTH_GBPS,
-                        link.latency_ms,
-                        link.bandwidth_gbps
+                        latency_ms,
+                        bandwidth_gbps
                     ),
                 });
                 continue;
@@ -218,7 +229,7 @@ fn enumerate_two_node_tp(
                 memory_headroom_gb: memory - model.required_memory_gb(),
                 assumptions: vec![format!(
                     "cross-node TP admitted by structural fabric gate: {:.1}Gbps / {:.1}ms",
-                    link.bandwidth_gbps, link.latency_ms
+                    bandwidth_gbps, latency_ms
                 )],
             });
         }
@@ -337,8 +348,8 @@ mod tests {
                     from: "local".into(),
                     to: "remote".into(),
                     kind: LinkKind::Wan,
-                    bandwidth_gbps: 10.0,
-                    latency_ms: 35.0,
+                    bandwidth_gbps: Some(10.0),
+                    latency_ms: Some(35.0),
                     jitter_ms: 1.0,
                     egress_cost_usd_per_gb: 0.0,
                 }],
