@@ -11,6 +11,8 @@ pub struct CompileRequest {
     #[serde(default)]
     pub tensor_parallel_size: Option<u32>,
     #[serde(default)]
+    pub gpu_layers: Option<u32>,
+    #[serde(default)]
     pub extra_args: Vec<String>,
 }
 
@@ -95,8 +97,12 @@ fn compile_llama_cpp(request: &CompileRequest) -> Result<ExecutablePlanIR, Compi
             args.push("999".into());
         }
         PlacementKind::CpuOffload => {
+            let gpu_layers = request.gpu_layers.ok_or_else(|| CompileError {
+                code: "missing_gpu_layers".into(),
+                message: "CPU offload compilation requires an explicit llama.cpp GPU-layer count".into(),
+            })?;
             args.push("-ngl".into());
-            args.push("auto".into());
+            args.push(gpu_layers.to_string());
         }
         _ => unreachable!(),
     }
@@ -208,12 +214,29 @@ mod tests {
             model_id: "demo".into(),
             context_tokens: 32768,
             tensor_parallel_size: None,
+            gpu_layers: None,
             extra_args: vec![],
         })
         .unwrap();
 
         assert_eq!(executable.program, "llama-server");
         assert!(executable.args.contains(&"/models/demo.gguf".to_string()));
+    }
+
+    #[test]
+    fn cpu_offload_requires_explicit_gpu_layers() {
+        let error = compile_plan(&CompileRequest {
+            plan: plan("llama.cpp", PlacementKind::CpuOffload, vec!["node-a"]),
+            model_path: "/models/demo.gguf".into(),
+            model_id: "demo".into(),
+            context_tokens: 32768,
+            tensor_parallel_size: None,
+            gpu_layers: None,
+            extra_args: vec![],
+        })
+        .unwrap_err();
+
+        assert_eq!(error.code, "missing_gpu_layers");
     }
 
     #[test]
@@ -224,6 +247,7 @@ mod tests {
             model_id: "qwen3-32b".into(),
             context_tokens: 32768,
             tensor_parallel_size: Some(2),
+            gpu_layers: None,
             extra_args: vec![],
         })
         .unwrap();
@@ -244,6 +268,7 @@ mod tests {
             model_id: "qwen3-32b".into(),
             context_tokens: 32768,
             tensor_parallel_size: Some(2),
+            gpu_layers: None,
             extra_args: vec![],
         })
         .unwrap_err();
