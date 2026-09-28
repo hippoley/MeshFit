@@ -86,7 +86,8 @@ fn print_prediction(prediction: &Prediction) {
     println!("MeshFit v0.2 evidence-backed prediction\n");
     println!("metric       {:?}", prediction.metric);
     println!("status       {:?}", prediction.status);
-    println!("fingerprint  {}", prediction.execution_fingerprint);\n    println!("samples      {}", prediction.sample_count);
+    println!("fingerprint  {}", prediction.execution_fingerprint);
+    println!("samples      {}", prediction.sample_count);
     println!("confidence   {:.2}", prediction.confidence);
     if let (Some(mean), Some(min), Some(max)) = (prediction.mean, prediction.min, prediction.max) {
         println!("mean         {:.3}", mean);
