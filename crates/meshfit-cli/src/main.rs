@@ -1,7 +1,8 @@
 use std::{env, fs, process};
 
 use meshfit_core::{
-    discover_local, solve, EvidenceStore, PlacementReport, Prediction, PredictionQuery, ScenarioIR,
+    discover_local, probe_peer, solve, EvidenceStore, PlacementReport, Prediction, PredictionQuery,
+    ScenarioIR,
 };
 
 fn main() {
@@ -20,6 +21,15 @@ fn run() -> Result<(), String> {
         "discover" => {
             let snapshot = discover_local();
             let yaml = serde_yaml::to_string(&snapshot).map_err(|e| e.to_string())?;
+            print!("{yaml}");
+        }
+        "probe" => {
+            let peer = args
+                .get(2)
+                .ok_or_else(|| "usage: meshfit probe <peer> [--bandwidth]".to_string())?;
+            let measure_bandwidth = args.iter().any(|arg| arg == "--bandwidth");
+            let result = probe_peer(peer, measure_bandwidth);
+            let yaml = serde_yaml::to_string(&result).map_err(|e| e.to_string())?;
             print!("{yaml}");
         }
         "plan" => {
