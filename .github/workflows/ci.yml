@@ -3,6 +3,7 @@ name: MeshFit CI
 on:
   push:
   pull_request:
+  workflow_dispatch:
 
 jobs:
   rust:
@@ -27,3 +28,5 @@ jobs:
       - run: cargo run -p meshfit -- compile-snapshot /tmp/meshfit-snapshot-manifest.yaml examples/placement-target.yaml node-b:vllm:SingleHost Qwen/Qwen3-32B > /tmp/meshfit-executable-from-snapshot.yaml
       - run: cargo run -p meshfit -- plan examples/v0.1-placement.yaml
       - run: cargo run -p meshfit -- predict examples/v0.2-evidence.yaml examples/v0.2-query.yaml
+      - run: cargo run -p meshfit -- evidence-from-benchmark examples/benchmark-bundle.yaml > /tmp/meshfit-benchmark-evidence.yaml
+      - run: cargo run -p meshfit -- predict /tmp/meshfit-benchmark-evidence.yaml examples/benchmark-query.yaml
