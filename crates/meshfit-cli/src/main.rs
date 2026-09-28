@@ -2,8 +2,8 @@ use std::{env, fs, process};
 
 use meshfit_core::{
     discover_local, discover_runtimes, inspect_model_artifact, probe_peer, solve, EvidenceStore,
-    InfrastructureSnapshot, LinkKind, LocalDiscovery, PeerProbeResult, PlacementReport, Prediction,
-    PredictionQuery, ScenarioIR,
+    InfrastructureSnapshot, LinkKind, LocalDiscovery, PeerProbeResult, PlacementReport,
+    PlacementTargetIR, Prediction, PredictionQuery, ScenarioIR,
 };
 
 fn main() {
@@ -97,6 +97,27 @@ fn run() -> Result<(), String> {
 
             let yaml = serde_yaml::to_string(&snapshot).map_err(|e| e.to_string())?;
             print!("{yaml}");
+        }
+        "plan-snapshot" => {
+            let snapshot_path = args
+                .get(2)
+                .ok_or_else(|| "usage: meshfit plan-snapshot <snapshot.yaml> <target.yaml>".to_string())?;
+            let target_path = args
+                .get(3)
+                .ok_or_else(|| "usage: meshfit plan-snapshot <snapshot.yaml> <target.yaml>".to_string())?;
+
+            let snapshot_raw = fs::read_to_string(snapshot_path)
+                .map_err(|e| format!("read {snapshot_path}: {e}"))?;
+            let target_raw = fs::read_to_string(target_path)
+                .map_err(|e| format!("read {target_path}: {e}"))?;
+            let snapshot: InfrastructureSnapshot = serde_yaml::from_str(&snapshot_raw)
+                .map_err(|e| format!("parse {snapshot_path}: {e}"))?;
+            let target: PlacementTargetIR = serde_yaml::from_str(&target_raw)
+                .map_err(|e| format!("parse {target_path}: {e}"))?;
+
+            let scenario = target.into_scenario(snapshot.infrastructure);
+            let report = solve(&scenario);
+            print_report(&report);
         }
         "plan" => {
             let path = args
@@ -216,6 +237,6 @@ fn print_prediction(prediction: &Prediction) {
 
 fn print_help() {
     println!(
-        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
+        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
     );
 }
