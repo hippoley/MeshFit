@@ -3,6 +3,8 @@ use std::process::Command;
 use serde::{Deserialize, Serialize};
 use serde_json::Value;
 
+use crate::ir::{FabricEdgeIR, FabricEndpointIR, LinkKind};
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PeerProbeResult {
     pub peer: String,
@@ -14,6 +16,29 @@ pub struct PeerProbeResult {
     pub bandwidth_gbps: Option<f64>,
     #[serde(default)]
     pub warnings: Vec<String>,
+}
+
+impl PeerProbeResult {
+    pub fn to_node_edge(
+        &self,
+        from_node: impl Into<String>,
+        to_node: impl Into<String>,
+        kind: LinkKind,
+    ) -> FabricEdgeIR {
+        FabricEdgeIR {
+            from: FabricEndpointIR::Node {
+                node: from_node.into(),
+            },
+            to: FabricEndpointIR::Node {
+                node: to_node.into(),
+            },
+            kind,
+            bandwidth_gbps: self.bandwidth_gbps,
+            latency_ms: self.latency_ms,
+            jitter_ms: self.jitter_ms.unwrap_or(0.0),
+            egress_cost_usd_per_gb: 0.0,
+        }
+    }
 }
 
 pub fn probe_peer(peer: &str, measure_bandwidth: bool) -> PeerProbeResult {
@@ -126,6 +151,26 @@ mod tests {
         let (latency, jitter) = parse_ping_summary(raw).unwrap();
         assert_eq!(latency, 0.355);
         assert_eq!(jitter, 0.048);
+    }
+
+    #[test]
+    fn converts_probe_to_graph_ready_node_edge() {
+        let probe = PeerProbeResult {
+            peer: "10.0.0.2".into(),
+            latency_ms: Some(0.42),
+            jitter_ms: Some(0.03),
+            bandwidth_gbps: Some(21.8),
+            warnings: vec![],
+        };
+        let edge = probe.to_node_edge("node-a", "node-b", LinkKind::Ethernet);
+        assert_eq!(
+            edge.from,
+            FabricEndpointIR::Node {
+                node: "node-a".into()
+            }
+        );
+        assert_eq!(edge.bandwidth_gbps, Some(21.8));
+        assert_eq!(edge.latency_ms, Some(0.42));
     }
 
     #[test]
