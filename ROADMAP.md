@@ -26,14 +26,14 @@ MeshFit's roadmap is ordered by the shortest path to a real closed loop.
 ## 3. Automatic discovery — v0.2.5
 
 - [ ] CPU / RAM
-- [ ] NVIDIA GPU / free VRAM / driver
+- [x] NVIDIA GPU / free VRAM / driver — implementation complete, real GPU validation pending
 - [ ] Apple unified memory
 - [ ] AMD / Intel baseline discovery
-- [ ] PCIe / NVLink topology
+- [x] PCIe / NVLink topology — parser implemented via `nvidia-smi topo -m`, real GPU validation pending
 - [ ] runtime versions
-- [ ] RTT
-- [ ] optional bandwidth probe
-- [ ] generate InfrastructureIR automatically
+- [x] RTT probe — implementation complete, real peer validation pending
+- [x] optional bandwidth probe — `iperf3` client path implemented, real peer validation pending
+- [ ] merge discovered hosts + measured peer edges into one generated InfrastructureIR
 
 ## 4. Execute and measure — v0.3
 
