@@ -479,11 +479,12 @@ mod tests {
     use crate::{
         benchmark::{BenchmarkConfig, BenchmarkRequestIR},
         compiler::{ExecutablePlanIR, ServiceContract},
+        discovery::LocalDiscovery,
         identity::{
             ExecutionIdentity, HardwareIdentity, ModelArtifactIdentity, RuntimeIdentity,
             TopologyIdentity,
         },
-        ir::PlacementKind,
+        ir::{HardwareNodeIR, PlacementKind},
     };
 
     fn request() -> BenchmarkRequestIR {
@@ -545,6 +546,52 @@ mod tests {
                 startup_timeout_ms: 300_000,
             },
         }
+    }
+
+    #[test]
+    fn builder_derives_context_and_runtime_flags_from_executable() {
+        let base = request();
+        let local = LocalDiscovery {
+            hardware_identity: base.identity.hardware.clone(),
+            node: HardwareNodeIR {
+                id: "node-a".into(),
+                site: "local".into(),
+                ram_gb: 64.0,
+                accelerators: vec![],
+                hourly_cost_usd: 0.0,
+            },
+            local_fabric: vec![],
+            warnings: vec![],
+        };
+        let runtime = RuntimeIdentity {
+            runtime: "vllm".into(),
+            version: "test".into(),
+            build_commit: None,
+            flags: vec!["stale".into()],
+        };
+        let mut executable = base.executable.clone();
+        executable.identity_flags = vec!["--tensor-parallel-size".into(), "1".into()];
+
+        let built = build_benchmark_request_from_facts(
+            executable.clone(),
+            local,
+            base.identity.model.clone(),
+            runtime,
+            1,
+            base.config.clone(),
+        )
+        .unwrap();
+
+        assert_eq!(built.context_tokens, executable.context_tokens);
+        assert_eq!(built.identity.runtime.flags, executable.identity_flags);
+    }
+
+    #[test]
+    fn rejects_unimplemented_concurrency() {
+        let mut changed = request();
+        changed.concurrency = 2;
+        let error = validate_local_benchmark_request(&changed, "node-a").unwrap_err();
+        assert!(error.contains("concurrency=1"));
     }
 
     #[test]
