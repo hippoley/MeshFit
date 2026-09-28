@@ -2,610 +2,357 @@
 
 # MeshFit
 
-### **Your infrastructure is messy. Your deployment plan shouldn't be.**
+### Placement intelligence for heterogeneous inference.
 
-**Point MeshFit at your real compute estate. Get the best way to run the model.**
+Give MeshFit the machines you actually have.  
+It searches **where the model belongs, how it should be split, what it will cost, and what should be left out.**
 
-Local servers · cloud GPUs · edge devices · mixed CPU/GPU/NPU · NVLink · PCIe · LAN · WAN · VPN · multi-cloud
+<br>
 
-<br/>
-
-**Fit models to infrastructure — not infrastructure to models.**
+**The unit of planning is not a GPU. It is a graph.**
 
 </div>
 
 ---
 
-## The 10-second idea
+## The problem
 
-You have:
+A real AI fleet does not look like a benchmark table.
+
+It looks like this:
 
 ~~~text
-Local DC                 Office                  Cloud
-2× RTX 4090              Mac Studio 128GB        2× H100
-10 GbE                    1 GbE                   48 ms RTT
-     │                       │                       │
-     └──────────── VPN / WAN / LAN / NVLink / PCIe ┘
-                             │
-                         Jetson Edge
+                         ┌──────────── AWS / 2× H100
+                         │             48 ms RTT
+                         │
+2× RTX 4090 ── 10GbE ───┼──────────── A100 80GB / Azure
+on-prem                  │             22 ms RTT
+                         │
+                         └──────────── Mac Studio 128GB
+                                       1GbE / Metal
 ~~~
 
-And you want to run a 70B model.
+Now pick a 70B model.
 
-The hard question is **not**:
+Adding memory is easy.
 
-> “If I add all the VRAM together, does it fit?”
-
-The hard questions are:
-
-- Which machines should actually participate?
-- Which machines should stay out?
-- Should this be Tensor Parallel, Pipeline Parallel, Expert Parallel, replicas, RPC, or offload?
-- Which runtime should execute it?
-- What happens at 32K context?
-- Is the bottleneck VRAM, memory bandwidth, PCIe, NVLink, WAN latency, or cost?
-- Will adding one more machine make it faster — or slower?
-- Does the cheapest plan violate the SLO?
-- How wrong is the estimate once we benchmark reality?
-
-**MeshFit is built to answer those questions.**
+Deciding whether those machines should **cooperate** is not.
 
 ---
 
-# Infrastructure in. Deployment plan out.
-
-MeshFit turns:
+## What MeshFit returns
 
 ~~~text
-Infrastructure Graph
-        +
-Model
-        +
-Context
-        +
-Concurrency
-        +
-SLO
-        +
-Budget
-~~~
-
-into:
-
-~~~text
-Deployment Plan
-├── selected nodes
-├── excluded nodes + reasons
-├── runtime
-├── quantization
-├── Tensor / Pipeline / Expert Parallel
-├── replicas
-├── CPU/GPU offload
-├── expected VRAM / RAM
-├── expected network traffic
-├── TTFT / TPOT / tok/s
-├── throughput
-├── cost
-├── bottleneck
-└── confidence
-~~~
-
-Think of it as:
-
-> ## **an infrastructure-to-model deployment compiler**
-
----
-
-# The screenshot moment
-
-~~~bash
-meshfit plan \
-  --infra ./my-cluster.yaml \
-  --model deepseek-r1-70b \
-  --context 32768 \
+meshfit plan infra.yaml \
+  --model qwen3-72b \
+  --context 32k \
   --concurrency 20 \
   --p95 2s \
-  --budget 200usd/day
+  --budget '$200/day'
 ~~~
-
-Target output:
 
 ~~~text
-MeshFit evaluated 14 feasible deployment candidates.
+01  LATENCY
 
-BEST LATENCY
-────────────
-AWS Tokyo
-2× H100
-vLLM
-TP=2
-BF16
-32K context
+    aws-h100-a + aws-h100-b
+    vLLM · TP=2 · BF16 · 32K
 
-TTFT p95       1.28 s
-Decode         71 tok/s
-Throughput     1,420 tok/s
-Peak VRAM      74.1 GB/GPU
-Cost           $6.74/h
-Bottleneck     HBM bandwidth
-SLO            PASS
-Budget         PASS
-Confidence     0.86
+    p95 TTFT       1.31 s
+    decode         69 tok/s
+    throughput     1,360 tok/s
+    cost           $6.74/h
+    bottleneck     HBM
+    confidence     0.84
 
 
-BEST COST
-────────────
-Foshan DC
-2× RTX 4090
-llama.cpp
-Q4_K_M
-GPU split + RAM offload
+02  COST
 
-Decode         22 tok/s
-Cost           local sunk cost
-Bottleneck     PCIe / memory bandwidth
-SLO            PASS
-Budget         PASS
-Confidence     0.72
+    local-4090-a + local-4090-b
+    llama.cpp · Q4_K_M · partial RAM offload
+
+    decode         23 tok/s
+    cost           sunk
+    bottleneck     PCIe / memory bandwidth
+    confidence     0.71
 
 
-DO NOT USE IN PRIMARY SHARD
-───────────────────────────
-Shenzhen Mac Studio
+—   EXCLUDE
 
-Why:
-Adding it to the primary shard increases communication
-latency more than the extra compute reduces inference time.
+    office-mac
 
-Better role:
-  → independent replica
-  → batch worker
-  → failover endpoint
+    reason
+    WAN + backend mismatch costs more than the added compute saves.
+
+    better use
+    replica · batch worker · failover
 ~~~
 
-### **“DO NOT USE THIS NODE” is a first-class result.**
+The last answer matters as much as the first two.
 
-That is one of the core ideas behind MeshFit.
+> **A machine can have compute and still be negative compute for a given plan.**
 
 ---
 
-# One rule changes everything
+## The model
 
-## Aggregate memory ≠ usable model memory
-
-This:
+MeshFit evaluates two graphs.
 
 ~~~text
-A100 80GB
-+ RTX 4090 24GB
-+ Mac Studio 128GB
-+ H100 80GB
+INFRASTRUCTURE GRAPH                    MODEL GRAPH
+
+node                                    layers
+├─ CPU / RAM                            ├─ weights
+├─ GPU / NPU                            ├─ attention
+├─ free memory                          ├─ KV cache
+├─ runtime support                      ├─ experts
+└─ cost                                 └─ communication
+
+edge
+├─ PCIe / NVLink
+├─ Ethernet / InfiniBand
+├─ WAN
+├─ bandwidth
+├─ latency / jitter
+└─ egress
 ~~~
 
-does **not** automatically become:
+Then it searches for a mapping:
 
 ~~~text
-312GB usable for one model
+model graph
+     ↓
+candidate placements
+     ↓
+single host / TP / PP / EP / replicas / RPC / offload
+     ↓
+latency × throughput × memory × network × cost
+     ↓
+ranked deployment plans
 ~~~
 
-A machine only helps if the actual execution path can use it efficiently.
-
-MeshFit must reason about:
-
-- CUDA / ROCm / Metal / SYCL / NPU compatibility
-- current free memory, not just theoretical capacity
-- PCIe / NVLink / InfiniBand topology
-- LAN / WAN bandwidth
-- RTT and jitter
-- runtime capabilities
-- collective communication cost
-- KV-cache placement
-- dense vs MoE communication
-- storage / model load time
-- cloud egress
-- failure domains
-- workload concurrency
-- cost
-
-Sometimes the highest-value optimization is **removing a machine from the plan**.
+This is the project.
 
 ---
 
-# Two worlds. One planner.
+## The constraint most tools miss
 
-## 🖥️ Single host
-
-Before distributing anything, MeshFit asks:
-
-> **Can one box run this better by itself?**
-
-A host might have:
+### Aggregate memory is not usable memory.
 
 ~~~text
-CPU + RAM
-   │
-PCIe
-   │
-GPU0 ─ NVLink ─ GPU1
-   │
-  NPU
+80GB H100 + 80GB A100 + 24GB 4090 + 128GB Apple Unified Memory
+≠
+312GB of useful model memory
 ~~~
 
-Possible plans:
+Usability depends on:
 
-- single GPU
-- local multi-GPU
-- tensor split
-- CPU ↔ GPU offload
-- unified memory
-- quant alternatives
-- KV-cache alternatives
-- runtime alternatives
+`backend × topology × runtime × communication × context × workload`
 
-Default bias:
+A slow link can erase a fast GPU.
 
-> **Never distribute a workload when one machine is the better execution plan.**
+A mixed backend can make a shard impossible.
 
-## 🌐 Infrastructure mesh
+A cheap cloud node can become expensive once egress enters the loop.
 
-When scale-out is useful, MeshFit reasons over the topology:
+A larger cluster can be slower than a smaller one.
 
-~~~text
-DC A ── 100GbE ── DC B
- │                  │
-NVLink             PCIe
- │                  │
-H100×8            A100×4
- │
-WAN 35ms
- │
-Cloud burst
-~~~
-
-Possible plans:
-
-- Replica Routing
-- Tensor Parallel
-- Pipeline Parallel
-- Expert Parallel
-- Layer / ring partition
-- llama.cpp RPC
-- hybrid CPU/RAM offload
-- cloud burst
-- failover replicas
-- batch workers
-
-The planner does **not** assume that more nodes means better performance.
+MeshFit should be able to say **no**.
 
 ---
 
-# MeshFit is not another inference engine
+## Three jobs
 
-Excellent engines already exist.
+| | Job | Question |
+|---|---|---|
+| **Fit** | capacity reasoning | Can it run? |
+| **Place** | topology search | Where should it run? |
+| **Verify** | benchmark calibration | Was the prediction right? |
 
-MeshFit plans **above** them.
+Most existing tools are excellent at one of these.
 
-| System | What MeshFit learns / uses |
-|---|---|
-| **llmfit** | machine → model fit, quant/memory reasoning, measured benchmark feedback |
-| **llama.cpp** | heterogeneous local execution, GGUF, CPU/GPU offload |
-| **llama.cpp RPC** | remote device execution |
-| **exo** | discovery, topology-aware distributed inference |
-| **vLLM** | production TP/PP serving |
-| **SGLang** | high-throughput distributed serving |
-| **MLX** | Apple Silicon execution |
-| **Ollama / LM Studio / LocalAI** | local model lifecycle and serving |
-
-MeshFit's job is the decision **before** deployment:
-
-> **Given what I own or can rent, which execution plan should I actually use?**
+MeshFit is trying to connect all three.
 
 ---
 
-# Why now
+## It sits above the runtimes
 
-Today, engineers still do some version of this by hand:
+MeshFit is not another inference engine.
+
+It plans over them.
 
 ~~~text
-nvidia-smi
-lscpu
-ip link
-iperf3
-cloud pricing page
-model card
-quant calculator
-vLLM docs
-llama.cpp docs
-spreadsheet
-guess
+                   MeshFit
+                      │
+        ┌─────────────┼─────────────┐
+        │             │             │
+     local         distributed     replica
+        │             │             │
+   llama.cpp        vLLM          Ollama
+      MLX           SGLang        LocalAI
+                    exo
+                 llama.cpp RPC
+~~~
+
+The runtime executes.
+
+MeshFit decides **which runtime, which nodes, which topology, and why**.
+
+---
+
+## Influences
+
+MeshFit starts by learning from systems that already solved important pieces well:
+
+- **llmfit** — hardware/model fit and practical memory reasoning
+- **llama.cpp** — heterogeneous execution and CPU/GPU offload
+- **llama.cpp RPC** — remote accelerator execution
+- **exo** — discovery and topology-aware distributed inference
+- **vLLM** — production tensor/pipeline parallel serving
+- **SGLang** — high-throughput distributed serving
+- **MLX** — Apple Silicon execution
+
+The goal is not a collage of their features.
+
+The goal is a better abstraction over the **placement problem**.
+
+---
+
+## Evidence loop
+
+No estimate gets promoted to truth.
+
+~~~text
+predict
+  ↓
 deploy
-benchmark
-discover assumption was wrong
-repeat
+  ↓
+measure
+  ↓
+error
+  ↓
+calibrate
+  ↺
 ~~~
 
-MeshFit's goal is to collapse that workflow into:
+MeshFit should track:
 
-~~~bash
-meshfit plan ./infra.yaml --model <model>
-~~~
+- TTFT / TPOT
+- prefill / decode tok/s
+- throughput under concurrency
+- peak VRAM / RAM
+- interconnect traffic
+- model load time
+- failure rate
+- $/hour and $/1M tokens
+- prediction error
 
-with assumptions that are visible, comparable, and testable.
+The planner gets better only when reality disagrees with it.
 
 ---
 
-# The planner
+## First reality gate
 
-~~~text
-                      ┌───────────────────┐
-                      │      MeshFit      │
-                      └─────────┬─────────┘
-                                │
-             ┌──────────────────┴──────────────────┐
-             │                                     │
-      Infrastructure Graph                  Model Profile
-             │                                     │
-             └──────────────────┬──────────────────┘
-                                │
-                          Candidate Search
-                                │
-               ┌────────────────┼────────────────┐
-               │                │                │
-          Single Host       Sharded          Replicated
-               │                │                │
-               └────────────────┼────────────────┘
-                                │
-                         Runtime Selection
-                                │
-           ┌──────────┬─────────┼─────────┬──────────┐
-           │          │         │         │          │
-       llama.cpp     MLX      vLLM     SGLang      exo
-           │          │         │         │          │
-           └──────────┴─────────┼─────────┴──────────┘
-                                │
-                             Bench
-                                │
-                          Calibration
-~~~
-
-The planner searches plans.
-
-The runtime executes them.
-
-The benchmark decides whether the planner was right.
-
----
-
-# Reality loop
-
-Estimates are hypotheses.
-
-~~~text
-prediction
-   ↓
-real deployment
-   ↓
-benchmark
-   ↓
-observed performance
-   ↓
-prediction error
-   ↓
-calibration
-   ↓
-better next prediction
-~~~
-
-Target evidence:
-
-| Dimension | Metrics |
-|---|---|
-| latency | TTFT p50/p95 · TPOT p50/p95 |
-| generation | decode tok/s · prefill tok/s |
-| serving | throughput · concurrency scaling |
-| memory | peak VRAM · peak RAM · KV growth |
-| network | traffic · collective time · RTT sensitivity |
-| operations | load time · failure rate · thermal throttling |
-| economics | $/hour · $/1M tokens · egress |
-| planner | estimate error · confidence calibration |
-
-> **No benchmark evidence → no strong performance claim.**
-
----
-
-# What makes this different
-
-Most tools start from one side:
-
-~~~text
-machine → what model fits?
-~~~
-
-or:
-
-~~~text
-model → how do I distribute it?
-~~~
-
-MeshFit wants to solve the larger problem:
-
-~~~text
-real infrastructure
-        ↓
-all feasible execution topologies
-        ↓
-compare latency / throughput / memory / network / cost
-        ↓
-best deployment plan
-        ↓
-benchmark reality
-~~~
-
-The key abstraction is not a machine.
-
-It is a **compute graph**.
-
----
-
-# Example infrastructure
-
-See `examples/heterogeneous-cluster.yaml`.
-
-~~~yaml
-sites:
-  local-dc:
-    nodes:
-      - id: local-4090
-        gpu: [RTX4090, RTX4090]
-        ram_gb: 512
-    network: 10GbE
-
-  office:
-    nodes:
-      - id: office-mac
-        accelerator: Apple-M3-Ultra
-        unified_memory_gb: 128
-    rtt_ms: 6
-
-  aws-tokyo:
-    nodes:
-      - id: aws-h100
-        gpu: [H100-80GB, H100-80GB]
-    rtt_ms: 48
-~~~
-
----
-
-# CLI direction
-
-~~~bash
-meshfit discover ./infra.yaml
-meshfit fit ./infra.yaml
-meshfit plan ./infra.yaml --model qwen3-72b
-meshfit compare ./infra.yaml --model qwen3-72b
-meshfit explain node://office-mac
-meshfit bench plan://latest
-meshfit doctor
-~~~
-
-Machine-readable output:
-
-~~~bash
-meshfit plan ./infra.yaml --model qwen3-72b --json
-~~~
-
----
-
-# Build philosophy
-
-### 01 — Parity first
-
-Reproduce proven single-machine model-fit logic before pretending to solve the whole world.
-
-### 02 — Synthesize proven ideas
-
-Study llmfit, exo, llama.cpp, vLLM, SGLang, MLX, distributed inference systems, schedulers, and real benchmark projects.
-
-Take mechanisms, not aesthetics.
-
-### 03 — Reality before claims
-
-Every performance model must eventually meet a real benchmark.
-
-### 04 — Innovate where existing abstractions break
-
-Especially:
-
-- heterogeneous accelerator fleets
-- hybrid cloud + local topology
-- topology-aware cost
-- explicit node exclusion
-- uncertainty / confidence
-- benchmark-driven calibration
-
----
-
-# Status
-
-> ## **Pre-alpha · building the first real planner**
-
-This repository is intentionally honest about its state.
-
-The first Reality Gate is:
+The first version is deliberately narrow.
 
 ~~~text
 3–5 heterogeneous machines
         +
-real measured links
+measured links
         +
 one target model
         ↓
-generate Plan A / B / C
+search candidate placements
+        ↓
+return Plan A / B / C
         ↓
 exclude at least one bad participant
         ↓
 run one plan
         ↓
-compare estimate vs reality
+compare prediction with reality
 ~~~
 
-When that works reliably, MeshFit stops being a good idea and starts becoming useful infrastructure.
+If that loop works, MeshFit has earned the right to become larger.
 
 ---
 
-# Roadmap
+## Example topology
 
-- [ ] single-host hardware discovery
-- [ ] model / quant / context memory model
-- [ ] infrastructure graph schema
-- [ ] network link discovery and measurement
-- [ ] candidate topology generation
-- [ ] runtime capability matrix
-- [ ] latency / throughput / cost estimator
-- [ ] explicit node exclusion reasoning
-- [ ] executable launch plans
-- [ ] real benchmark harness
-- [ ] calibration database
-- [ ] community benchmark evidence
-- [ ] TUI / visual topology explorer
+[`examples/heterogeneous-cluster.yaml`](examples/heterogeneous-cluster.yaml)
+
+~~~yaml
+sites:
+  local:
+    nodes:
+      - id: workstation
+        gpu: [RTX4090, RTX4090]
+        ram_gb: 512
+    network: 10GbE
+
+  aws:
+    nodes:
+      - id: h100-pair
+        gpu: [H100-80GB, H100-80GB]
+        hourly_cost_usd: 6.74
+    rtt_ms: 48
+
+  office:
+    nodes:
+      - id: mac-studio
+        accelerator: Apple-M3-Ultra
+        unified_memory_gb: 128
+    rtt_ms: 6
+~~~
 
 ---
 
-# Contributing
+## Build order
 
-If you have a weird setup, **that is exactly what this project needs**.
+**01 / Fit**  
+Single-host discovery, model memory, quantization, context, KV cache, offload.
 
-Interesting test cases include:
+**02 / Graph**  
+Hosts, accelerators, links, bandwidth, latency, cost, failure domains.
 
-- CUDA + Apple Silicon
-- old GPUs + new GPUs
-- cloud + on-prem
-- multi-region cloud
-- NVLink + Ethernet
-- 1/10/25/100/400GbE
-- InfiniBand
-- Thunderbolt
-- high-latency WAN
-- edge devices
-- large RAM / small VRAM systems
-- MoE models
+**03 / Search**  
+Single-host, TP, PP, EP, replicas, RPC, hybrid placement.
 
-Open an issue with your topology and the model you want to run.
+**04 / Predict**  
+Latency, throughput, memory, network traffic, cost, confidence.
 
-The ugly cases are the useful cases.
+**05 / Verify**  
+Real benchmark runs, prediction error, calibration.
+
+Full roadmap: [`ROADMAP.md`](ROADMAP.md)
+
+---
+
+## Current state
+
+**Pre-alpha.**
+
+The repository currently defines the product contract, infrastructure example, contribution path, and implementation roadmap.
+
+The next milestone is not another README section.
+
+It is a planner that can produce the terminal output shown above from the example topology.
+
+---
+
+## Bring an ugly cluster
+
+Perfect clusters are boring.
+
+If your setup is difficult to reason about, it is useful.
+
+Open a **Weird Cluster / Reality Probe** issue.
 
 ---
 
 <div align="center">
 
-## The north star
+### MeshFit
 
-### **Infrastructure in. Executable model topology out.**
-
-`model × hardware × network × runtime × SLO × cost → plan`
-
-**MeshFit**
-
-*Fit models to infrastructure, not infrastructure to models.*
+**Place the model where it actually belongs.**
 
 </div>
