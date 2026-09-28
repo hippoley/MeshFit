@@ -8,6 +8,12 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct DiscoveredAccelerator {
+    pub identity: DeviceIdentity,
+    pub free_memory_mib: Option<u64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct LocalDiscovery {
     pub hardware_identity: HardwareIdentity,
     pub node: HardwareNodeIR,
@@ -26,7 +32,7 @@ pub fn discover_local() -> LocalDiscovery {
     let cpu_model = discover_cpu_model();
     let mut warnings = Vec::new();
 
-    let devices = match query_nvidia_smi() {
+    let discovered = match query_nvidia_smi() {
         Ok(output) => parse_nvidia_smi_csv(&output),
         Err(reason) => {
             warnings.push(reason);
@@ -34,14 +40,19 @@ pub fn discover_local() -> LocalDiscovery {
         }
     };
 
-    let accelerators = devices
+    let devices = discovered
+        .iter()
+        .map(|gpu| gpu.identity.clone())
+        .collect();
+
+    let accelerators = discovered
         .iter()
         .enumerate()
-        .map(|(idx, device)| AcceleratorIR {
+        .map(|(idx, gpu)| AcceleratorIR {
             id: format!("gpu{idx}"),
-            backend: device.backend,
-            memory_gb: device.memory_mib as f64 / 1024.0,
-            free_memory_gb: Some(device.memory_mib as f64 / 1024.0),
+            backend: gpu.identity.backend,
+            memory_gb: gpu.identity.memory_mib as f64 / 1024.0,
+            free_memory_gb: gpu.free_memory_mib.map(|mib| mib as f64 / 1024.0),
             relative_compute: 0.0,
         })
         .collect();
@@ -84,7 +95,7 @@ fn query_nvidia_smi() -> Result<String, String> {
     String::from_utf8(output.stdout).map_err(|e| format!("nvidia-smi output is not UTF-8: {e}"))
 }
 
-pub fn parse_nvidia_smi_csv(raw: &str) -> Vec<DeviceIdentity> {
+pub fn parse_nvidia_smi_csv(raw: &str) -> Vec<DiscoveredAccelerator> {
     raw.lines()
         .filter_map(|line| {
             let parts: Vec<_> = line.split(',').map(str::trim).collect();
@@ -93,13 +104,17 @@ pub fn parse_nvidia_smi_csv(raw: &str) -> Vec<DeviceIdentity> {
             }
 
             let memory_mib = parts[2].parse::<u64>().ok()?;
+            let free_memory_mib = parts[3].parse::<u64>().ok();
 
-            Some(DeviceIdentity {
-                vendor: "nvidia".into(),
-                model: parts[1].to_string(),
-                backend: AcceleratorBackend::Cuda,
-                memory_mib,
-                driver_version: Some(parts[4].to_string()),
+            Some(DiscoveredAccelerator {
+                identity: DeviceIdentity {
+                    vendor: "nvidia".into(),
+                    model: parts[1].to_string(),
+                    backend: AcceleratorBackend::Cuda,
+                    memory_mib,
+                    driver_version: Some(parts[4].to_string()),
+                },
+                free_memory_mib,
             })
         })
         .collect()
@@ -144,13 +159,14 @@ mod tests {
     use super::*;
 
     #[test]
-    fn parses_nvidia_csv() {
+    fn parses_nvidia_csv_without_polluting_identity_with_free_memory() {
         let raw = "0, NVIDIA H100 80GB HBM3, 81559, 80123, 580.65.06\n1, NVIDIA H100 80GB HBM3, 81559, 79999, 580.65.06\n";
         let devices = parse_nvidia_smi_csv(raw);
         assert_eq!(devices.len(), 2);
-        assert_eq!(devices[0].model, "NVIDIA H100 80GB HBM3");
-        assert_eq!(devices[0].memory_mib, 81559);
-        assert_eq!(devices[0].backend, AcceleratorBackend::Cuda);
+        assert_eq!(devices[0].identity.model, "NVIDIA H100 80GB HBM3");
+        assert_eq!(devices[0].identity.memory_mib, 81559);
+        assert_eq!(devices[0].free_memory_mib, Some(80123));
+        assert_eq!(devices[0].identity.backend, AcceleratorBackend::Cuda);
     }
 
     #[test]
