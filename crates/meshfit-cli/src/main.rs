@@ -180,8 +180,7 @@ fn run() -> Result<(), String> {
                 },
             )?;
 
-            let local_node_id = request.executable.working_node.clone();
-            let bundle = run_local_benchmark(request, &local_node_id)?;
+            let bundle = run_local_benchmark(request)?;
             let yaml = serde_yaml::to_string(&bundle).map_err(|e| e.to_string())?;
             print!("{yaml}");
         }
@@ -193,8 +192,7 @@ fn run() -> Result<(), String> {
                 .map_err(|e| format!("read {request_path}: {e}"))?;
             let request: BenchmarkRequestIR = serde_yaml::from_str(&raw)
                 .map_err(|e| format!("parse {request_path}: {e}"))?;
-            let local = discover_local();
-            let bundle = run_local_benchmark(request, &local.node.id)?;
+            let bundle = run_local_benchmark(request)?;
             let yaml = serde_yaml::to_string(&bundle).map_err(|e| e.to_string())?;
             print!("{yaml}");
         }
