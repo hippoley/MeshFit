@@ -355,6 +355,9 @@ Current code includes:
 - provenance-bound benchmark evidence
 - structured execution identity and stable SHA-256 fingerprint
 - first Linux/NVIDIA automatic discovery slice
+- NVIDIA local NVLink/PCIe topology snapshot
+- peer RTT/jitter probe and optional `iperf3` bandwidth measurement
+- typed fabric endpoints for host-level and accelerator-level graph edges
 
 Still missing before the first real product proof:
 
