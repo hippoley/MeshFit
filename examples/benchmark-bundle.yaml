@@ -3,6 +3,7 @@ request:
   executable:
     source_plan_id: node-b:vllm:SingleHost
     model_id: qwen-demo
+    placement: single_host
     runtime: vllm
     scope: LocalProcess
     program: vllm
