@@ -17,6 +17,8 @@ pub struct BenchmarkConfig {
     pub measured_requests: u32,
     #[serde(default = "default_timeout_ms")]
     pub request_timeout_ms: u64,
+    #[serde(default = "default_startup_timeout_ms")]
+    pub startup_timeout_ms: u64,
 }
 
 fn default_max_tokens() -> u32 {
@@ -33,6 +35,10 @@ fn default_measured_requests() -> u32 {
 
 fn default_timeout_ms() -> u64 {
     120_000
+}
+
+fn default_startup_timeout_ms() -> u64 {
+    300_000
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -248,6 +254,7 @@ mod tests {
                 warmup_requests: 1,
                 measured_requests: 1,
                 request_timeout_ms: 120_000,
+                startup_timeout_ms: 300_000,
             },
         }
     }
