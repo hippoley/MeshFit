@@ -1,0 +1,72 @@
+name: "🧪 Weird Cluster / Reality Probe"
+description: "Give MeshFit a real heterogeneous setup that is hard to reason about."
+title: "[reality] "
+labels: ["reality-probe"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        MeshFit needs ugly real infrastructure more than perfect lab setups.
+        Share a topology, the model you want to run, and any measurements you already have.
+
+  - type: textarea
+    id: topology
+    attributes:
+      label: Infrastructure topology
+      description: List nodes, GPUs/NPUs, RAM, sites, and how they are connected.
+      placeholder: |
+        Site A:
+          node-1: 2× RTX 4090, 256GB RAM
+          node-2: A100 80GB
+          network: 25GbE
+        Site B:
+          Mac Studio 128GB
+          RTT to Site A: 18ms
+    validations:
+      required: true
+
+  - type: textarea
+    id: links
+    attributes:
+      label: Link measurements
+      description: iperf3 bandwidth, RTT, jitter, NVLink/PCIe/InfiniBand details if known.
+      placeholder: "node-1 ↔ node-2: 21.8Gbps, 0.4ms RTT"
+
+  - type: input
+    id: model
+    attributes:
+      label: Target model
+      placeholder: "Qwen3-72B / DeepSeek-R1-70B / ..."
+    validations:
+      required: true
+
+  - type: input
+    id: context
+    attributes:
+      label: Context length
+      placeholder: "32768"
+
+  - type: input
+    id: concurrency
+    attributes:
+      label: Concurrency
+      placeholder: "20"
+
+  - type: textarea
+    id: constraints
+    attributes:
+      label: SLO / cost / privacy constraints
+      placeholder: "p95 < 2s, <$200/day, data must stay on-prem"
+
+  - type: textarea
+    id: tried
+    attributes:
+      label: What have you already tried?
+      description: Runtime, parallelism, measured tok/s, failures, surprises.
+      placeholder: "vLLM TP=2, 31 tok/s; adding remote A100 made it slower."
+
+  - type: textarea
+    id: expectation
+    attributes:
+      label: What should MeshFit decide for you?
+      placeholder: "Should node B join the shard, run a replica, or stay out?"
