@@ -115,12 +115,41 @@ pub fn validate_local_benchmark_request(
         return Err("executable runtime does not match ExecutionIdentity runtime".into());
     }
 
+    if request.executable.identity_flags != request.identity.runtime.flags {
+        return Err("executable identity flags do not match ExecutionIdentity runtime flags".into());
+    }
+
+    if request.identity.runtime.version.trim().is_empty() {
+        return Err("ExecutionIdentity runtime version is empty".into());
+    }
+
     if request.executable.model_id != request.identity.model.model_id {
         return Err("executable model id does not match ExecutionIdentity model id".into());
     }
 
+    if request.identity.model.artifact_sha256.is_none()
+        && request.identity.model.revision.is_none()
+    {
+        return Err("model identity must include an artifact hash or immutable revision".into());
+    }
+
     if request.executable.placement != request.identity.placement {
         return Err("executable placement does not match ExecutionIdentity placement".into());
+    }
+
+    if request.concurrency != 1 {
+        return Err(
+            "v0.3 local benchmark runner only supports concurrency=1; concurrent load generation is not implemented"
+                .into(),
+        );
+    }
+
+    if request.config.measured_requests == 0 {
+        return Err("benchmark requires at least one measured request".into());
+    }
+
+    if request.config.max_tokens == 0 {
+        return Err("benchmark max_tokens must be greater than zero".into());
     }
 
     if request.executable.service.scheme != "http" {
