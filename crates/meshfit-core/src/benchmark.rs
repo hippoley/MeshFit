@@ -105,6 +105,9 @@ impl BenchmarkBundle {
             if measurement.ttft_ms < 0.0 {
                 return Err(format!("measurement {idx} has negative TTFT"));
             }
+            if measurement.total_ms <= 0.0 {
+                return Err(format!("measurement {idx} has non-positive total duration"));
+            }
             if measurement.total_ms < measurement.ttft_ms {
                 return Err(format!(
                     "measurement {idx} total duration is lower than TTFT"
