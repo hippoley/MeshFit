@@ -1,52 +1,73 @@
 # Roadmap
 
-## Gate 1 — Single-host parity
+MeshFit's roadmap is ordered by the shortest path to a real closed loop.
 
-- hardware discovery
-- RAM / VRAM / unified memory
-- model + quant + context memory model
-- CPU/GPU offload
-- runtime capability matrix
-- measured local benchmark
+## 1. Structural placement — v0.1
 
-## Gate 2 — Compute graph
+- [x] core IRs
+- [x] hard feasibility pruning
+- [x] single-host candidates
+- [x] conservative cross-node TP gate
+- [x] Pareto frontier
+- [x] explicit rejection / exclusion
+- [ ] CI/build verification
 
-- host graph
-- accelerator graph
-- PCIe / NVLink / InfiniBand / Ethernet links
-- WAN links
-- latency / bandwidth / jitter
-- cost and failure domains
+## 2. Evidence identity — v0.2
 
-## Gate 3 — Candidate planner
+- [x] benchmark evidence store
+- [x] provenance
+- [x] exact-match evidence query
+- [x] structured execution identity
+- [x] stable execution fingerprint
+- [ ] model artifact identity captured from a real file
+- [ ] runtime + driver identity captured from a real run
+- [ ] repeated-run statistics
 
-- single-host
-- local multi-GPU
-- Tensor Parallel
-- Pipeline Parallel
-- Expert Parallel
-- replica routing
-- RPC / layer partition
-- hybrid offload
-- explicit node exclusion
+## 3. Automatic discovery — v0.2.5
 
-## Gate 4 — Performance model
+- [ ] CPU / RAM
+- [ ] NVIDIA GPU / free VRAM / driver
+- [ ] Apple unified memory
+- [ ] AMD / Intel baseline discovery
+- [ ] PCIe / NVLink topology
+- [ ] runtime versions
+- [ ] RTT
+- [ ] optional bandwidth probe
+- [ ] generate InfrastructureIR automatically
 
-- TTFT
-- TPOT
-- decode tok/s
-- prefill tok/s
-- throughput
-- memory
-- network traffic
-- $/hour
-- $/1M tokens
-- confidence
+## 4. Execute and measure — v0.3
 
-## Gate 5 — Reality calibration
+- [ ] llama.cpp plan compiler
+- [ ] vLLM plan compiler
+- [ ] launch plan
+- [ ] benchmark harness
+- [ ] TTFT / TPOT
+- [ ] decode / prefill tok/s
+- [ ] peak memory
+- [ ] evidence bundle
 
-- benchmark harness
-- estimate vs observed
-- prediction error
-- device/runtime calibration
-- community evidence
+## 5. Predict and calibrate — v0.4
+
+- [ ] repeated-run distributions
+- [ ] prediction intervals
+- [ ] memory calibration
+- [ ] latency / throughput model
+- [ ] cost model
+- [ ] estimate vs observed error
+- [ ] bounded evidence transfer
+
+## 6. Ask for the missing evidence — v0.5
+
+- [ ] uncertainty-aware probe selection
+- [ ] targeted network probe
+- [ ] targeted compute probe
+- [ ] decision-changing probe validation
+
+## 7. Adapt — v0.6
+
+- [ ] live telemetry
+- [ ] re-placement
+- [ ] failure / load / cost events
+- [ ] counterfactual plan comparison
+
+See [docs/VERSIONS.md](docs/VERSIONS.md) for exit criteria.
