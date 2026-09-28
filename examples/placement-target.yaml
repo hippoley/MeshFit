@@ -1,0 +1,30 @@
+model:
+  id: qwen-72b-class-q4
+  parameters_b: 72
+  weight_memory_gb: 42
+  kv_cache_gb: 6
+  is_moe: false
+  required_backends: []
+
+runtimes:
+  - id: vllm
+    backends: [cuda]
+    supports_tp: true
+    supports_pp: true
+    supports_ep: false
+    supports_rpc: false
+    supports_cpu_offload: false
+
+  - id: llama.cpp
+    backends: [cuda, metal, cpu]
+    supports_tp: false
+    supports_pp: false
+    supports_ep: false
+    supports_rpc: true
+    supports_cpu_offload: true
+
+workload:
+  context_tokens: 32768
+  concurrency: 20
+  p95_latency_ms: 2000
+  budget_per_day_usd: 200
