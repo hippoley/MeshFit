@@ -1,0 +1,13 @@
+[package]
+name = "meshfit"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+
+[[bin]]
+name = "meshfit"
+path = "src/main.rs"
+
+[dependencies]
+meshfit-core = { path = "../meshfit-core" }
+serde_yaml = "0.9"
