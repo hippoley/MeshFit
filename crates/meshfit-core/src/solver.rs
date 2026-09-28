@@ -166,7 +166,7 @@ fn enumerate_two_node_tp(
                 continue;
             }
 
-            let Some(link) = infra.link(&a.id, &b.id) else {
+            let Some(link) = infra.node_link(&a.id, &b.id) else {
                 rejected.push(RejectionIR {
                     candidate,
                     code: "missing_link".into(),
@@ -345,8 +345,12 @@ mod tests {
                     },
                 ],
                 links: vec![FabricEdgeIR {
-                    from: "local".into(),
-                    to: "remote".into(),
+                    from: FabricEndpointIR::Node {
+                        node: "local".into(),
+                    },
+                    to: FabricEndpointIR::Node {
+                        node: "remote".into(),
+                    },
                     kind: LinkKind::Wan,
                     bandwidth_gbps: Some(10.0),
                     latency_ms: Some(35.0),
