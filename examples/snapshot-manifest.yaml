@@ -1,0 +1,13 @@
+discovery_files:
+  - discovery-node-a.yaml
+  - discovery-node-b.yaml
+  - discovery-node-c.yaml
+probes:
+  - from_node: node-a
+    to_node: node-b
+    probe_file: probe-a-b.yaml
+    kind: ethernet
+  - from_node: node-b
+    to_node: node-c
+    probe_file: probe-b-c.yaml
+    kind: wan
