@@ -636,4 +636,95 @@ mod tests {
     fn sanitizes_benchmark_ids() {
         assert_eq!(sanitize_id("node:vllm:SingleHost"), "node-vllm-SingleHost");
     }
+
+    #[cfg(target_os = "linux")]
+    #[test]
+    fn measures_mock_streaming_runtime_end_to_end() {
+        use std::{
+            net::TcpListener,
+            process::{Command, Stdio},
+        };
+
+        let listener = TcpListener::bind("127.0.0.1:0").unwrap();
+        let port = listener.local_addr().unwrap().port();
+        drop(listener);
+
+        let script = format!(
+            r#"
+from http.server import BaseHTTPRequestHandler, HTTPServer
+import json
+import time
+
+class Handler(BaseHTTPRequestHandler):
+    def log_message(self, *args):
+        pass
+
+    def do_GET(self):
+        if self.path == "/health":
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.end_headers()
+            self.wfile.write(b'{{"status":"ok"}}')
+        else:
+            self.send_response(404)
+            self.end_headers()
+
+    def do_POST(self):
+        length = int(self.headers.get("Content-Length", "0"))
+        if length:
+            self.rfile.read(length)
+
+        if self.path != "/v1/chat/completions":
+            self.send_response(404)
+            self.end_headers()
+            return
+
+        self.send_response(200)
+        self.send_header("Content-Type", "text/event-stream")
+        self.end_headers()
+
+        chunks = [
+            {{"choices":[{{"delta":{{"content":"hello"}}}}]}},
+            {{"choices":[{{"delta":{{"content":" world"}}}}]}},
+            {{"choices":[], "usage":{{"completion_tokens":2}}}},
+        ]
+
+        for chunk in chunks:
+            payload = "data: " + json.dumps(chunk) + "\n\n"
+            self.wfile.write(payload.encode())
+            self.wfile.flush()
+            time.sleep(0.03)
+
+        self.wfile.write(b"data: [DONE]\n\n")
+        self.wfile.flush()
+
+HTTPServer(("127.0.0.1", {port}), Handler).serve_forever()
+"#
+        );
+
+        let mut child = Command::new("python3")
+            .args(["-c", &script])
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .expect("python3 is required for Linux integration test");
+
+        let mut req = request();
+        req.executable.service.port = port;
+        req.config.warmup_requests = 0;
+        req.config.measured_requests = 1;
+        req.config.startup_timeout_ms = 5_000;
+        req.config.request_timeout_ms = 5_000;
+
+        let result = run_against_child(&req, &mut child);
+
+        let _ = child.kill();
+        let _ = child.wait();
+
+        let bundle = result.unwrap();
+        assert_eq!(bundle.measurements.len(), 1);
+        assert_eq!(bundle.measurements[0].output_tokens, Some(2));
+        assert!(bundle.measurements[0].ttft_ms > 0.0);
+        assert!(bundle.measurements[0].total_ms >= bundle.measurements[0].ttft_ms);
+    }
 }
