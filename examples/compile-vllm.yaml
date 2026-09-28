@@ -1,8 +1,12 @@
 plan:
-  id: node-b:vllm:SingleHost
+  id: node-b:gpu0:vllm:SingleHost
   placement: single_host
   runtime: vllm
   nodes: [node-b]
+  accelerators:
+    - node: node-b
+      accelerator: gpu0
+      backend: cuda
   required_memory_gb: 48
   accelerator_memory_gb: 78
   relative_compute: 0
@@ -13,6 +17,5 @@ model_path: Qwen/Qwen3-32B
 model_id: qwen3-32b
 context_tokens: 32768
 listen_port: 18080
-tensor_parallel_size: null
 gpu_layers: null
 extra_args: []
