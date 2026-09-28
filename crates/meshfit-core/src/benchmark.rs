@@ -224,6 +224,7 @@ mod tests {
             executable: ExecutablePlanIR {
                 source_plan_id: "plan-1".into(),
                 model_id: "demo".into(),
+                model_source: "/models/demo.gguf".into(),
                 placement: PlacementKind::SingleHost,
                 context_tokens: 4096,
                 runtime: "vllm".into(),
