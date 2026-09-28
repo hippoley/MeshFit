@@ -20,7 +20,11 @@ identity:
     runtime: vllm
     version: demo
     build_commit: null
-    flags: []
+    flags:
+      - --max-model-len
+      - "4096"
+      - --tensor-parallel-size
+      - "1"
   topology:
     links: []
   placement: single_host
