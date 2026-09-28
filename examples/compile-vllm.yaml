@@ -1,0 +1,17 @@
+plan:
+  id: node-b:vllm:SingleHost
+  placement: single_host
+  runtime: vllm
+  nodes: [node-b]
+  required_memory_gb: 48
+  accelerator_memory_gb: 78
+  relative_compute: 0
+  hourly_cost_usd: 0
+  memory_headroom_gb: 30
+  assumptions: []
+model_path: Qwen/Qwen3-32B
+model_id: qwen3-32b
+context_tokens: 32768
+tensor_parallel_size: null
+gpu_layers: null
+extra_args: []
