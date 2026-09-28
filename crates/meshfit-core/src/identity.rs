@@ -51,8 +51,10 @@ pub struct LinkIdentity {
     pub from: String,
     pub to: String,
     pub kind: LinkKind,
-    pub bandwidth_mbps: u64,
-    pub latency_micros: u64,
+    #[serde(default)]
+    pub bandwidth_mbps: Option<u64>,
+    #[serde(default)]
+    pub latency_micros: Option<u64>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
@@ -170,8 +172,8 @@ mod tests {
                     from: "gpu0".into(),
                     to: "gpu1".into(),
                     kind: LinkKind::Nvlink,
-                    bandwidth_mbps: 900_000,
-                    latency_micros: 5,
+                    bandwidth_mbps: Some(900_000),
+                    latency_micros: Some(5),
                 }],
             },
             placement: PlacementKind::TensorParallel,
