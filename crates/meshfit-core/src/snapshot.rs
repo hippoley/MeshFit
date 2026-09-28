@@ -10,6 +10,21 @@ use crate::{
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SnapshotProbeSpec {
+    pub from_node: String,
+    pub to_node: String,
+    pub probe_file: String,
+    pub kind: LinkKind,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct SnapshotManifest {
+    pub discovery_files: Vec<String>,
+    #[serde(default)]
+    pub probes: Vec<SnapshotProbeSpec>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct InfrastructureSnapshot {
     pub infrastructure: InfrastructureIR,
     #[serde(default)]
