@@ -40,7 +40,9 @@ Deciding whether those machines should **cooperate** is not.
 
 ---
 
-## What MeshFit returns
+## Target UX
+
+The interaction below is the product target, not the current pre-alpha CLI.
 
 ~~~text
 meshfit plan infra.yaml \
@@ -329,13 +331,39 @@ Full roadmap: [`ROADMAP.md`](ROADMAP.md)
 
 ## Current state
 
-**Pre-alpha.**
+**Pre-alpha, but no longer docs-only.**
 
-The repository currently defines the product contract, infrastructure example, contribution path, and implementation roadmap.
+Implemented now:
 
-The next milestone is not another README section.
+~~~bash
+# automatic local CPU/RAM + NVIDIA snapshot
+meshfit discover
 
-It is a planner that can produce the terminal output shown above from the example topology.
+# structural placement: feasible / rejected / Pareto / excluded
+meshfit plan examples/v0.1-placement.yaml
+
+# exact-match evidence query with structured execution fingerprint
+meshfit predict examples/v0.2-evidence.yaml examples/v0.2-query.yaml
+~~~
+
+Current code includes:
+
+- typed Hardware / Fabric / Model / Runtime / Workload / Plan IRs
+- structural feasibility solver
+- conservative cross-node TP admission gate
+- Pareto frontier and explicit exclusion reasoning
+- provenance-bound benchmark evidence
+- structured execution identity and stable SHA-256 fingerprint
+- first Linux/NVIDIA automatic discovery slice
+
+Still missing before the first real product proof:
+
+- real two-machine discovery + measured link
+- executable vLLM/llama.cpp plan compiler
+- automatic benchmark evidence bundle
+- calibrated performance prediction
+
+See [`docs/DIRECTION_AUDIT.md`](docs/DIRECTION_AUDIT.md) for the Reality Gates that keep the project on course.
 
 ---
 
