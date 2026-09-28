@@ -21,5 +21,7 @@ jobs:
       - run: cargo run -p meshfit -- inspect-model examples/model-artifact-demo.bin demo gguf q4_k_m test
       - run: cargo run -p meshfit -- snapshot examples/discovery-node-a.yaml examples/discovery-node-b.yaml examples/probe-a-b.yaml > /tmp/meshfit-snapshot.yaml
       - run: cargo run -p meshfit -- plan-snapshot /tmp/meshfit-snapshot.yaml examples/placement-target.yaml
+      - run: cargo run -p meshfit -- snapshot-manifest examples/snapshot-manifest.yaml > /tmp/meshfit-snapshot-manifest.yaml
+      - run: cargo run -p meshfit -- plan-snapshot /tmp/meshfit-snapshot-manifest.yaml examples/placement-target.yaml
       - run: cargo run -p meshfit -- plan examples/v0.1-placement.yaml
       - run: cargo run -p meshfit -- predict examples/v0.2-evidence.yaml examples/v0.2-query.yaml
