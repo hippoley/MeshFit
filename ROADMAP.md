@@ -19,21 +19,21 @@ MeshFit's roadmap is ordered by the shortest path to a real closed loop.
 - [x] exact-match evidence query
 - [x] structured execution identity
 - [x] stable execution fingerprint
-- [ ] model artifact identity captured from a real file
-- [ ] runtime + driver identity captured from a real run
+- [x] model artifact identity from file bytes — SHA-256 inspection implemented, real model validation pending
+- [x] runtime + driver identity capture primitives implemented — real benchmark bundle pending
 - [ ] repeated-run statistics
 
 ## 3. Automatic discovery — v0.2.5
 
-- [ ] CPU / RAM
+- [x] CPU / RAM — implementation complete on Linux, real host validation pending
 - [x] NVIDIA GPU / free VRAM / driver — implementation complete, real GPU validation pending
 - [ ] Apple unified memory
 - [ ] AMD / Intel baseline discovery
 - [x] PCIe / NVLink topology — parser implemented via `nvidia-smi topo -m`, real GPU validation pending
-- [ ] runtime versions
+- [x] runtime versions — vLLM / llama.cpp PATH discovery implemented
 - [x] RTT probe — implementation complete, real peer validation pending
 - [x] optional bandwidth probe — `iperf3` client path implemented, real peer validation pending
-- [ ] merge discovered hosts + measured peer edges into one generated InfrastructureIR
+- [x] merge discovered hosts + measured peer edges into one generated InfrastructureIR — fixture E2E implemented, real two-host validation pending
 
 ## 4. Execute and measure — v0.3
 
