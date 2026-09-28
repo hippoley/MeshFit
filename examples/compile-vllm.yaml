@@ -12,6 +12,7 @@ plan:
 model_path: Qwen/Qwen3-32B
 model_id: qwen3-32b
 context_tokens: 32768
+listen_port: 18080
 tensor_parallel_size: null
 gpu_layers: null
 extra_args: []
