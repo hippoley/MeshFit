@@ -1,6 +1,8 @@
 use std::{env, fs, process};
 
-use meshfit_core::{solve, EvidenceStore, PlacementReport, Prediction, PredictionQuery, ScenarioIR};
+use meshfit_core::{
+    discover_local, solve, EvidenceStore, PlacementReport, Prediction, PredictionQuery, ScenarioIR,
+};
 
 fn main() {
     if let Err(err) = run() {
@@ -15,20 +17,36 @@ fn run() -> Result<(), String> {
 
     match command {
         "help" | "--help" | "-h" => print_help(),
+        "discover" => {
+            let snapshot = discover_local();
+            let yaml = serde_yaml::to_string(&snapshot).map_err(|e| e.to_string())?;
+            print!("{yaml}");
+        }
         "plan" => {
-            let path = args.get(2).ok_or_else(|| "usage: meshfit plan <scenario.yaml>".to_string())?;
+            let path = args
+                .get(2)
+                .ok_or_else(|| "usage: meshfit plan <scenario.yaml>".to_string())?;
             let raw = fs::read_to_string(path).map_err(|e| format!("read {path}: {e}"))?;
-            let scenario: ScenarioIR = serde_yaml::from_str(&raw).map_err(|e| format!("parse {path}: {e}"))?;
+            let scenario: ScenarioIR =
+                serde_yaml::from_str(&raw).map_err(|e| format!("parse {path}: {e}"))?;
             let report = solve(&scenario);
             print_report(&report);
         }
         "predict" => {
-            let evidence_path = args.get(2).ok_or_else(|| "usage: meshfit predict <evidence.yaml> <query.yaml>".to_string())?;
-            let query_path = args.get(3).ok_or_else(|| "usage: meshfit predict <evidence.yaml> <query.yaml>".to_string())?;
-            let evidence_raw = fs::read_to_string(evidence_path).map_err(|e| format!("read {evidence_path}: {e}"))?;
-            let query_raw = fs::read_to_string(query_path).map_err(|e| format!("read {query_path}: {e}"))?;
-            let evidence: EvidenceStore = serde_yaml::from_str(&evidence_raw).map_err(|e| format!("parse {evidence_path}: {e}"))?;
-            let query: PredictionQuery = serde_yaml::from_str(&query_raw).map_err(|e| format!("parse {query_path}: {e}"))?;
+            let evidence_path = args.get(2).ok_or_else(|| {
+                "usage: meshfit predict <evidence.yaml> <query.yaml>".to_string()
+            })?;
+            let query_path = args.get(3).ok_or_else(|| {
+                "usage: meshfit predict <evidence.yaml> <query.yaml>".to_string()
+            })?;
+            let evidence_raw = fs::read_to_string(evidence_path)
+                .map_err(|e| format!("read {evidence_path}: {e}"))?;
+            let query_raw =
+                fs::read_to_string(query_path).map_err(|e| format!("read {query_path}: {e}"))?;
+            let evidence: EvidenceStore = serde_yaml::from_str(&evidence_raw)
+                .map_err(|e| format!("parse {evidence_path}: {e}"))?;
+            let query: PredictionQuery = serde_yaml::from_str(&query_raw)
+                .map_err(|e| format!("parse {query_path}: {e}"))?;
             let prediction = evidence.predict_exact(&query);
             print_prediction(&prediction);
         }
@@ -64,7 +82,10 @@ fn print_report(report: &PlacementReport) {
         println!("\nEXCLUDED");
         println!("--------");
         for node in &report.excluded_nodes {
-            println!("{}\n  {}\n  better role: {}", node.node, node.reason, node.suggested_role);
+            println!(
+                "{}\n  {}\n  better role: {}",
+                node.node, node.reason, node.suggested_role
+            );
         }
     }
 
@@ -72,14 +93,19 @@ fn print_report(report: &PlacementReport) {
         println!("\nREJECTIONS");
         println!("----------");
         for rejection in report.rejected.iter().take(12) {
-            println!("{}  [{}]\n  {}", rejection.candidate, rejection.code, rejection.reason);
+            println!(
+                "{}  [{}]\n  {}",
+                rejection.candidate, rejection.code, rejection.reason
+            );
         }
         if report.rejected.len() > 12 {
             println!("... {} more", report.rejected.len() - 12);
         }
     }
 
-    println!("\nNote: v0.1 reports structural feasibility only. It does not claim real TTFT or tok/s.");
+    println!(
+        "\nNote: v0.1 reports structural feasibility only. It does not claim real TTFT or tok/s."
+    );
 }
 
 fn print_prediction(prediction: &Prediction) {
@@ -99,8 +125,14 @@ fn print_prediction(prediction: &Prediction) {
         println!("--------");
         for item in &prediction.evidence {
             match &item.source_url {
-                Some(url) => println!("{}  {}  {}", item.benchmark_id, item.source, url),
-                None => println!("{}  {}", item.benchmark_id, item.source),
+                Some(url) => println!(
+                    "{}  {}  {}  {}",
+                    item.benchmark_id, item.execution_fingerprint, item.source, url
+                ),
+                None => println!(
+                    "{}  {}  {}",
+                    item.benchmark_id, item.execution_fingerprint, item.source
+                ),
             }
         }
     }
@@ -108,6 +140,6 @@ fn print_prediction(prediction: &Prediction) {
 
 fn print_help() {
     println!(
-        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
+        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
     );
 }
