@@ -4,7 +4,10 @@ use serde::{Deserialize, Serialize};
 
 use crate::{
     identity::{DeviceIdentity, HardwareIdentity},
-    ir::{AcceleratorBackend, AcceleratorIR, FabricEdgeIR, HardwareNodeIR, LinkKind},
+    ir::{
+        AcceleratorBackend, AcceleratorIR, FabricEdgeIR, FabricEndpointIR, HardwareNodeIR,
+        LinkKind,
+    },
 };
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
@@ -43,7 +46,7 @@ pub fn discover_local() -> LocalDiscovery {
     };
 
     let local_fabric = match query_nvidia_topology() {
-        Ok(output) => parse_nvidia_topo_matrix(&output),
+        Ok(output) => parse_nvidia_topo_matrix(&output, &hostname),
         Err(reason) => {
             warnings.push(reason);
             Vec::new()
@@ -148,7 +151,7 @@ pub fn parse_nvidia_smi_csv(raw: &str) -> Vec<DiscoveredAccelerator> {
         .collect()
 }
 
-pub fn parse_nvidia_topo_matrix(raw: &str) -> Vec<FabricEdgeIR> {
+pub fn parse_nvidia_topo_matrix(raw: &str, node_id: &str) -> Vec<FabricEdgeIR> {
     let mut gpu_columns = Vec::new();
     let mut rows = Vec::new();
 
@@ -189,8 +192,14 @@ pub fn parse_nvidia_topo_matrix(raw: &str) -> Vec<FabricEdgeIR> {
             };
 
             edges.push(FabricEdgeIR {
-                from: format!("gpu{row_index}"),
-                to: format!("gpu{column_index}"),
+                from: FabricEndpointIR::Accelerator {
+                    node: node_id.to_string(),
+                    accelerator: format!("gpu{row_index}"),
+                },
+                to: FabricEndpointIR::Accelerator {
+                    node: node_id.to_string(),
+                    accelerator: format!("gpu{column_index}"),
+                },
                 kind,
                 bandwidth_gbps: None,
                 latency_ms: None,
@@ -267,12 +276,23 @@ mod tests {
     fn parses_nvlink_and_pcie_topology_without_fake_metrics() {
         let raw = "\tGPU0\tGPU1\tGPU2\tCPU Affinity\nGPU0\tX\tNV4\tPHB\t0-31\nGPU1\tNV4\tX\tPXB\t0-31\nGPU2\tPHB\tPXB\tX\t32-63\n";
 
-        let edges = parse_nvidia_topo_matrix(raw);
+        let edges = parse_nvidia_topo_matrix(raw, "node-a");
         assert_eq!(edges.len(), 3);
 
         let nv = edges
             .iter()
-            .find(|edge| edge.from == "gpu0" && edge.to == "gpu1")
+            .find(|edge| {
+                edge.from
+                    == FabricEndpointIR::Accelerator {
+                        node: "node-a".into(),
+                        accelerator: "gpu0".into(),
+                    }
+                    && edge.to
+                        == FabricEndpointIR::Accelerator {
+                            node: "node-a".into(),
+                            accelerator: "gpu1".into(),
+                        }
+            })
             .unwrap();
         assert_eq!(nv.kind, LinkKind::Nvlink);
         assert_eq!(nv.bandwidth_gbps, None);
@@ -280,7 +300,18 @@ mod tests {
 
         let pcie = edges
             .iter()
-            .find(|edge| edge.from == "gpu0" && edge.to == "gpu2")
+            .find(|edge| {
+                edge.from
+                    == FabricEndpointIR::Accelerator {
+                        node: "node-a".into(),
+                        accelerator: "gpu0".into(),
+                    }
+                    && edge.to
+                        == FabricEndpointIR::Accelerator {
+                            node: "node-a".into(),
+                            accelerator: "gpu2".into(),
+                        }
+            })
             .unwrap();
         assert_eq!(pcie.kind, LinkKind::Pcie);
     }
