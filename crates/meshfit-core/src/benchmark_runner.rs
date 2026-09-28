@@ -12,6 +12,7 @@ use crate::{
     compiler::{ExecutablePlanIR, ExecutionScope},
     discovery::{discover_local, topology_identity_from_discovery, LocalDiscovery},
     evidence::BenchmarkProvenance,
+    artifact::inspect_model_artifact,
     identity::{ExecutionIdentity, ModelArtifactIdentity, RuntimeIdentity},
     runtime_discovery::discover_runtimes,
 };
@@ -164,11 +165,84 @@ pub fn validate_local_benchmark_request(
     Ok(())
 }
 
-pub fn run_local_benchmark(
-    request: BenchmarkRequestIR,
-    local_node_id: &str,
-) -> Result<BenchmarkBundle, String> {
-    validate_local_benchmark_request(&request, local_node_id)?;
+pub fn validate_request_against_live_facts(
+    request: &BenchmarkRequestIR,
+    local: &LocalDiscovery,
+    live_runtime: &RuntimeIdentity,
+) -> Result<(), String> {
+    validate_local_benchmark_request(request, &local.node.id)?;
+
+    if request.identity.hardware != local.hardware_identity {
+        return Err(
+            "benchmark ExecutionIdentity hardware does not match live discovered hardware/driver"
+                .into(),
+        );
+    }
+
+    let live_topology = topology_identity_from_discovery(local);
+    if request.identity.topology != live_topology {
+        return Err(
+            "benchmark ExecutionIdentity topology does not match live discovered topology".into(),
+        );
+    }
+
+    if request.identity.runtime.runtime != live_runtime.runtime
+        || request.identity.runtime.version != live_runtime.version
+        || request.identity.runtime.build_commit != live_runtime.build_commit
+    {
+        return Err(
+            "benchmark ExecutionIdentity runtime version does not match live discovered runtime"
+                .into(),
+        );
+    }
+
+    if let Some(expected_sha) = request.identity.model.artifact_sha256.as_deref() {
+        let path = std::path::Path::new(
+            request
+                .executable
+                .args
+                .get(1)
+                .ok_or_else(|| "executable plan does not expose a model path".to_string())?,
+        );
+
+        if !path.is_file() {
+            return Err(
+                "model identity contains an artifact hash but executable model path is not a local file"
+                    .into(),
+            );
+        }
+
+        let live_model = inspect_model_artifact(
+            path,
+            request.identity.model.model_id.clone(),
+            request.identity.model.format.clone(),
+            request.identity.model.quantization.clone(),
+            request.identity.model.revision.clone(),
+        )?;
+
+        if live_model.artifact_sha256.as_deref() != Some(expected_sha) {
+            return Err("live model artifact hash does not match ExecutionIdentity".into());
+        }
+    }
+
+    Ok(())
+}
+
+pub fn run_local_benchmark(request: BenchmarkRequestIR) -> Result<BenchmarkBundle, String> {
+    let local = discover_local();
+    let discovered_runtimes = discover_runtimes();
+    let live_runtime = discovered_runtimes
+        .runtimes
+        .iter()
+        .find(|runtime| runtime.runtime == request.executable.runtime)
+        .ok_or_else(|| {
+            format!(
+                "runtime '{}' is not installed or could not be discovered on PATH",
+                request.executable.runtime
+            )
+        })?;
+
+    validate_request_against_live_facts(&request, &local, live_runtime)?;
 
     let mut command = Command::new(&request.executable.program);
     command
@@ -261,8 +335,10 @@ fn wait_for_health(request: &BenchmarkRequestIR, child: &mut Child) -> Result<()
             .stderr(Stdio::null())
             .status();
 
-        if matches!(health, Ok(status) if status.success()) {
-            return Ok(());
+        match health {
+            Ok(status) if status.success() => return Ok(()),
+            Ok(_) => {}
+            Err(error) => return Err(format!("curl unavailable for health probe: {error}")),
         }
 
         if start.elapsed() >= timeout {
