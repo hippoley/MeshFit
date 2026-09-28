@@ -1,5 +1,6 @@
 pub mod artifact;
 pub mod benchmark;
+pub mod benchmark_runner;
 pub mod compiler;
 pub mod discovery;
 pub mod evidence;
@@ -12,6 +13,7 @@ pub mod solver;
 
 pub use artifact::*;
 pub use benchmark::*;
+pub use benchmark_runner::*;
 pub use compiler::*;
 pub use discovery::*;
 pub use evidence::*;
