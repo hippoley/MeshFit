@@ -179,7 +179,7 @@ fn run_streaming_request(request: &BenchmarkRequestIR) -> Result<RequestMeasurem
         "messages": [
             {
                 "role": "user",
-                "content": request.config.prompt
+                "content": request.config.prompt.clone()
             }
         ],
         "max_tokens": request.config.max_tokens,
@@ -196,6 +196,7 @@ fn run_streaming_request(request: &BenchmarkRequestIR) -> Result<RequestMeasurem
         .saturating_add(999)
         / 1000;
 
+    let max_time_seconds_text = max_time_seconds.to_string();
     let start = Instant::now();
     let mut curl = Command::new("curl")
         .args([
@@ -203,7 +204,7 @@ fn run_streaming_request(request: &BenchmarkRequestIR) -> Result<RequestMeasurem
             "-sS",
             "--fail",
             "--max-time",
-            &max_time_seconds.to_string(),
+            &max_time_seconds_text,
             "-H",
             "Content-Type: application/json",
             "-d",
