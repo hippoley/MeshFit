@@ -47,6 +47,8 @@ pub struct ExecutablePlanIR {
     pub program: String,
     pub args: Vec<String>,
     #[serde(default)]
+    pub identity_flags: Vec<String>,
+    #[serde(default)]
     pub env: Vec<(String, String)>,
     pub working_node: String,
     pub service: ServiceContract,
@@ -133,6 +135,21 @@ fn compile_llama_cpp(request: &CompileRequest) -> Result<ExecutablePlanIR, Compi
 
     args.extend(request.extra_args.clone());
 
+    let mut identity_flags = vec![
+        "-c".into(),
+        request.context_tokens.to_string(),
+        "-ngl".into(),
+        match request.plan.placement {
+            PlacementKind::SingleHost => "all".into(),
+            PlacementKind::CpuOffload => request
+                .gpu_layers
+                .expect("validated above")
+                .to_string(),
+            _ => unreachable!(),
+        },
+    ];
+    identity_flags.extend(request.extra_args.clone());
+
     Ok(ExecutablePlanIR {
         source_plan_id: request.plan.id.clone(),
         model_id: request.model_id.clone(),
@@ -141,6 +158,7 @@ fn compile_llama_cpp(request: &CompileRequest) -> Result<ExecutablePlanIR, Compi
         scope: ExecutionScope::LocalProcess,
         program: "llama-server".into(),
         args,
+        identity_flags,
         env: vec![],
         working_node: request.plan.nodes[0].clone(),
         service: ServiceContract {
@@ -211,6 +229,14 @@ fn compile_vllm(request: &CompileRequest) -> Result<ExecutablePlanIR, CompileErr
     ];
     args.extend(request.extra_args.clone());
 
+    let mut identity_flags = vec![
+        "--max-model-len".into(),
+        request.context_tokens.to_string(),
+        "--tensor-parallel-size".into(),
+        tp_size.to_string(),
+    ];
+    identity_flags.extend(request.extra_args.clone());
+
     Ok(ExecutablePlanIR {
         source_plan_id: request.plan.id.clone(),
         model_id: request.model_id.clone(),
@@ -219,6 +245,7 @@ fn compile_vllm(request: &CompileRequest) -> Result<ExecutablePlanIR, CompileErr
         scope: ExecutionScope::LocalProcess,
         program: "vllm".into(),
         args,
+        identity_flags,
         env: vec![],
         working_node: request.plan.nodes[0].clone(),
         service: ServiceContract {
