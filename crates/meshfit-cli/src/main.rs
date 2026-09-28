@@ -258,25 +258,12 @@ fn run() -> Result<(), String> {
                 .cloned()
                 .ok_or_else(|| format!("plan-id '{plan_id}' is not feasible in the current snapshot"))?;
 
-            let tensor_parallel_size = if plan.placement == PlacementKind::TensorParallel
-                && plan.nodes.len() == 1
-            {
-                snapshot
-                    .infrastructure
-                    .node(&plan.nodes[0])
-                    .map(|node| node.accelerators.len() as u32)
-                    .filter(|count| *count > 0)
-            } else {
-                None
-            };
-
             let request = CompileRequest {
                 plan,
                 model_path: model_path.clone(),
                 model_id: target.model.id.clone(),
                 context_tokens: target.workload.context_tokens,
                 listen_port: 18080,
-                tensor_parallel_size,
                 gpu_layers,
                 extra_args: vec![],
             };
@@ -351,11 +338,16 @@ fn print_report(report: &PlacementReport) {
     println!("------");
     for (idx, plan) in report.pareto.iter().enumerate() {
         println!(
-            "{:02}  id={}  {:?}  nodes={}  runtime={}  compute={:.1}  cost=${:.2}/h  headroom={:.1}GB",
+            "{:02}  id={}  {:?}  nodes={}  devices={}  runtime={}  compute={:.1}  cost=${:.2}/h  headroom={:.1}GB",
             idx + 1,
             plan.id,
             plan.placement,
             plan.nodes.join("+"),
+            plan.accelerators
+                .iter()
+                .map(|a| format!("{}/{}", a.node, a.accelerator))
+                .collect::<Vec<_>>()
+                .join(","),
             plan.runtime,
             plan.relative_compute,
             plan.hourly_cost_usd,
