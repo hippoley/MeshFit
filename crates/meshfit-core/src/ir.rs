@@ -106,6 +106,30 @@ impl InfrastructureIR {
         self.nodes.iter().find(|n| n.id == id)
     }
 
+    pub fn accelerator(&self, node_id: &str, accelerator_id: &str) -> Option<&AcceleratorIR> {
+        self.node(node_id)?
+            .accelerators
+            .iter()
+            .find(|accelerator| accelerator.id == accelerator_id)
+    }
+
+    pub fn accelerator_link(
+        &self,
+        node_id: &str,
+        accelerator_a: &str,
+        accelerator_b: &str,
+    ) -> Option<&FabricEdgeIR> {
+        self.links.iter().find(|link| {
+            let endpoint = |node: &str, accelerator: &str| FabricEndpointIR::Accelerator {
+                node: node.to_string(),
+                accelerator: accelerator.to_string(),
+            };
+            let a = endpoint(node_id, accelerator_a);
+            let b = endpoint(node_id, accelerator_b);
+            (link.from == a && link.to == b) || (link.from == b && link.to == a)
+        })
+    }
+
     pub fn node_link(&self, a: &str, b: &str) -> Option<&FabricEdgeIR> {
         self.links.iter().find(|link| {
             let forward = matches!(
@@ -196,12 +220,20 @@ pub enum PlacementKind {
     CpuOffload,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq, Hash)]
+pub struct AcceleratorRefIR {
+    pub node: String,
+    pub accelerator: String,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PlanIR {
     pub id: String,
     pub placement: PlacementKind,
     pub runtime: String,
     pub nodes: Vec<String>,
+    #[serde(default)]
+    pub accelerators: Vec<AcceleratorRefIR>,
     pub required_memory_gb: f64,
     pub accelerator_memory_gb: f64,
     pub relative_compute: f64,
