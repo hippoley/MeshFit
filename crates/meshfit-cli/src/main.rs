@@ -1,8 +1,8 @@
 use std::{env, fs, process};
 
 use meshfit_core::{
-    discover_local, probe_peer, solve, EvidenceStore, PlacementReport, Prediction, PredictionQuery,
-    ScenarioIR,
+    discover_local, probe_peer, solve, EvidenceStore, InfrastructureSnapshot, LinkKind, LocalDiscovery,
+    PeerProbeResult, PlacementReport, Prediction, PredictionQuery, ScenarioIR,
 };
 
 fn main() {
@@ -30,6 +30,41 @@ fn run() -> Result<(), String> {
             let measure_bandwidth = args.iter().any(|arg| arg == "--bandwidth");
             let result = probe_peer(peer, measure_bandwidth);
             let yaml = serde_yaml::to_string(&result).map_err(|e| e.to_string())?;
+            print!("{yaml}");
+        }
+        "snapshot" => {
+            let local_path = args
+                .get(2)
+                .ok_or_else(|| "usage: meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]".to_string())?;
+            let peer_path = args
+                .get(3)
+                .ok_or_else(|| "usage: meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]".to_string())?;
+
+            let local_raw = fs::read_to_string(local_path)
+                .map_err(|e| format!("read {local_path}: {e}"))?;
+            let peer_raw = fs::read_to_string(peer_path)
+                .map_err(|e| format!("read {peer_path}: {e}"))?;
+            let local: LocalDiscovery = serde_yaml::from_str(&local_raw)
+                .map_err(|e| format!("parse {local_path}: {e}"))?;
+            let peer: LocalDiscovery = serde_yaml::from_str(&peer_raw)
+                .map_err(|e| format!("parse {peer_path}: {e}"))?;
+
+            let local_id = local.node.id.clone();
+            let peer_id = peer.node.id.clone();
+            let mut snapshot = InfrastructureSnapshot::from_discoveries(vec![local, peer])
+                .map_err(|e| e.to_string())?;
+
+            if let Some(probe_path) = args.get(4) {
+                let probe_raw = fs::read_to_string(probe_path)
+                    .map_err(|e| format!("read {probe_path}: {e}"))?;
+                let probe: PeerProbeResult = serde_yaml::from_str(&probe_raw)
+                    .map_err(|e| format!("parse {probe_path}: {e}"))?;
+                snapshot
+                    .add_peer_probe(&local_id, &peer_id, &probe, LinkKind::Ethernet)
+                    .map_err(|e| e.to_string())?;
+            }
+
+            let yaml = serde_yaml::to_string(&snapshot).map_err(|e| e.to_string())?;
             print!("{yaml}");
         }
         "plan" => {
@@ -150,6 +185,6 @@ fn print_prediction(prediction: &Prediction) {
 
 fn print_help() {
     println!(
-        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit probe <peer> [--bandwidth]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
+        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
     );
 }
