@@ -101,6 +101,7 @@ fn enumerate_single_node(
                     accelerators: vec![AcceleratorRefIR {
                         node: node.id.clone(),
                         accelerator: accelerator.id.clone(),
+                        backend: accelerator.backend,
                     }],
                     required_memory_gb: required,
                     accelerator_memory_gb: usable,
@@ -129,6 +130,7 @@ fn enumerate_single_node(
                         accelerators: vec![AcceleratorRefIR {
                             node: node.id.clone(),
                             accelerator: accelerator.id.clone(),
+                            backend: accelerator.backend,
                         }],
                         required_memory_gb: required,
                         accelerator_memory_gb: usable,
@@ -255,6 +257,7 @@ fn enumerate_local_tp(
                 .map(|accelerator| AcceleratorRefIR {
                     node: node_id.to_string(),
                     accelerator: accelerator.clone(),
+                    backend,
                 })
                 .collect(),
             required_memory_gb: model.required_memory_gb(),
@@ -370,10 +373,12 @@ fn enumerate_two_node_tp(
                     AcceleratorRefIR {
                         node: a.id.clone(),
                         accelerator: accelerator_a.id.clone(),
+                        backend: accelerator_a.backend,
                     },
                     AcceleratorRefIR {
                         node: b.id.clone(),
                         accelerator: accelerator_b.id.clone(),
+                        backend: accelerator_b.backend,
                     },
                 ],
                 required_memory_gb: model.required_memory_gb(),
