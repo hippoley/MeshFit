@@ -21,7 +21,6 @@ pub fn build_benchmark_request_from_facts(
     local: LocalDiscovery,
     model: ModelArtifactIdentity,
     mut runtime: RuntimeIdentity,
-    context_tokens: u32,
     concurrency: u32,
     config: BenchmarkConfig,
 ) -> Result<BenchmarkRequestIR, String> {
@@ -59,7 +58,7 @@ pub fn build_benchmark_request_from_facts(
     Ok(BenchmarkRequestIR {
         executable,
         identity,
-        context_tokens,
+        context_tokens: executable.context_tokens,
         concurrency,
         config,
     })
@@ -68,7 +67,6 @@ pub fn build_benchmark_request_from_facts(
 pub fn prepare_local_benchmark_request(
     executable: ExecutablePlanIR,
     model: ModelArtifactIdentity,
-    context_tokens: u32,
     concurrency: u32,
     config: BenchmarkConfig,
 ) -> Result<BenchmarkRequestIR, String> {
@@ -90,7 +88,6 @@ pub fn prepare_local_benchmark_request(
         local,
         model,
         runtime,
-        context_tokens,
         concurrency,
         config,
     )
@@ -423,6 +420,7 @@ mod tests {
                 source_plan_id: "plan-1".into(),
                 model_id: "demo".into(),
                 placement: PlacementKind::SingleHost,
+                context_tokens: 4096,
                 runtime: "vllm".into(),
                 scope: ExecutionScope::LocalProcess,
                 program: "vllm".into(),
