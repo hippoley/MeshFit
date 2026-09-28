@@ -3,6 +3,7 @@ request:
   executable:
     source_plan_id: node-b:vllm:SingleHost
     model_id: qwen-demo
+    model_source: Qwen/Qwen3-32B
     placement: single_host
     context_tokens: 4096
     runtime: vllm
