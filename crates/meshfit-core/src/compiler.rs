@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::ir::{PlacementKind, PlanIR};
+use crate::ir::{AcceleratorBackend, AcceleratorRefIR, PlacementKind, PlanIR};
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct CompileRequest {
@@ -10,8 +10,6 @@ pub struct CompileRequest {
     pub context_tokens: u32,
     #[serde(default = "default_listen_port")]
     pub listen_port: u16,
-    #[serde(default)]
-    pub tensor_parallel_size: Option<u32>,
     #[serde(default)]
     pub gpu_layers: Option<u32>,
     #[serde(default)]
@@ -73,6 +71,8 @@ impl std::fmt::Display for CompileError {
 impl std::error::Error for CompileError {}
 
 pub fn compile_plan(request: &CompileRequest) -> Result<ExecutablePlanIR, CompileError> {
+    validate_device_refs(&request.plan)?;
+
     match request.plan.runtime.as_str() {
         "llama.cpp" => compile_llama_cpp(request),
         "vllm" => compile_vllm(request),
@@ -83,6 +83,30 @@ pub fn compile_plan(request: &CompileRequest) -> Result<ExecutablePlanIR, Compil
     }
 }
 
+fn validate_device_refs(plan: &PlanIR) -> Result<(), CompileError> {
+    if plan.accelerators.is_empty() {
+        return Err(CompileError {
+            code: "missing_accelerator_selection".into(),
+            message: "executable compilation requires PlanIR to select concrete accelerators"
+                .into(),
+        });
+    }
+
+    for accelerator in &plan.accelerators {
+        if !plan.nodes.contains(&accelerator.node) {
+            return Err(CompileError {
+                code: "accelerator_node_mismatch".into(),
+                message: format!(
+                    "selected accelerator {}/{} is not on a selected plan node",
+                    accelerator.node, accelerator.accelerator
+                ),
+            });
+        }
+    }
+
+    Ok(())
+}
+
 fn compile_llama_cpp(request: &CompileRequest) -> Result<ExecutablePlanIR, CompileError> {
     if request.plan.nodes.len() != 1 {
         return Err(CompileError {
@@ -90,6 +114,14 @@ fn compile_llama_cpp(request: &CompileRequest) -> Result<ExecutablePlanIR, Compi
             message:
                 "v0.3 only compiles single-node llama.cpp plans; RPC orchestration is not implemented"
                     .into(),
+        });
+    }
+
+    if request.plan.accelerators.len() != 1 {
+        return Err(CompileError {
+            code: "llama_cpp_multi_device_not_compiled".into(),
+            message: "v0.3 llama.cpp compiler only binds one explicitly selected accelerator"
+                .into(),
         });
     }
 
@@ -106,6 +138,18 @@ fn compile_llama_cpp(request: &CompileRequest) -> Result<ExecutablePlanIR, Compi
         }
     }
 
+    let selected = &request.plan.accelerators[0];
+    if selected.backend != AcceleratorBackend::Cuda {
+        return Err(CompileError {
+            code: "llama_cpp_device_binding_not_implemented".into(),
+            message: format!(
+                "explicit llama.cpp device binding for {:?} is not implemented yet",
+                selected.backend
+            ),
+        });
+    }
+    let cuda_device = cuda_device_name(selected)?;
+
     let mut args = vec![
         "-m".into(),
         request.model_path.clone(),
@@ -117,38 +161,33 @@ fn compile_llama_cpp(request: &CompileRequest) -> Result<ExecutablePlanIR, Compi
         request.listen_port.to_string(),
         "--alias".into(),
         request.model_id.clone(),
+        "--device".into(),
+        cuda_device.clone(),
     ];
 
-    match request.plan.placement {
-        PlacementKind::SingleHost => {
-            args.push("-ngl".into());
-            args.push("all".into());
-        }
-        PlacementKind::CpuOffload => {
-            let gpu_layers = request.gpu_layers.ok_or_else(|| CompileError {
+    let gpu_layers = match request.plan.placement {
+        PlacementKind::SingleHost => "all".to_string(),
+        PlacementKind::CpuOffload => request
+            .gpu_layers
+            .ok_or_else(|| CompileError {
                 code: "missing_gpu_layers".into(),
-                message: "CPU offload compilation requires an explicit llama.cpp GPU-layer count".into(),
-            })?;
-            args.push("-ngl".into());
-            args.push(gpu_layers.to_string());
-        }
+                message: "CPU offload compilation requires an explicit llama.cpp GPU-layer count"
+                    .into(),
+            })?
+            .to_string(),
         _ => unreachable!(),
-    }
-
+    };
+    args.push("-ngl".into());
+    args.push(gpu_layers.clone());
     args.extend(request.extra_args.clone());
 
     let mut identity_flags = vec![
         "-c".into(),
         request.context_tokens.to_string(),
+        "--device".into(),
+        cuda_device,
         "-ngl".into(),
-        match request.plan.placement {
-            PlacementKind::SingleHost => "all".into(),
-            PlacementKind::CpuOffload => request
-                .gpu_layers
-                .expect("validated above")
-                .to_string(),
-            _ => unreachable!(),
-        },
+        gpu_layers,
     ];
     identity_flags.extend(request.extra_args.clone());
 
@@ -173,21 +212,14 @@ fn compile_llama_cpp(request: &CompileRequest) -> Result<ExecutablePlanIR, Compi
             chat_completions_path: "/v1/chat/completions".into(),
         },
         assumptions: vec![
-            "llama-server is available on PATH and supports current -ngl semantics".into(),
-            "v0.3 compiler emits a launch contract; it does not claim runtime compatibility until executed".into(),
+            "llama-server is available on PATH and supports current --device/-ngl semantics".into(),
+            "selected CUDA device is bound explicitly from PlanIR".into(),
         ],
     })
 }
 
 fn compile_vllm(request: &CompileRequest) -> Result<ExecutablePlanIR, CompileError> {
-    if request.plan.nodes.is_empty() {
-        return Err(CompileError {
-            code: "missing_node".into(),
-            message: "vLLM plan has no selected node".into(),
-        });
-    }
-
-    if request.plan.nodes.len() > 1 {
+    if request.plan.nodes.len() != 1 {
         return Err(CompileError {
             code: "vllm_multi_node_requires_orchestrator".into(),
             message:
@@ -209,13 +241,51 @@ fn compile_vllm(request: &CompileRequest) -> Result<ExecutablePlanIR, CompileErr
         }
     }
 
-    let tp_size = match request.plan.placement {
-        PlacementKind::TensorParallel => request.tensor_parallel_size.ok_or_else(|| CompileError {
-            code: "missing_tensor_parallel_size".into(),
-            message: "tensor-parallel compilation requires an explicit device count".into(),
-        })?,
-        _ => 1,
+    if request
+        .plan
+        .accelerators
+        .iter()
+        .any(|accelerator| accelerator.backend != AcceleratorBackend::Cuda)
+    {
+        return Err(CompileError {
+            code: "vllm_non_cuda_device_not_compiled".into(),
+            message: "v0.3 vLLM compiler currently binds CUDA accelerator selections only".into(),
+        });
+    }
+
+    let device_indices = request
+        .plan
+        .accelerators
+        .iter()
+        .map(cuda_device_index)
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let expected_count = match request.plan.placement {
+        PlacementKind::SingleHost => 1,
+        PlacementKind::TensorParallel => {
+            if device_indices.len() < 2 {
+                return Err(CompileError {
+                    code: "tp_requires_multiple_devices".into(),
+                    message: "TensorParallel plan selected fewer than two accelerators".into(),
+                });
+            }
+            device_indices.len()
+        }
+        _ => unreachable!(),
     };
+
+    if request.plan.placement == PlacementKind::SingleHost && device_indices.len() != 1 {
+        return Err(CompileError {
+            code: "single_host_requires_one_device".into(),
+            message: "SingleHost vLLM plan must select exactly one accelerator".into(),
+        });
+    }
+
+    let visible_devices = device_indices
+        .iter()
+        .map(u32::to_string)
+        .collect::<Vec<_>>()
+        .join(",");
 
     let mut args = vec![
         "serve".into(),
@@ -223,7 +293,7 @@ fn compile_vllm(request: &CompileRequest) -> Result<ExecutablePlanIR, CompileErr
         "--max-model-len".into(),
         request.context_tokens.to_string(),
         "--tensor-parallel-size".into(),
-        tp_size.to_string(),
+        expected_count.to_string(),
         "--host".into(),
         "127.0.0.1".into(),
         "--port".into(),
@@ -233,11 +303,13 @@ fn compile_vllm(request: &CompileRequest) -> Result<ExecutablePlanIR, CompileErr
     ];
     args.extend(request.extra_args.clone());
 
+    let device_binding = format!("CUDA_VISIBLE_DEVICES={visible_devices}");
     let mut identity_flags = vec![
         "--max-model-len".into(),
         request.context_tokens.to_string(),
         "--tensor-parallel-size".into(),
-        tp_size.to_string(),
+        expected_count.to_string(),
+        device_binding.clone(),
     ];
     identity_flags.extend(request.extra_args.clone());
 
@@ -252,7 +324,7 @@ fn compile_vllm(request: &CompileRequest) -> Result<ExecutablePlanIR, CompileErr
         program: "vllm".into(),
         args,
         identity_flags,
-        env: vec![],
+        env: vec![("CUDA_VISIBLE_DEVICES".into(), visible_devices)],
         working_node: request.plan.nodes[0].clone(),
         service: ServiceContract {
             scheme: "http".into(),
@@ -263,21 +335,54 @@ fn compile_vllm(request: &CompileRequest) -> Result<ExecutablePlanIR, CompileErr
         },
         assumptions: vec![
             "vllm is available on PATH".into(),
-            "tensor-parallel size is supplied explicitly from device-count evidence; MeshFit does not infer it from memory ratios".into(),
+            "selected CUDA devices are bound through CUDA_VISIBLE_DEVICES".into(),
+            "tensor-parallel size equals the number of explicitly selected accelerators".into(),
         ],
     })
+}
+
+fn cuda_device_index(accelerator: &AcceleratorRefIR) -> Result<u32, CompileError> {
+    accelerator
+        .accelerator
+        .strip_prefix("gpu")
+        .and_then(|value| value.parse::<u32>().ok())
+        .ok_or_else(|| CompileError {
+            code: "unmappable_cuda_device_id".into(),
+            message: format!(
+                "accelerator id '{}' cannot be mapped to a CUDA ordinal; discovery ids must use gpuN",
+                accelerator.accelerator
+            ),
+        })
+}
+
+fn cuda_device_name(accelerator: &AcceleratorRefIR) -> Result<String, CompileError> {
+    Ok(format!("CUDA{}", cuda_device_index(accelerator)?))
 }
 
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn plan(runtime: &str, placement: PlacementKind, nodes: Vec<&str>) -> PlanIR {
+    fn accelerator(node: &str, id: &str) -> AcceleratorRefIR {
+        AcceleratorRefIR {
+            node: node.into(),
+            accelerator: id.into(),
+            backend: AcceleratorBackend::Cuda,
+        }
+    }
+
+    fn plan(
+        runtime: &str,
+        placement: PlacementKind,
+        nodes: Vec<&str>,
+        accelerators: Vec<AcceleratorRefIR>,
+    ) -> PlanIR {
         PlanIR {
             id: "plan-1".into(),
             placement,
             runtime: runtime.into(),
             nodes: nodes.into_iter().map(str::to_string).collect(),
+            accelerators,
             required_memory_gb: 40.0,
             accelerator_memory_gb: 80.0,
             relative_compute: 10.0,
@@ -288,32 +393,39 @@ mod tests {
     }
 
     #[test]
-    fn compiles_single_host_llama_cpp() {
+    fn compiles_single_host_llama_cpp_with_explicit_device() {
         let executable = compile_plan(&CompileRequest {
-            plan: plan("llama.cpp", PlacementKind::SingleHost, vec!["node-a"]),
+            plan: plan(
+                "llama.cpp",
+                PlacementKind::SingleHost,
+                vec!["node-a"],
+                vec![accelerator("node-a", "gpu1")],
+            ),
             model_path: "/models/demo.gguf".into(),
             model_id: "demo".into(),
             context_tokens: 32768,
             listen_port: 18080,
-            tensor_parallel_size: None,
             gpu_layers: None,
             extra_args: vec![],
         })
         .unwrap();
 
-        assert_eq!(executable.program, "llama-server");
-        assert!(executable.args.contains(&"/models/demo.gguf".to_string()));
+        assert!(executable.args.windows(2).any(|pair| pair == ["--device", "CUDA1"]));
     }
 
     #[test]
     fn cpu_offload_requires_explicit_gpu_layers() {
         let error = compile_plan(&CompileRequest {
-            plan: plan("llama.cpp", PlacementKind::CpuOffload, vec!["node-a"]),
+            plan: plan(
+                "llama.cpp",
+                PlacementKind::CpuOffload,
+                vec!["node-a"],
+                vec![accelerator("node-a", "gpu0")],
+            ),
             model_path: "/models/demo.gguf".into(),
             model_id: "demo".into(),
             context_tokens: 32768,
             listen_port: 18080,
-            tensor_parallel_size: None,
             gpu_layers: None,
             extra_args: vec![],
         })
@@ -323,21 +435,34 @@ mod tests {
     }
 
     #[test]
-    fn compiles_local_vllm_tp() {
+    fn compiles_local_vllm_tp_from_selected_devices() {
         let executable = compile_plan(&CompileRequest {
-            plan: plan("vllm", PlacementKind::TensorParallel, vec!["node-a"]),
+            plan: plan(
+                "vllm",
+                PlacementKind::TensorParallel,
+                vec!["node-a"],
+                vec![
+                    accelerator("node-a", "gpu0"),
+                    accelerator("node-a", "gpu2"),
+                ],
+            ),
             model_path: "Qwen/Qwen3-32B".into(),
             model_id: "qwen3-32b".into(),
             context_tokens: 32768,
             listen_port: 18080,
-            tensor_parallel_size: Some(2),
             gpu_layers: None,
             extra_args: vec![],
         })
         .unwrap();
 
-        assert_eq!(executable.program, "vllm");
-        assert!(executable.args.contains(&"--tensor-parallel-size".to_string()));
+        assert_eq!(
+            executable.env,
+            vec![("CUDA_VISIBLE_DEVICES".into(), "0,2".into())]
+        );
+        assert!(executable
+            .args
+            .windows(2)
+            .any(|pair| pair == ["--tensor-parallel-size", "2"]));
     }
 
     #[test]
@@ -347,12 +472,15 @@ mod tests {
                 "vllm",
                 PlacementKind::TensorParallel,
                 vec!["node-a", "node-b"],
+                vec![
+                    accelerator("node-a", "gpu0"),
+                    accelerator("node-b", "gpu0"),
+                ],
             ),
             model_path: "Qwen/Qwen3-32B".into(),
             model_id: "qwen3-32b".into(),
             context_tokens: 32768,
             listen_port: 18080,
-            tensor_parallel_size: Some(2),
             gpu_layers: None,
             extra_args: vec![],
         })
