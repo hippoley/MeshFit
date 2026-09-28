@@ -224,6 +224,7 @@ pub enum PlacementKind {
 pub struct AcceleratorRefIR {
     pub node: String,
     pub accelerator: String,
+    pub backend: AcceleratorBackend,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
