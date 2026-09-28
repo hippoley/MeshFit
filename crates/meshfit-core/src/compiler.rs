@@ -41,6 +41,7 @@ pub struct ServiceContract {
 pub struct ExecutablePlanIR {
     pub source_plan_id: String,
     pub model_id: String,
+    pub model_source: String,
     pub placement: PlacementKind,
     pub context_tokens: u32,
     pub runtime: String,
@@ -154,6 +155,7 @@ fn compile_llama_cpp(request: &CompileRequest) -> Result<ExecutablePlanIR, Compi
     Ok(ExecutablePlanIR {
         source_plan_id: request.plan.id.clone(),
         model_id: request.model_id.clone(),
+        model_source: request.model_path.clone(),
         placement: request.plan.placement,
         context_tokens: request.context_tokens,
         runtime: "llama.cpp".into(),
@@ -242,6 +244,7 @@ fn compile_vllm(request: &CompileRequest) -> Result<ExecutablePlanIR, CompileErr
     Ok(ExecutablePlanIR {
         source_plan_id: request.plan.id.clone(),
         model_id: request.model_id.clone(),
+        model_source: request.model_path.clone(),
         placement: request.plan.placement,
         context_tokens: request.context_tokens,
         runtime: "vllm".into(),
