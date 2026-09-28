@@ -200,6 +200,7 @@ mod tests {
             executable: ExecutablePlanIR {
                 source_plan_id: "plan-1".into(),
                 model_id: "demo".into(),
+                placement: PlacementKind::SingleHost,
                 runtime: "vllm".into(),
                 scope: ExecutionScope::LocalProcess,
                 program: "vllm".into(),
