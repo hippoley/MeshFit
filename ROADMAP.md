@@ -33,7 +33,7 @@ MeshFit's roadmap is ordered by the shortest path to a real closed loop.
 - [x] runtime versions — vLLM / llama.cpp PATH discovery implemented
 - [x] RTT probe — implementation complete, real peer validation pending
 - [x] optional bandwidth probe — `iperf3` client path implemented, real peer validation pending
-- [x] merge discovered hosts + measured peer edges into one generated InfrastructureIR — fixture E2E implemented, real two-host validation pending
+- [x] merge discovered hosts + measured peer edges into one generated InfrastructureIR — 2-node and N-node manifest fixture E2E implemented, real multi-host validation pending
 
 ## 4. Execute and measure — v0.3
 
