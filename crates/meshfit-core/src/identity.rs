@@ -91,8 +91,6 @@ impl ExecutionIdentity {
                 ))
         });
 
-        normalized.runtime.flags.sort();
-
         normalized.topology.links.sort_by(|a, b| {
             (
                 a.from.as_str(),
@@ -181,14 +179,32 @@ mod tests {
     }
 
     #[test]
-    fn fingerprint_is_stable_against_device_and_flag_order() {
+    fn fingerprint_is_stable_against_device_order() {
         let first = identity();
         let mut second = first.clone();
         second.hardware.devices.reverse();
-        second.runtime.flags.push("--dummy".into());
-        second.runtime.flags.sort();
-        second.runtime.flags.retain(|f| f != "--dummy");
         assert_eq!(first.fingerprint(), second.fingerprint());
+    }
+
+    #[test]
+    fn runtime_flag_value_pairing_changes_fingerprint() {
+        let mut first = identity();
+        first.runtime.flags = vec![
+            "--max-model-len".into(),
+            "4096".into(),
+            "--tensor-parallel-size".into(),
+            "2".into(),
+        ];
+
+        let mut second = identity();
+        second.runtime.flags = vec![
+            "--max-model-len".into(),
+            "2".into(),
+            "--tensor-parallel-size".into(),
+            "4096".into(),
+        ];
+
+        assert_ne!(first.fingerprint(), second.fingerprint());
     }
 
     #[test]
