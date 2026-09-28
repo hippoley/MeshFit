@@ -1,4 +1,4 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
@@ -13,7 +13,7 @@ use crate::{
 pub struct InfrastructureSnapshot {
     pub infrastructure: InfrastructureIR,
     #[serde(default)]
-    pub hardware_identities: HashMap<String, HardwareIdentity>,
+    pub hardware_identities: BTreeMap<String, HardwareIdentity>,
     #[serde(default)]
     pub warnings: Vec<String>,
 }
@@ -42,7 +42,7 @@ impl InfrastructureSnapshot {
         let mut seen = HashSet::new();
         let mut nodes = Vec::new();
         let mut links = Vec::new();
-        let mut hardware_identities = HashMap::new();
+        let mut hardware_identities = BTreeMap::new();
         let mut warnings = Vec::new();
 
         for discovery in discoveries {
