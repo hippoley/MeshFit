@@ -339,7 +339,22 @@ Implemented now:
 # automatic local CPU/RAM + NVIDIA snapshot
 meshfit discover
 
-# structural placement: feasible / rejected / Pareto / excluded
+# installed runtime identity
+meshfit runtimes
+
+# model artifact SHA-256 identity
+meshfit inspect-model <model-file> <model-id> <format> <quantization>
+
+# measured host-to-host link evidence
+meshfit probe <peer> --bandwidth
+
+# merge two discoveries + a probe into a compute graph
+meshfit snapshot node-a.yaml node-b.yaml a-b.yaml > cluster.yaml
+
+# run placement directly on the discovered graph
+meshfit plan-snapshot cluster.yaml examples/placement-target.yaml
+
+# structural placement from a hand-authored scenario still works
 meshfit plan examples/v0.1-placement.yaml
 
 # exact-match evidence query with structured execution fingerprint
