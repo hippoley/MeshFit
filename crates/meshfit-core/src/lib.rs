@@ -1,4 +1,5 @@
 pub mod artifact;
+pub mod compiler;
 pub mod discovery;
 pub mod evidence;
 pub mod identity;
@@ -9,6 +10,7 @@ pub mod snapshot;
 pub mod solver;
 
 pub use artifact::*;
+pub use compiler::*;
 pub use discovery::*;
 pub use evidence::*;
 pub use identity::*;
