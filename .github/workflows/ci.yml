@@ -17,3 +17,4 @@ jobs:
       - run: cargo test --workspace
       - run: cargo build --workspace --release
       - run: cargo run -p meshfit -- plan examples/v0.1-placement.yaml
+      - run: cargo run -p meshfit -- predict examples/v0.2-evidence.yaml examples/v0.2-query.yaml
