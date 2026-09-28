@@ -1,0 +1,92 @@
+infrastructure:
+  nodes:
+    - id: local-4090
+      site: foshan
+      ram_gb: 512
+      hourly_cost_usd: 0
+      accelerators:
+        - id: local-4090-0
+          backend: cuda
+          memory_gb: 24
+          free_memory_gb: 23
+          relative_compute: 5
+        - id: local-4090-1
+          backend: cuda
+          memory_gb: 24
+          free_memory_gb: 23
+          relative_compute: 5
+
+    - id: aws-h100
+      site: tokyo
+      ram_gb: 256
+      hourly_cost_usd: 6.74
+      accelerators:
+        - id: aws-h100-0
+          backend: cuda
+          memory_gb: 80
+          free_memory_gb: 78
+          relative_compute: 10
+        - id: aws-h100-1
+          backend: cuda
+          memory_gb: 80
+          free_memory_gb: 78
+          relative_compute: 10
+
+    - id: office-mac
+      site: shenzhen
+      ram_gb: 128
+      hourly_cost_usd: 0
+      accelerators:
+        - id: office-mac-gpu
+          backend: metal
+          memory_gb: 128
+          free_memory_gb: 110
+          relative_compute: 3
+
+  links:
+    - from: local-4090
+      to: aws-h100
+      kind: wan
+      bandwidth_gbps: 10
+      latency_ms: 48
+      jitter_ms: 1
+      egress_cost_usd_per_gb: 0.09
+
+    - from: local-4090
+      to: office-mac
+      kind: wan
+      bandwidth_gbps: 1
+      latency_ms: 6
+      jitter_ms: 1
+      egress_cost_usd_per_gb: 0
+
+model:
+  id: qwen-72b-class-q4
+  parameters_b: 72
+  weight_memory_gb: 42
+  kv_cache_gb: 6
+  is_moe: false
+  required_backends: []
+
+runtimes:
+  - id: vllm
+    backends: [cuda]
+    supports_tp: true
+    supports_pp: true
+    supports_ep: false
+    supports_rpc: false
+    supports_cpu_offload: false
+
+  - id: llama.cpp
+    backends: [cuda, metal, cpu]
+    supports_tp: false
+    supports_pp: false
+    supports_ep: false
+    supports_rpc: true
+    supports_cpu_offload: true
+
+workload:
+  context_tokens: 32768
+  concurrency: 20
+  p95_latency_ms: 2000
+  budget_per_day_usd: 200
