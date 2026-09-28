@@ -14,40 +14,65 @@ is not a MeshFit prediction by itself.
 
 A valid prediction must answer:
 
-- which hardware;
-- which model artifact;
-- which runtime;
+- which exact hardware and driver;
+- which model artifact and quantization;
+- which runtime version and flags;
+- which topology;
 - which placement;
-- which context;
-- which concurrency;
+- which context and concurrency;
 - how many observations;
 - where those observations came from.
 
-## BenchmarkRecord
+## ExecutionIdentity
 
-A benchmark record binds observations to a concrete execution context:
+v0.2.1 replaces hand-written labels such as:
 
 ~~~text
-hardware fingerprint
-model
-runtime
-placement
+2xh100-nvlink
+~~~
+
+with structured identity:
+
+~~~text
+HardwareIdentity
++ ModelArtifactIdentity
++ RuntimeIdentity
++ TopologyIdentity
++ PlacementKind
+        ↓
+stable SHA-256 execution fingerprint
+~~~
+
+The fingerprint is normalized so device order, runtime-flag order, and topology-link order do not create false identity changes.
+
+Important:
+
+- device model / total memory / driver are identity;
+- current free VRAM is dynamic state and is **not** identity;
+- runtime version changes identity;
+- quantization changes identity;
+- model artifact hash changes identity;
+- topology changes identity.
+
+This prevents benchmark evidence from silently crossing execution boundaries.
+
+## BenchmarkRecord
+
+A benchmark record binds observations to:
+
+~~~text
+ExecutionIdentity
 context
 concurrency
 metrics
 provenance
 ~~~
 
-## v0.2.0 matching policy
+## Exact matching policy
 
-The first evidence-backed predictor is intentionally strict.
+The current predictor only uses exact matches across:
 
-It only uses **exact matches** across:
-
-- hardware fingerprint
-- model id
-- runtime
-- placement kind
+- execution fingerprint
 - context length
 - concurrency
 
@@ -64,6 +89,7 @@ It does not interpolate and it does not invent a fallback estimate.
 
 An available prediction reports:
 
+- execution fingerprint
 - mean
 - min
 - max
@@ -72,30 +98,19 @@ An available prediction reports:
 - evidence references
 - explanation
 
-The confidence score in v0.2.0 reflects only sample count.
+The current confidence score reflects sample count only.
 
-It is not yet a statistical confidence interval and must not be interpreted as one.
+It is not yet a statistical confidence interval.
 
 ## Synthetic examples
 
-Files under `examples/` may contain synthetic values for testing schemas and CLI behavior.
+Files under `examples/` may contain synthetic values for schema and CLI testing.
 
 Synthetic evidence must be clearly labeled and must never be presented as measured benchmark truth.
 
-## Next evidence steps
+## Next steps
 
-### v0.2.1 — artifact identity
-
-Add:
-
-- model artifact hash
-- runtime version
-- driver version
-- device identity
-- quantization
-- runtime flags
-
-### v0.2.2 — repeated-run statistics
+### Repeated-run statistics
 
 Add:
 
@@ -104,17 +119,28 @@ Add:
 - standard deviation
 - outlier policy
 
-### v0.2.3 — calibrated transfer
+### Real capture
 
-Only after exact-match evidence works:
+Capture identity directly from:
 
-- same GPU family
+- discovered devices
+- runtime binary/version
+- driver
+- model artifact
+- runtime flags
+- measured topology
+
+### Calibrated transfer
+
+Only after exact-match evidence and real benchmark capture work:
+
+- same accelerator family
 - same runtime family
 - nearby context
 - nearby concurrency
 - topology similarity
 
-Transferred predictions must reduce confidence and expose the transfer distance.
+Transferred predictions must reduce confidence and expose transfer distance.
 
 ## Principle
 
