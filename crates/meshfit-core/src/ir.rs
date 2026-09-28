@@ -77,8 +77,10 @@ pub struct FabricEdgeIR {
     pub from: String,
     pub to: String,
     pub kind: LinkKind,
-    pub bandwidth_gbps: f64,
-    pub latency_ms: f64,
+    #[serde(default)]
+    pub bandwidth_gbps: Option<f64>,
+    #[serde(default)]
+    pub latency_ms: Option<f64>,
     #[serde(default)]
     pub jitter_ms: f64,
     #[serde(default)]
