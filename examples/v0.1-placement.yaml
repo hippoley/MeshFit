@@ -44,16 +44,24 @@ infrastructure:
           relative_compute: 3
 
   links:
-    - from: local-4090
-      to: aws-h100
+    - from:
+        scope: node
+        node: local-4090
+      to:
+        scope: node
+        node: aws-h100
       kind: wan
       bandwidth_gbps: 10
       latency_ms: 48
       jitter_ms: 1
       egress_cost_usd_per_gb: 0.09
 
-    - from: local-4090
-      to: office-mac
+    - from:
+        scope: node
+        node: local-4090
+      to:
+        scope: node
+        node: office-mac
       kind: wan
       bandwidth_gbps: 1
       latency_ms: 6
