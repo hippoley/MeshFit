@@ -1,0 +1,47 @@
+hardware_identity:
+  architecture: x86_64
+  operating_system: linux
+  cpu_model: AMD EPYC
+  ram_mib: 262144
+  devices:
+    - vendor: nvidia
+      model: NVIDIA RTX 4090
+      backend: cuda
+      memory_mib: 24576
+      driver_version: '580.65'
+    - vendor: nvidia
+      model: NVIDIA RTX 4090
+      backend: cuda
+      memory_mib: 24576
+      driver_version: '580.65'
+node:
+  id: node-a
+  site: local
+  ram_gb: 256
+  accelerators:
+    - id: gpu0
+      backend: cuda
+      memory_gb: 24
+      free_memory_gb: 23
+      relative_compute: 0
+    - id: gpu1
+      backend: cuda
+      memory_gb: 24
+      free_memory_gb: 23
+      relative_compute: 0
+  hourly_cost_usd: 0
+local_fabric:
+  - from:
+      scope: accelerator
+      node: node-a
+      accelerator: gpu0
+    to:
+      scope: accelerator
+      node: node-a
+      accelerator: gpu1
+    kind: nvlink
+    bandwidth_gbps: null
+    latency_ms: null
+    jitter_ms: 0
+    egress_cost_usd_per_gb: 0
+warnings: []
