@@ -3,7 +3,7 @@ use std::{env, fs, process::Command};
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    identity::{DeviceIdentity, HardwareIdentity},
+    identity::{DeviceIdentity, HardwareIdentity, LinkIdentity, TopologyIdentity},
     ir::{
         AcceleratorBackend, AcceleratorIR, FabricEdgeIR, FabricEndpointIR, HardwareNodeIR,
         LinkKind,
@@ -149,6 +149,48 @@ pub fn parse_nvidia_smi_csv(raw: &str) -> Vec<DiscoveredAccelerator> {
             })
         })
         .collect()
+}
+
+pub fn topology_identity_from_discovery(discovery: &LocalDiscovery) -> TopologyIdentity {
+    let mut links = discovery
+        .local_fabric
+        .iter()
+        .map(|edge| LinkIdentity {
+            from: fabric_endpoint_key(&edge.from),
+            to: fabric_endpoint_key(&edge.to),
+            kind: edge.kind,
+            bandwidth_mbps: edge
+                .bandwidth_gbps
+                .map(|gbps| (gbps * 1000.0).round() as u64),
+            latency_micros: edge
+                .latency_ms
+                .map(|ms| (ms * 1000.0).round() as u64),
+        })
+        .collect::<Vec<_>>();
+
+    links.sort_by(|a, b| {
+        (
+            a.from.as_str(),
+            a.to.as_str(),
+            format!("{:?}", a.kind),
+        )
+            .cmp(&(
+                b.from.as_str(),
+                b.to.as_str(),
+                format!("{:?}", b.kind),
+            ))
+    });
+
+    TopologyIdentity { links }
+}
+
+fn fabric_endpoint_key(endpoint: &FabricEndpointIR) -> String {
+    match endpoint {
+        FabricEndpointIR::Node { node } => format!("node:{node}"),
+        FabricEndpointIR::Accelerator { node, accelerator } => {
+            format!("accelerator:{node}/{accelerator}")
+        }
+    }
 }
 
 pub fn parse_nvidia_topo_matrix(raw: &str, node_id: &str) -> Vec<FabricEdgeIR> {
@@ -314,6 +356,50 @@ mod tests {
             })
             .unwrap();
         assert_eq!(pcie.kind, LinkKind::Pcie);
+    }
+
+    #[test]
+    fn converts_discovered_fabric_to_topology_identity_without_inventing_metrics() {
+        let discovery = LocalDiscovery {
+            hardware_identity: HardwareIdentity {
+                architecture: "x86_64".into(),
+                operating_system: "linux".into(),
+                cpu_model: None,
+                ram_mib: None,
+                devices: vec![],
+            },
+            node: HardwareNodeIR {
+                id: "node-a".into(),
+                site: "local".into(),
+                ram_gb: 0.0,
+                accelerators: vec![],
+                hourly_cost_usd: 0.0,
+            },
+            local_fabric: vec![FabricEdgeIR {
+                from: FabricEndpointIR::Accelerator {
+                    node: "node-a".into(),
+                    accelerator: "gpu0".into(),
+                },
+                to: FabricEndpointIR::Accelerator {
+                    node: "node-a".into(),
+                    accelerator: "gpu1".into(),
+                },
+                kind: LinkKind::Nvlink,
+                bandwidth_gbps: None,
+                latency_ms: None,
+                jitter_ms: 0.0,
+                egress_cost_usd_per_gb: 0.0,
+            }],
+            warnings: vec![],
+        };
+
+        let topology = topology_identity_from_discovery(&discovery);
+        assert_eq!(topology.links.len(), 1);
+        assert_eq!(
+            topology.links[0].from,
+            "accelerator:node-a/gpu0"
+        );
+        assert_eq!(topology.links[0].bandwidth_mbps, None);
     }
 
     #[test]
