@@ -30,7 +30,10 @@ pub fn discover_runtimes() -> RuntimeDiscovery {
 
 fn discover_one(runtime: &str, binaries: &[&str]) -> Option<RuntimeIdentity> {
     for binary in binaries {
-        let output = Command::new(binary).arg("--version").output().ok()?;
+        let output = match Command::new(binary).arg("--version").output() {
+            Ok(output) => output,
+            Err(_) => continue,
+        };
         if !output.status.success() {
             continue;
         }
