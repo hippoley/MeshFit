@@ -250,7 +250,10 @@ fn evidence_qualification(candidates: &[BenchmarkCandidate]) -> (bool, String) {
         let Some(first_bundle) = candidate.bundles.first() else {
             return (
                 false,
-                format!("candidate '{}' contains no benchmark bundles", candidate.name),
+                format!(
+                    "candidate '{}' contains no benchmark bundles",
+                    candidate.name
+                ),
             );
         };
         let plan_id = first_bundle.request.executable.source_plan_id.as_str();
