@@ -113,6 +113,21 @@ meshfit benchmark-kit \
 
 This writes `kit.yaml`, `comparison.yaml`, `RUNBOOK.md`, an `inputs/` snapshot of the small control files, and per-strategy `artifacts/` + `results/` directories. Commands in the materialized kit are rewritten to run from that directory. Local model paths are canonicalized instead of copying large weights; model hub identifiers are preserved as-is.
 
+The benchmark service port is part of that materialized execution contract. It defaults to `18080` for backward compatibility and can be selected explicitly:
+
+```bash
+meshfit benchmark-kit \
+  cluster.yaml \
+  target.yaml \
+  <meshfit-plan-id> \
+  <model-path> \
+  model-identity.yaml \
+  --listen-port 18181 \
+  --write-dir benchmark-001
+```
+
+The same `listen_port` is reused by compiler preflight, generated executables, run-one/candidate/host dry-runs, host-local execution locking, and the runtime service contract. Preflight reports whether the selected port is currently bindable; an occupied port makes the candidate not ready before any GPU runtime is started. The host-local port lock remains the race-safety layer between the readiness check and actual launch.
+
 Before running anything, inspect the experiment as a host-oriented work queue:
 
 ```bash
@@ -155,7 +170,7 @@ meshfit benchmark-run-host benchmark-001 --host node-b --resume
 
 An explicit `--model-path` always wins over `MESHFIT_MODEL_PATH`.
 
-A local model-path override is accepted only when the materialized model identity contains `artifact_sha256` and the host-local file hashes to exactly the same value. The path is canonicalized before compilation. Dry-run output for both one-run and candidate-level execution includes the effective path and verification state. If an executable already exists with a different model source, MeshFit recompiles it under the executable lock and replaces it with backup/restore protection. The local benchmark runner hashes the executable's model source again immediately before launch, so path relocation is verified twice while model identity remains immutable. Candidate- and host-level repeated execution performs the expensive host-local artifact preflight once per planned candidate, then reuses that verified resolved path across its run slots instead of hashing a multi-gigabyte model before every independent run. Executable cache reuse requires both the expected plan ID and the resolved model source to match.
+A local model-path override is accepted only when the materialized model identity contains `artifact_sha256` and the host-local file hashes to exactly the same value. The path is canonicalized before compilation. Dry-run output for both one-run and candidate-level execution includes the effective path and verification state. If an executable already exists with a different model source, MeshFit recompiles it under the executable lock and replaces it with backup/restore protection. The local benchmark runner hashes the executable's model source again immediately before launch, so path relocation is verified twice while model identity remains immutable. Candidate- and host-level repeated execution performs the expensive host-local artifact preflight once per planned candidate, then reuses that verified resolved path across its run slots instead of hashing a multi-gigabyte model before every independent run. Executable cache reuse requires the expected plan ID, resolved model source, and service port to match. Changing only the benchmark listen port therefore invalidates the old executable and triggers the same safe recompilation path.
 
 Run one assigned candidate/run directly from the materialized kit:
 
