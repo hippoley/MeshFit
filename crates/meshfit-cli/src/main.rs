@@ -767,17 +767,7 @@ fn run() -> Result<(), String> {
                 let temp_path = bundle_path.with_extension("yaml.tmp");
                 fs::write(&temp_path, bundle_yaml)
                     .map_err(|e| format!("write {}: {e}", temp_path.display()))?;
-                if overwrite && bundle_path.exists() {
-                    fs::remove_file(&bundle_path)
-                        .map_err(|e| format!("remove {}: {e}", bundle_path.display()))?;
-                }
-                fs::rename(&temp_path, &bundle_path).map_err(|e| {
-                    format!(
-                        "move {} to {}: {e}",
-                        temp_path.display(),
-                        bundle_path.display()
-                    )
-                })?;
+                commit_benchmark_bundle(&temp_path, &bundle_path, overwrite)?;
 
                 println!("{}", bundle_path.display());
             }
@@ -1039,6 +1029,69 @@ fn acquire_benchmark_file_lock(
             "create {kind} lock '{}': {error}",
             lock_path.display()
         )),
+    }
+}
+
+fn commit_benchmark_bundle(
+    temp_path: &Path,
+    bundle_path: &Path,
+    overwrite: bool,
+) -> Result<(), String> {
+    if !bundle_path.exists() {
+        return fs::rename(temp_path, bundle_path).map_err(|e| {
+            format!(
+                "move {} to {}: {e}",
+                temp_path.display(),
+                bundle_path.display()
+            )
+        });
+    }
+
+    if !overwrite {
+        return Err(format!(
+            "bundle '{}' already exists; refusing replacement without --overwrite",
+            bundle_path.display()
+        ));
+    }
+
+    let backup_path = bundle_path.with_extension("yaml.meshfit-backup");
+    if backup_path.exists() {
+        return Err(format!(
+            "backup '{}' already exists; refusing to overwrite evidence until it is resolved",
+            backup_path.display()
+        ));
+    }
+
+    fs::rename(bundle_path, &backup_path).map_err(|e| {
+        format!(
+            "move existing evidence {} to backup {}: {e}",
+            bundle_path.display(),
+            backup_path.display()
+        )
+    })?;
+
+    match fs::rename(temp_path, bundle_path) {
+        Ok(()) => {
+            fs::remove_file(&backup_path).map_err(|e| {
+                format!(
+                    "replacement committed to '{}' but backup '{}' could not be removed: {e}",
+                    bundle_path.display(),
+                    backup_path.display()
+                )
+            })?;
+            Ok(())
+        }
+        Err(commit_error) => match fs::rename(&backup_path, bundle_path) {
+            Ok(()) => Err(format!(
+                "replacement of '{}' failed: {commit_error}; previous evidence was restored",
+                bundle_path.display()
+            )),
+            Err(restore_error) => Err(format!(
+                "replacement of '{}' failed: {commit_error}; restoring backup '{}' also failed: {restore_error}",
+                bundle_path.display(),
+                backup_path.display()
+            )),
+        },
     }
 }
 
@@ -1857,6 +1910,39 @@ mod tests {
         let issues = benchmark_preflight_issues(true, candidate, "node-a", true, None, 1, true);
 
         assert!(issues.is_empty());
+    }
+
+    #[test]
+    fn evidence_commit_refuses_implicit_overwrite() {
+        let dir = status_test_dir("evidence-no-overwrite");
+        fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("run-01.yaml");
+        let temp = dir.join("run-01.yaml.tmp");
+        fs::write(&target, "old").unwrap();
+        fs::write(&temp, "new").unwrap();
+
+        let error = commit_benchmark_bundle(&temp, &target, false).unwrap_err();
+        assert!(error.contains("refusing replacement"));
+        assert_eq!(fs::read_to_string(&target).unwrap(), "old");
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn evidence_commit_replaces_only_with_explicit_overwrite() {
+        let dir = status_test_dir("evidence-overwrite");
+        fs::create_dir_all(&dir).unwrap();
+        let target = dir.join("run-01.yaml");
+        let temp = dir.join("run-01.yaml.tmp");
+        fs::write(&target, "old").unwrap();
+        fs::write(&temp, "new").unwrap();
+
+        commit_benchmark_bundle(&temp, &target, true).unwrap();
+
+        assert_eq!(fs::read_to_string(&target).unwrap(), "new");
+        assert!(!dir.join("run-01.yaml.meshfit-backup").exists());
+
+        let _ = fs::remove_dir_all(dir);
     }
 
     #[test]

@@ -320,3 +320,22 @@ A normal preflight always emits the diagnostic report. `--require-ready` turns a
 
 
 The `--host` option follows the same logical-node contract as `benchmark-preflight`: use it when the snapshot node ID intentionally differs from the operating-system hostname. Real execution still requires runtime/model readiness; `--host` does not bypass those checks.
+
+
+## Evidence overwrite safety
+
+Benchmark bundles are evidence artifacts. MeshFit never deletes an existing bundle before a replacement is safely prepared.
+
+Default behavior refuses replacement. With an explicit `--overwrite`, the one-run executor uses:
+
+```text
+new bundle validated
+→ write temp file
+→ old bundle renamed to backup
+→ temp renamed into target
+→ backup removed only after commit
+```
+
+If the final commit rename fails, MeshFit attempts to restore the previous bundle from backup. A stale backup blocks later replacement until it is resolved instead of being silently overwritten.
+
+This protects real benchmark evidence from a remove-then-rename failure window.
