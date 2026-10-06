@@ -68,6 +68,7 @@ struct BenchmarkExecutionCandidate {
     name: String,
     plan_id: String,
     nodes: Vec<String>,
+    benchmark_host: String,
     result_dir: String,
     executable_path: String,
     compile_ready: bool,
@@ -466,10 +467,17 @@ fn run() -> Result<(), String> {
                         }
                     };
 
+                let benchmark_host = plan
+                    .nodes
+                    .first()
+                    .cloned()
+                    .ok_or_else(|| format!("candidate '{name}' has no execution node"))?;
+
                 execution_candidates.push(BenchmarkExecutionCandidate {
                     name: name.to_string(),
                     plan_id: plan.id.clone(),
                     nodes: plan.nodes.clone(),
+                    benchmark_host,
                     result_dir,
                     executable_path,
                     compile_ready,
