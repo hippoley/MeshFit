@@ -3083,6 +3083,70 @@ mod tests {
         ));
     }
 
+    fn attestation_identity(
+        model: &str,
+        memory_mib: u64,
+        driver: &str,
+        ram_mib: u64,
+    ) -> HardwareIdentity {
+        HardwareIdentity {
+            architecture: "x86_64".into(),
+            operating_system: "linux".into(),
+            cpu_model: Some("AMD EPYC".into()),
+            ram_mib: Some(ram_mib),
+            devices: vec![meshfit_core::DeviceIdentity {
+                vendor: "nvidia".into(),
+                model: model.into(),
+                backend: meshfit_core::AcceleratorBackend::Cuda,
+                memory_mib,
+                driver_version: Some(driver.into()),
+            }],
+        }
+    }
+
+    #[test]
+    fn hardware_attestation_allows_driver_drift_but_reports_it() {
+        let expected = attestation_identity("NVIDIA H100 80GB HBM3", 81_559, "580.65", 262_144);
+        let observed = attestation_identity("NVIDIA H100 80GB HBM3", 81_559, "590.01", 260_000);
+
+        let attestation = benchmark_hardware_profile_attestation(&expected, &observed);
+
+        assert!(attestation.matches);
+        assert!(attestation.issues.is_empty());
+        assert!(attestation
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("driver changed")));
+    }
+
+    #[test]
+    fn hardware_attestation_rejects_wrong_accelerator_profile() {
+        let expected = attestation_identity("NVIDIA H100 80GB HBM3", 81_559, "580.65", 262_144);
+        let observed = attestation_identity("NVIDIA RTX 4090", 24_564, "580.65", 262_144);
+
+        let attestation = benchmark_hardware_profile_attestation(&expected, &observed);
+
+        assert!(!attestation.matches);
+        assert!(attestation
+            .issues
+            .iter()
+            .any(|issue| issue.contains("accelerator[0] mismatch")));
+    }
+
+    #[test]
+    fn hardware_attestation_rejects_material_ram_shortfall() {
+        let expected = attestation_identity("NVIDIA H100 80GB HBM3", 81_559, "580.65", 262_144);
+        let observed = attestation_identity("NVIDIA H100 80GB HBM3", 81_559, "580.65", 200_000);
+
+        let attestation = benchmark_hardware_profile_attestation(&expected, &observed);
+
+        assert!(!attestation.matches);
+        assert!(attestation
+            .issues
+            .iter()
+            .any(|issue| issue.contains("RAM capacity mismatch")));
+    }
+
     #[test]
     fn benchmark_auto_defaults_to_at_least_ten_samples() {
         assert_eq!(default_measured_requests(1), 10);
