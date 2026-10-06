@@ -1,0 +1,153 @@
+benchmark_id: kit-calibration-synthetic-run-01
+request:
+  executable:
+    source_plan_id: node-b:gpu0:vllm:SingleHost
+    model_id: qwen-72b-class-q4
+    model_source: examples/model-artifact-demo.bin
+    placement: single_host
+    context_tokens: 32768
+    runtime: vllm
+    scope: LocalProcess
+    program: vllm
+    args:
+      - serve
+      - examples/model-artifact-demo.bin
+      - --max-model-len
+      - "32768"
+      - --tensor-parallel-size
+      - "1"
+      - --host
+      - 127.0.0.1
+      - --port
+      - "18181"
+      - --served-model-name
+      - qwen-72b-class-q4
+    identity_flags:
+      - --max-model-len
+      - "32768"
+      - --tensor-parallel-size
+      - "1"
+      - CUDA_VISIBLE_DEVICES=0
+    env:
+      - [CUDA_VISIBLE_DEVICES, "0"]
+    working_node: node-b
+    service:
+      scheme: http
+      host: 127.0.0.1
+      port: 18181
+      health_path: /health
+      chat_completions_path: /v1/chat/completions
+    assumptions:
+      - synthetic fixture only
+  identity:
+    hardware:
+      architecture: x86_64
+      operating_system: linux
+      cpu_model: Intel Xeon
+      ram_mib: 262144
+      devices:
+        - vendor: nvidia
+          model: NVIDIA H100 80GB HBM3
+          backend: cuda
+          memory_mib: 81920
+          driver_version: "580.65"
+    model:
+      model_id: qwen-72b-class-q4
+      format: gguf
+      quantization: q4_k_m
+      artifact_sha256: 1700d6ad0d90692a1ee5680de2e002e9c32d7923afa67834f4a04a85d604a034
+      revision: test
+    runtime:
+      runtime: vllm
+      version: synthetic
+      build_commit: null
+      flags:
+        - --max-model-len
+        - "32768"
+        - --tensor-parallel-size
+        - "1"
+        - CUDA_VISIBLE_DEVICES=0
+    topology:
+      links: []
+    placement: single_host
+  context_tokens: 32768
+  concurrency: 20
+  config:
+    prompt: synthetic calibration only
+    max_tokens: 64
+    warmup_requests: 1
+    measured_requests: 20
+    request_timeout_ms: 120000
+    startup_timeout_ms: 300000
+measurements:
+  - ttft_ms: 100
+    total_ms: 1000
+    output_tokens: 16
+  - ttft_ms: 101
+    total_ms: 1001
+    output_tokens: 16
+  - ttft_ms: 102
+    total_ms: 1002
+    output_tokens: 16
+  - ttft_ms: 103
+    total_ms: 1003
+    output_tokens: 16
+  - ttft_ms: 104
+    total_ms: 1004
+    output_tokens: 16
+  - ttft_ms: 105
+    total_ms: 1005
+    output_tokens: 16
+  - ttft_ms: 106
+    total_ms: 1006
+    output_tokens: 16
+  - ttft_ms: 107
+    total_ms: 1007
+    output_tokens: 16
+  - ttft_ms: 108
+    total_ms: 1008
+    output_tokens: 16
+  - ttft_ms: 109
+    total_ms: 1009
+    output_tokens: 16
+  - ttft_ms: 110
+    total_ms: 1010
+    output_tokens: 16
+  - ttft_ms: 111
+    total_ms: 1011
+    output_tokens: 16
+  - ttft_ms: 112
+    total_ms: 1012
+    output_tokens: 16
+  - ttft_ms: 113
+    total_ms: 1013
+    output_tokens: 16
+  - ttft_ms: 114
+    total_ms: 1014
+    output_tokens: 16
+  - ttft_ms: 115
+    total_ms: 1015
+    output_tokens: 16
+  - ttft_ms: 116
+    total_ms: 1016
+    output_tokens: 16
+  - ttft_ms: 117
+    total_ms: 1017
+    output_tokens: 16
+  - ttft_ms: 118
+    total_ms: 1018
+    output_tokens: 16
+  - ttft_ms: 119
+    total_ms: 1019
+    output_tokens: 16
+waves:
+  - request_count: 20
+    total_ms: 1500
+    output_tokens: 320
+    peak_vram_gb: 70.0
+    peak_ram_gb: 12.0
+provenance:
+  source: synthetic-kit-calibration-not-real-benchmark
+  source_url: null
+  commit: synthetic
+  captured_at: null
