@@ -43,7 +43,7 @@ jobs:
       - run: "! cargo run -p meshfit -- benchmark-kit /tmp/meshfit-snapshot-manifest.yaml examples/placement-target.yaml node-b:gpu0:vllm:SingleHost Qwen/Qwen3-32B /tmp/meshfit-model-identity.yaml --listen-port 0"
       - run: cargo run -p meshfit -- benchmark-kit /tmp/meshfit-snapshot-manifest.yaml examples/placement-target.yaml node-b:gpu0:vllm:SingleHost Qwen/Qwen3-32B /tmp/meshfit-model-identity.yaml --listen-port 18181 --write-dir /tmp/meshfit-benchmark-001-materialized
       - run: test -f /tmp/meshfit-benchmark-001-materialized/kit.yaml
-      - run: grep -q 'listen_port: 18181' /tmp/meshfit-benchmark-001-materialized/kit.yaml
+      - run: 'grep -q "listen_port: 18181" /tmp/meshfit-benchmark-001-materialized/kit.yaml'
       - run: grep -q 'Listen port.*18181' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
       - run: test -f /tmp/meshfit-benchmark-001-materialized/comparison.yaml
       - run: test -f /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
@@ -62,7 +62,7 @@ jobs:
       - run: cargo run -p meshfit -- benchmark-preflight /tmp/meshfit-benchmark-001-materialized meshfit --host node-b --model-path examples/model-artifact-demo.bin > /tmp/meshfit-model-override-preflight.yaml
       - run: grep -q 'local_override_verified' /tmp/meshfit-model-override-preflight.yaml
       - run: grep -q 'model_artifact_verified' /tmp/meshfit-model-override-preflight.yaml
-      - run: grep -q 'listen_port: 18181' /tmp/meshfit-model-override-preflight.yaml
+      - run: 'grep -q "listen_port: 18181" /tmp/meshfit-model-override-preflight.yaml'
       - run: |
           python3 -m http.server 18181 >/tmp/meshfit-port-18181.log 2>&1 &
           pid=$!
@@ -78,11 +78,11 @@ jobs:
       - run: grep -q 'candidate' /tmp/meshfit-benchmark-run-one.yaml
       - run: grep -q 'run_number' /tmp/meshfit-benchmark-run-one.yaml
       - run: grep -q 'model_artifact_verified' /tmp/meshfit-benchmark-run-one.yaml
-      - run: grep -q 'listen_port: 18181' /tmp/meshfit-benchmark-run-one.yaml
+      - run: 'grep -q "listen_port: 18181" /tmp/meshfit-benchmark-run-one.yaml'
       - run: mkdir -p /tmp/meshfit-benchmark-001-materialized/artifacts/meshfit
       - run: cargo run -p meshfit -- compile-snapshot /tmp/meshfit-benchmark-001-materialized/inputs/snapshot.yaml /tmp/meshfit-benchmark-001-materialized/inputs/target.yaml node-b:gpu0:vllm:SingleHost examples/model-artifact-demo.bin --listen-port 18182 > /tmp/meshfit-benchmark-001-materialized/artifacts/meshfit/executable.yaml
       - run: cargo run -p meshfit -- benchmark-run-one /tmp/meshfit-benchmark-001-materialized meshfit 1 --host node-b --model-path examples/model-artifact-demo.bin --dry-run > /tmp/meshfit-benchmark-run-one-stale-port.yaml
-      - run: grep -q 'compile_required: true' /tmp/meshfit-benchmark-run-one-stale-port.yaml
+      - run: 'grep -q "compile_required: true" /tmp/meshfit-benchmark-run-one-stale-port.yaml'
       - run: "! cargo run -p meshfit -- benchmark-run-one /tmp/meshfit-benchmark-001-materialized meshfit 0 --host node-b --dry-run"
       - run: '! cargo run -p meshfit -- benchmark-run-one /tmp/meshfit-benchmark-001-materialized meshfit 1 --host node-b'
       - run: cargo run -p meshfit -- benchmark-run-candidate /tmp/meshfit-benchmark-001-materialized meshfit --host node-b --model-path examples/model-artifact-demo.bin --dry-run > /tmp/meshfit-benchmark-run-candidate.yaml
@@ -90,11 +90,11 @@ jobs:
       - run: 'grep -q "preflight_ready: false" /tmp/meshfit-benchmark-run-candidate.yaml'
       - run: 'grep -q "pending_runs:" /tmp/meshfit-benchmark-run-candidate.yaml'
       - run: grep -q 'model_artifact_verified' /tmp/meshfit-benchmark-run-candidate.yaml
-      - run: grep -q 'listen_port: 18181' /tmp/meshfit-benchmark-run-candidate.yaml
+      - run: 'grep -q "listen_port: 18181" /tmp/meshfit-benchmark-run-candidate.yaml'
       - run: cargo run -p meshfit -- benchmark-run-host /tmp/meshfit-benchmark-001-materialized --host node-b --model-path examples/model-artifact-demo.bin --dry-run > /tmp/meshfit-benchmark-run-host.yaml
       - run: grep -q 'host' /tmp/meshfit-benchmark-run-host.yaml
       - run: grep -q 'model_artifact_verified' /tmp/meshfit-benchmark-run-host.yaml
-      - run: grep -q 'listen_port: 18181' /tmp/meshfit-benchmark-run-host.yaml
+      - run: 'grep -q "listen_port: 18181" /tmp/meshfit-benchmark-run-host.yaml'
       - run: MESHFIT_NODE_ID=node-b cargo run -p meshfit -- benchmark-run-host /tmp/meshfit-benchmark-001-materialized --current-host --model-path examples/model-artifact-demo.bin --dry-run > /tmp/meshfit-benchmark-run-current-host.yaml
       - run: grep -q 'node-b' /tmp/meshfit-benchmark-run-current-host.yaml
       - run: "! cargo run -p meshfit -- benchmark-run-host /tmp/meshfit-benchmark-001-materialized --host node-z --dry-run"
