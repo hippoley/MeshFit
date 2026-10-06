@@ -2942,10 +2942,10 @@ fn select_benchmark_plans(
     let single_best = report
         .feasible
         .iter()
-        .filter(|plan| plan.nodes.len() == 1)
+        .filter(|plan| plan.placement == PlacementKind::SingleHost)
         .max_by(|left, right| baseline_plan_order(left, right))
         .cloned()
-        .ok_or_else(|| "no feasible single-node baseline plan".to_string())?;
+        .ok_or_else(|| "no feasible single-device baseline plan".to_string())?;
 
     let max_compute = report
         .feasible
@@ -2957,7 +2957,7 @@ fn select_benchmark_plans(
     let selected = vec![
         (
             "single-best-node",
-            "highest relative compute among feasible single-node plans",
+            "highest relative compute among feasible single-device plans",
             single_best,
         ),
         (
