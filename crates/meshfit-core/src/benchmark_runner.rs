@@ -10,7 +10,9 @@ use serde_json::{json, Value};
 
 use crate::{
     artifact::inspect_model_artifact,
-    benchmark::{BenchmarkBundle, BenchmarkConfig, BenchmarkRequestIR, RequestMeasurement},
+    benchmark::{
+        BenchmarkBundle, BenchmarkConfig, BenchmarkRequestIR, RequestMeasurement, WaveMeasurement,
+    },
     compiler::{ExecutablePlanIR, ExecutionScope},
     discovery::{discover_local, topology_identity_from_discovery, LocalDiscovery},
     evidence::BenchmarkProvenance,
@@ -286,13 +288,16 @@ fn run_against_child(
     let runtime_pid = child.id();
     let wave_count = request.config.measured_requests / request.concurrency;
     let mut measurements = Vec::new();
+    let mut waves = Vec::new();
 
     for _ in 0..wave_count {
-        measurements.extend(run_concurrent_wave(
+        let (wave_measurements, wave) = run_concurrent_wave(
             request,
             runtime_pid,
             request.concurrency as usize,
-        )?);
+        )?;
+        measurements.extend(wave_measurements);
+        waves.push(wave);
     }
 
     let unix_seconds = SystemTime::now()
@@ -310,6 +315,7 @@ fn run_against_child(
         benchmark_id,
         request: request.clone(),
         measurements,
+        waves,
         provenance: BenchmarkProvenance {
             source: "meshfit-local-runner".into(),
             source_url: None,
@@ -374,7 +380,7 @@ fn run_concurrent_wave(
     request: &BenchmarkRequestIR,
     runtime_pid: u32,
     concurrency: usize,
-) -> Result<Vec<RequestMeasurement>, String> {
+) -> Result<(Vec<RequestMeasurement>, WaveMeasurement), String> {
     let barrier = Arc::new(Barrier::new(concurrency + 1));
     let mut handles = Vec::with_capacity(concurrency);
 
@@ -388,6 +394,7 @@ fn run_concurrent_wave(
     }
 
     let sampler = ResourceSampler::start(runtime_pid, Duration::from_millis(50));
+    let wave_start = Instant::now();
     barrier.wait();
 
     let mut measurements = Vec::with_capacity(concurrency);
@@ -415,7 +422,21 @@ fn run_concurrent_wave(
         measurement.peak_ram_gb = peaks.peak_ram_gb;
     }
 
-    Ok(measurements)
+    let output_tokens = measurements
+        .iter()
+        .map(|measurement| measurement.output_tokens)
+        .collect::<Option<Vec<_>>>()
+        .map(|tokens| tokens.into_iter().sum());
+
+    let wave = WaveMeasurement {
+        request_count: concurrency as u32,
+        total_ms: wave_start.elapsed().as_secs_f64() * 1000.0,
+        output_tokens,
+        peak_vram_gb: peaks.peak_vram_gb,
+        peak_ram_gb: peaks.peak_ram_gb,
+    };
+
+    Ok((measurements, wave))
 }
 
 fn run_streaming_request(request: &BenchmarkRequestIR) -> Result<RequestMeasurement, String> {
