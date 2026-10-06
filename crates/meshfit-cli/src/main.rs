@@ -7,8 +7,9 @@ use meshfit_core::{
     prepare_local_benchmark_request, probe_peer, run_local_benchmark, solve, BenchmarkBundle,
     BenchmarkCandidate, BenchmarkComparisonRequest, BenchmarkConfig, BenchmarkRequestIR,
     ComparisonObjective, CompileRequest, EvidenceStore, ExecutablePlanIR, InfrastructureSnapshot,
-    LinkKind, LocalDiscovery, ModelArtifactIdentity, PeerProbeResult, PlacementKind, PlacementReport,
-    PlacementTargetIR, PlanIR, Prediction, PredictionQuery, ScenarioIR, SnapshotManifest,
+    LinkKind, LocalDiscovery, ModelArtifactIdentity, PeerProbeResult, PlacementKind,
+    PlacementReport, PlacementTargetIR, PlanIR, Prediction, PredictionQuery, ScenarioIR,
+    SnapshotManifest,
 };
 
 #[derive(Debug, Deserialize)]
@@ -248,7 +249,9 @@ fn run() -> Result<(), String> {
                 "usage: meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id>"
                     .to_string()
             })?;
-            let target_path = args.get(3).ok_or_else(|| "missing target.yaml".to_string())?;
+            let target_path = args
+                .get(3)
+                .ok_or_else(|| "missing target.yaml".to_string())?;
             let meshfit_plan_id = args
                 .get(4)
                 .ok_or_else(|| "missing meshfit-plan-id".to_string())?;
