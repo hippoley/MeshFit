@@ -77,6 +77,12 @@ pub fn discover_local() -> LocalDiscovery {
         Err(reason) => warnings.push(reason),
     }
 
+    match discover_apple_silicon_accelerator(&operating_system, &architecture) {
+        Ok(Some(device)) => discovered.push(device),
+        Ok(None) => {}
+        Err(reason) => warnings.push(reason),
+    }
+
     let local_fabric = match query_nvidia_topology() {
         Ok(output) => parse_nvidia_topo_matrix(&output, &node_id),
         Err(reason) => {
@@ -539,10 +545,112 @@ fn topology_relation_kind(relation: &str) -> Option<LinkKind> {
     }
 }
 
+fn query_sysctl_value(key: &str) -> Result<String, String> {
+    let output = Command::new("sysctl")
+        .args(["-n", key])
+        .output()
+        .map_err(|error| format!("sysctl {key} unavailable: {error}"))?;
+
+    if !output.status.success() {
+        return Err(format!("sysctl {key} failed with status {}", output.status));
+    }
+
+    String::from_utf8(output.stdout)
+        .map(|value| value.trim().to_string())
+        .map_err(|error| format!("sysctl {key} output is not UTF-8: {error}"))
+}
+
+fn query_vm_stat() -> Result<String, String> {
+    let output = Command::new("vm_stat")
+        .output()
+        .map_err(|error| format!("vm_stat unavailable: {error}"))?;
+
+    if !output.status.success() {
+        return Err(format!("vm_stat failed with status {}", output.status));
+    }
+
+    String::from_utf8(output.stdout)
+        .map_err(|error| format!("vm_stat output is not UTF-8: {error}"))
+}
+
+pub fn parse_byte_count_mib(raw: &str) -> Option<u64> {
+    let bytes = raw.trim().parse::<u64>().ok()?;
+    Some(bytes / (1024 * 1024))
+}
+
+pub fn parse_vm_stat_available_mib(raw: &str) -> Option<u64> {
+    let page_size = raw
+        .lines()
+        .next()?
+        .split("page size of ")
+        .nth(1)?
+        .split_whitespace()
+        .next()?
+        .parse::<u64>()
+        .ok()?;
+
+    let mut pages = 0_u64;
+    for label in ["Pages free", "Pages inactive", "Pages speculative"] {
+        let line = raw
+            .lines()
+            .find(|line| line.trim_start().starts_with(label))?;
+        let count = line
+            .split(':')
+            .nth(1)?
+            .trim()
+            .trim_end_matches('.')
+            .parse::<u64>()
+            .ok()?;
+        pages = pages.saturating_add(count);
+    }
+
+    Some(pages.saturating_mul(page_size) / (1024 * 1024))
+}
+
+fn discover_apple_silicon_accelerator(
+    operating_system: &str,
+    architecture: &str,
+) -> Result<Option<DiscoveredAccelerator>, String> {
+    if operating_system != "macos" || architecture != "aarch64" {
+        return Ok(None);
+    }
+
+    let memory_mib = parse_byte_count_mib(&query_sysctl_value("hw.memsize")?)
+        .filter(|memory| *memory > 0)
+        .ok_or_else(|| "Apple unified memory size is unavailable".to_string())?;
+
+    let chip = query_sysctl_value("machdep.cpu.brand_string")
+        .ok()
+        .filter(|value| !value.trim().is_empty())
+        .unwrap_or_else(|| "Apple Silicon".to_string());
+    let vm_stat = query_vm_stat()?;
+    let free_memory_mib = parse_vm_stat_available_mib(&vm_stat)
+        .map(|available| available.min(memory_mib))
+        .ok_or_else(|| {
+            "Apple unified-memory availability could not be derived from vm_stat".to_string()
+        })?;
+
+    Ok(Some(DiscoveredAccelerator {
+        identity: DeviceIdentity {
+            vendor: "apple".into(),
+            model: format!("{chip} GPU"),
+            backend: AcceleratorBackend::Metal,
+            memory_mib,
+            driver_version: None,
+        },
+        free_memory_mib: Some(free_memory_mib),
+    }))
+}
+
 fn discover_ram_mib() -> Option<u64> {
     if env::consts::OS == "linux" {
         let raw = fs::read_to_string("/proc/meminfo").ok()?;
         return parse_linux_meminfo_mib(&raw);
+    }
+
+    if env::consts::OS == "macos" {
+        let raw = query_sysctl_value("hw.memsize").ok()?;
+        return parse_byte_count_mib(&raw);
     }
 
     None
@@ -564,6 +672,10 @@ fn discover_cpu_model() -> Option<String> {
                 }
             }
         }
+    }
+
+    if env::consts::OS == "macos" {
+        return query_sysctl_value("machdep.cpu.brand_string").ok();
     }
 
     None
@@ -763,6 +875,23 @@ mod tests {
         assert_eq!(topology.links.len(), 1);
         assert_eq!(topology.links[0].from, "accelerator:node-a/gpu0");
         assert_eq!(topology.links[0].bandwidth_mbps, None);
+    }
+
+    #[test]
+    fn parses_macos_hw_memsize_bytes_to_mib() {
+        assert_eq!(parse_byte_count_mib("34359738368\n"), Some(32768));
+    }
+
+    #[test]
+    fn parses_macos_vm_stat_available_shared_memory() {
+        let raw = "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free:                               1000.\nPages active:                             5000.\nPages inactive:                           2000.\nPages speculative:                         500.\nPages wired down:                         3000.\n";
+        assert_eq!(parse_vm_stat_available_mib(raw), Some(54));
+    }
+
+    #[test]
+    fn vm_stat_requires_all_conservative_available_page_classes() {
+        let raw = "Mach Virtual Memory Statistics: (page size of 16384 bytes)\nPages free: 1000.\nPages inactive: 2000.\n";
+        assert_eq!(parse_vm_stat_available_mib(raw), None);
     }
 
     #[test]
