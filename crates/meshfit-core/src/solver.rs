@@ -706,6 +706,38 @@ mod tests {
     }
 
     #[test]
+    fn workload_aware_kv_can_change_single_gpu_feasibility() {
+        let mut low = scenario();
+        low.model.weight_memory_gb = 42.0;
+        low.model.kv_cache_gb = 0.0;
+        low.model.kv_cache_model = Some(KvCacheModelIR::BytesPerToken {
+            bytes_per_token: 500_000,
+        });
+        low.workload.context_tokens = 4_096;
+        low.workload.concurrency = 1;
+        low.workload.max_active_sequences = Some(1);
+
+        let low_report = solve(&low);
+        assert!(low_report.feasible.iter().any(|plan| {
+            plan.runtime == "vllm"
+                && plan.placement == PlacementKind::SingleHost
+                && plan.nodes == vec!["remote".to_string()]
+        }));
+
+        let mut high = low.clone();
+        high.workload.context_tokens = 32_768;
+        high.workload.concurrency = 4;
+        high.workload.max_active_sequences = Some(4);
+
+        let high_report = solve(&high);
+        assert!(!high_report.feasible.iter().any(|plan| {
+            plan.runtime == "vllm"
+                && plan.placement == PlacementKind::SingleHost
+                && plan.nodes == vec!["remote".to_string()]
+        }));
+    }
+
+    #[test]
     fn slow_wan_pair_is_rejected_for_tp() {
         let report = solve(&scenario());
         assert!(report
