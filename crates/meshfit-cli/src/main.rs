@@ -835,6 +835,10 @@ fn run() -> Result<(), String> {
                     ));
                 }
 
+                let execution_marker = kit_dir.join(".meshfit-benchmark");
+                let _execution_lock =
+                    acquire_benchmark_file_lock(&execution_marker, "benchmark candidate execution")?;
+
                 for run_number in &plan.pending_runs {
                     execute_benchmark_run_one(
                         kit_dir,
@@ -842,6 +846,7 @@ fn run() -> Result<(), String> {
                         *run_number,
                         declared_host,
                         overwrite,
+                        false,
                     )?;
                 }
 
@@ -1298,6 +1303,7 @@ fn execute_benchmark_run_one(
     run_number: usize,
     declared_host: Option<&str>,
     overwrite: bool,
+    acquire_execution_lock: bool,
 ) -> Result<PathBuf, String> {
     let kit = load_benchmark_execution_kit(kit_dir)?;
     let candidate = kit
@@ -1343,8 +1349,15 @@ fn execute_benchmark_run_one(
 
     let executable_path = kit_dir.join(&candidate.executable_path);
     let bundle_path = kit_dir.join(&comparison.bundles[run_number - 1]);
-    let execution_marker = kit_dir.join(".meshfit-benchmark");
-    let _execution_lock = acquire_benchmark_file_lock(&execution_marker, "benchmark execution")?;
+    let _execution_lock = if acquire_execution_lock {
+        let execution_marker = kit_dir.join(".meshfit-benchmark");
+        Some(acquire_benchmark_file_lock(
+            &execution_marker,
+            "benchmark execution",
+        )?)
+    } else {
+        None
+    };
 
     if bundle_path.exists() && !overwrite {
         return Err(format!(
