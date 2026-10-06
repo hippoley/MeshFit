@@ -216,6 +216,7 @@ struct BenchmarkRunOnePlan {
     model_path: String,
     model_path_overridden: bool,
     model_artifact_verified: bool,
+    listen_port: u16,
     run_number: usize,
     executable_path: String,
     bundle_path: String,
@@ -233,6 +234,7 @@ struct BenchmarkRunCandidatePlan {
     model_path: String,
     model_path_overridden: bool,
     model_artifact_verified: bool,
+    listen_port: u16,
     total_runs: usize,
     existing_valid_runs: Vec<usize>,
     pending_runs: Vec<usize>,
@@ -247,6 +249,7 @@ struct BenchmarkRunHostPlan {
     ready: bool,
     issues: Vec<String>,
     model_path_override: Option<String>,
+    listen_port: u16,
     resume: bool,
     overwrite: bool,
     candidates: Vec<BenchmarkRunCandidatePlan>,
@@ -276,6 +279,8 @@ struct BenchmarkPreflight {
     model_path_status: String,
     model_path_overridden: bool,
     model_artifact_verified: bool,
+    listen_port: u16,
+    listen_port_available: bool,
     existing_bundles: Vec<String>,
     issues: Vec<String>,
     warnings: Vec<String>,
@@ -1191,8 +1196,12 @@ fn finalize_benchmark_kit(kit_dir: &Path) -> Result<BenchmarkComparisonReport, S
     load_benchmark_comparison_report(&kit_dir.join("comparison.yaml"))
 }
 
-fn benchmark_execution_lock_target() -> PathBuf {
-    env::temp_dir().join(format!("meshfit-benchmark-port-{BENCHMARK_LISTEN_PORT}"))
+fn benchmark_execution_lock_target(listen_port: u16) -> PathBuf {
+    env::temp_dir().join(format!("meshfit-benchmark-port-{listen_port}"))
+}
+
+fn benchmark_listen_port_available(listen_port: u16) -> bool {
+    std::net::TcpListener::bind(("0.0.0.0", listen_port)).is_ok()
 }
 
 fn acquire_benchmark_file_lock(
@@ -1330,7 +1339,7 @@ fn inspect_benchmark_run_one_plan(
     )?;
     let executable_path = kit_dir.join(&candidate.executable_path);
     let bundle_path = kit_dir.join(&comparison.bundles[run_number - 1]);
-    let compile_required = !executable_matches_model_path(&executable_path, &preflight.model_path)?;
+    let compile_required = !executable_matches_contract(&executable_path, &preflight.model_path, kit.listen_port)?;
 
     Ok(BenchmarkRunOnePlan {
         benchmark_id: kit.benchmark_id,
@@ -1346,6 +1355,7 @@ fn inspect_benchmark_run_one_plan(
         model_path: preflight.model_path,
         model_path_overridden: preflight.model_path_overridden,
         model_artifact_verified: preflight.model_artifact_verified,
+        listen_port: preflight.listen_port,
         run_number,
         executable_path: executable_path.display().to_string(),
         bundle_path: bundle_path.display().to_string(),
@@ -1443,6 +1453,7 @@ fn plan_benchmark_candidate_runs(
         model_path: preflight.model_path,
         model_path_overridden: preflight.model_path_overridden,
         model_artifact_verified: preflight.model_artifact_verified,
+        listen_port: preflight.listen_port,
         total_runs: comparison.bundles.len(),
         existing_valid_runs,
         pending_runs,
@@ -1511,6 +1522,7 @@ fn plan_benchmark_host_runs(
         ready: issues.is_empty(),
         issues,
         model_path_override: model_path_override.map(str::to_string),
+        listen_port: kit.listen_port,
         resume,
         overwrite,
         candidates,
@@ -1604,7 +1616,7 @@ fn execute_benchmark_run_one(
         .ok_or_else(|| format!("unknown benchmark candidate '{candidate_name}'"))?;
     let bundle_path = PathBuf::from(&plan.bundle_path);
     let executable_path = PathBuf::from(&plan.executable_path);
-    let execution_marker = benchmark_execution_lock_target();
+    let execution_marker = benchmark_execution_lock_target(kit.listen_port);
     let _execution_lock = acquire_benchmark_file_lock(&execution_marker, "benchmark execution")?;
 
     if bundle_path.exists() && !overwrite {
@@ -1667,7 +1679,11 @@ fn load_benchmark_execution_kit(kit_dir: &Path) -> Result<BenchmarkExecutionKit,
     serde_yaml::from_str(&raw).map_err(|e| format!("parse {}: {e}", kit_path.display()))
 }
 
-fn executable_matches_model_path(executable_path: &Path, model_path: &str) -> Result<bool, String> {
+fn executable_matches_contract(
+    executable_path: &Path,
+    model_path: &str,
+    listen_port: u16,
+) -> Result<bool, String> {
     if !executable_path.is_file() {
         return Ok(false);
     }
@@ -1675,7 +1691,7 @@ fn executable_matches_model_path(executable_path: &Path, model_path: &str) -> Re
         .map_err(|e| format!("read {}: {e}", executable_path.display()))?;
     let executable: ExecutablePlanIR = serde_yaml::from_str(&raw)
         .map_err(|e| format!("parse {}: {e}", executable_path.display()))?;
-    Ok(executable.model_source == model_path)
+    Ok(executable.model_source == model_path && executable.service.port == listen_port)
 }
 
 fn inspect_model_path_for_host(
@@ -1860,7 +1876,7 @@ fn ensure_candidate_executable(
     executable_path: &Path,
     model_path: &str,
 ) -> Result<(), String> {
-    if executable_matches_model_path(executable_path, model_path)? {
+    if executable_matches_contract(executable_path, model_path, kit.listen_port)? {
         return Ok(());
     }
 
@@ -1868,7 +1884,7 @@ fn ensure_candidate_executable(
         fs::create_dir_all(parent).map_err(|e| format!("create {}: {e}", parent.display()))?;
     }
     let _compile_lock = acquire_benchmark_compile_lock(executable_path)?;
-    if executable_matches_model_path(executable_path, model_path)? {
+    if executable_matches_contract(executable_path, model_path, kit.listen_port)? {
         return Ok(());
     }
 
@@ -1905,7 +1921,7 @@ fn ensure_candidate_executable(
         model_path: model_path.to_string(),
         model_id: target.model.id.clone(),
         context_tokens: target.workload.context_tokens,
-        listen_port: BENCHMARK_LISTEN_PORT,
+        listen_port: kit.listen_port,
         gpu_layers: None,
         extra_args: vec![],
     };
@@ -2020,7 +2036,8 @@ fn inspect_benchmark_preflight(
         .cloned()
         .collect::<Vec<_>>();
 
-    let issues = benchmark_preflight_issues(
+    let listen_port_available = benchmark_listen_port_available(kit.listen_port);
+    let mut issues = benchmark_preflight_issues(
         kit.ready,
         candidate,
         &observed_host,
@@ -2029,6 +2046,12 @@ fn inspect_benchmark_preflight(
         existing_bundles.len(),
         allow_existing,
     );
+    if !listen_port_available {
+        issues.push(format!(
+            "benchmark listen port {} is not currently available on this host",
+            kit.listen_port
+        ));
+    }
     let mut warnings = model_check.warnings.clone();
     warnings.extend(local.warnings);
     warnings.extend(runtime_discovery.warnings);
@@ -2046,6 +2069,8 @@ fn inspect_benchmark_preflight(
         model_path_status: model_check.status,
         model_path_overridden: model_check.overridden,
         model_artifact_verified: model_check.verified,
+        listen_port: kit.listen_port,
+        listen_port_available,
         existing_bundles,
         issues,
         warnings,
@@ -2368,11 +2393,12 @@ fn materialize_benchmark_kit(
 
         if candidate.compile_ready {
             candidate.compile_command = Some(format!(
-                "meshfit compile-snapshot {} {} {} {} > {}",
+                "meshfit compile-snapshot {} {} {} {} --listen-port {} > {}",
                 shell_quote(&localized.snapshot),
                 shell_quote(&localized.target),
                 shell_quote(&candidate.plan_id),
                 shell_quote(&localized.model_path),
+                localized.listen_port,
                 shell_quote(&candidate.executable_path),
             ));
             candidate.run_commands = (1..=localized.runs_per_candidate)
@@ -2433,8 +2459,12 @@ fn render_benchmark_runbook(kit: &BenchmarkExecutionKit) -> String {
     let mut out = String::new();
     out.push_str("# MeshFit Benchmark 001 Runbook\n\n");
     out.push_str(&format!(
-        "**Ready:** {}  \n**Concurrency:** {}  \n**Measured requests/run:** {}  \n**Runs/candidate:** {}\n\n",
-        kit.ready, kit.concurrency, kit.measured_requests_per_run, kit.runs_per_candidate
+        "**Ready:** {}  \n**Concurrency:** {}  \n**Measured requests/run:** {}  \n**Runs/candidate:** {}  \n**Listen port:** {}\n\n",
+        kit.ready,
+        kit.concurrency,
+        kit.measured_requests_per_run,
+        kit.runs_per_candidate,
+        kit.listen_port
     ));
     out.push_str(
         "Run commands from this directory. Execute each candidate on its listed benchmark_host.\n\n",
@@ -2712,6 +2742,7 @@ mod tests {
             concurrency: 1,
             measured_requests_per_run: 10,
             runs_per_candidate: 1,
+            listen_port: BENCHMARK_LISTEN_PORT,
             candidates: vec![BenchmarkExecutionCandidate {
                 name: "meshfit".into(),
                 plan_id: "plan-test".into(),
