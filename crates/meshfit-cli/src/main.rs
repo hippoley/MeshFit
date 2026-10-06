@@ -3277,9 +3277,27 @@ fn render_benchmark_runbook(kit: &BenchmarkExecutionKit) -> String {
         out.push_str("# Inspect the exact execution plan.\n");
         out.push_str("meshfit benchmark-run-host . --current-host --resume --dry-run\n\n");
         out.push_str("# Execute every pending candidate/run assigned to this host.\n");
-        out.push_str("meshfit benchmark-run-host . --current-host --resume\n");
+        out.push_str("meshfit benchmark-run-host . --current-host --resume\n\n");
+        out.push_str("# If this host does not write into the coordinator's shared kit, export only its validated evidence slots.\n");
+        out.push_str(&format!(
+            "meshfit benchmark-export-host . --current-host > {}\n",
+            shell_quote(&format!("{host}-evidence.yaml"))
+        ));
         out.push_str("```\n\n");
     }
+
+    out.push_str("## Bounded evidence transfer\n\n");
+    out.push_str(
+        "Use this only when benchmark hosts do not share the coordinator's writable kit directory. Each transfer package is limited to the exact result slots assigned to one host, carries SHA-256 for every bundle, and is fully revalidated against the coordinator's local kit before any write.\n\n",
+    );
+    out.push_str("On the coordinator, after copying each host evidence YAML into this directory:\n\n```bash\n");
+    for host in by_host.keys() {
+        out.push_str(&format!(
+            "meshfit benchmark-import-host . {}\n",
+            shell_quote(&format!("{host}-evidence.yaml"))
+        ));
+    }
+    out.push_str("```\n\n");
 
     out.push_str("## Recovery and debugging\n\n");
     out.push_str(
