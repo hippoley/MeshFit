@@ -45,3 +45,42 @@ The first version supports only `single_host` and `tensor_parallel`. CPU offload
 The files under `examples/` are synthetic fixtures used only to validate the calibration contract. They are not MeshFit performance evidence.
 
 Real correction factors must come from repeated Benchmark 001 bundles collected on actual hardware.
+
+
+## Benchmark 001 kit integration
+
+For a materialized Benchmark 001 experiment, calibrate one candidate directly from the frozen experiment inputs and collected result slots:
+
+```bash
+meshfit benchmark-calibrate-memory benchmark-001 meshfit
+```
+
+A partial diagnostic is allowed when at least one valid bundle exists. The report makes incompleteness explicit:
+
+```text
+complete
+expected_runs
+calibrated_runs
+missing_bundles
+```
+
+Require every planned repeated run before producing a calibration report with:
+
+```bash
+meshfit benchmark-calibrate-memory benchmark-001 meshfit --require-complete
+```
+
+Kit-level calibration is stricter than the low-level `calibrate-memory` command. Every included bundle must match the frozen experiment on:
+
+- source plan ID and placement,
+- candidate runtime,
+- target model ID,
+- materialized model artifact identity,
+- target context length,
+- benchmark concurrency,
+- frozen benchmark-host hardware identity,
+- and the exact execution fingerprint shared by all repeated calibration runs.
+
+An existing but corrupt, wrong-plan, wrong-workload, wrong-model, wrong-hardware, or mixed-execution bundle is a hard failure. It is never silently treated as a missing run.
+
+This prevents correction factors from mixing observations across experiment generations.
