@@ -114,7 +114,6 @@ struct BenchmarkExecutionCandidate {
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
-#[derive(Debug, Clone, Deserialize, Serialize)]
 struct BenchmarkExecutableFallback {
     plan_id: String,
     placement: PlacementKind,
@@ -850,8 +849,8 @@ fn run() -> Result<(), String> {
                     compile_command,
                     run_commands,
                 ) = match compile_result {
-                        Ok(_) => {
-                            let compile_command = format!(
+                    Ok(_) => {
+                        let compile_command = format!(
                                 "mkdir -p artifacts/{name} {result_dir} && meshfit compile-snapshot {} {} {} {} --listen-port {} > {}",
                                 snapshot_path,
                                 target_path,
@@ -860,7 +859,7 @@ fn run() -> Result<(), String> {
                                 listen_port,
                                 executable_path
                             );
-                            let run_commands = bundles
+                        let run_commands = bundles
                                 .iter()
                                 .map(|bundle| {
                                     format!(
@@ -873,19 +872,19 @@ fn run() -> Result<(), String> {
                                     )
                                 })
                                 .collect::<Vec<_>>();
-                            (
-                                true,
-                                None,
-                                None,
-                                Vec::new(),
-                                Some(compile_command),
-                                run_commands,
-                            )
-                        }
-                        Err(error) => {
-                            let code = error.code.clone();
-                            let message = error.to_string();
-                            let executable_fallbacks = benchmark_executable_fallbacks(
+                        (
+                            true,
+                            None,
+                            None,
+                            Vec::new(),
+                            Some(compile_command),
+                            run_commands,
+                        )
+                    }
+                    Err(error) => {
+                        let code = error.code.clone();
+                        let message = error.to_string();
+                        let executable_fallbacks = benchmark_executable_fallbacks(
                                 &report,
                                 name,
                                 &plan,
@@ -894,21 +893,21 @@ fn run() -> Result<(), String> {
                                 target.workload.context_tokens,
                                 listen_port,
                             );
-                            warnings.push(format!(
+                        warnings.push(format!(
                                 "candidate '{name}' plan '{}' is not compile-ready [{code}]: {message}; {} compiler-ready diagnostic fallback(s) found",
                                 plan.id,
                                 executable_fallbacks.len()
                             ));
-                            (
-                                false,
-                                Some(code),
-                                Some(message),
-                                executable_fallbacks,
-                                None,
-                                Vec::new(),
-                            )
-                        }
-                    };
+                        (
+                            false,
+                            Some(code),
+                            Some(message),
+                            executable_fallbacks,
+                            None,
+                            Vec::new(),
+                        )
+                    }
+                };
 
                 let benchmark_host = plan
                     .nodes
@@ -3265,11 +3264,7 @@ mod tests {
             .any(|issue| issue.contains("RAM capacity mismatch")));
     }
 
-    fn executability_test_plan(
-        id: &str,
-        nodes: &[&str],
-        relative_compute: f64,
-    ) -> PlanIR {
+    fn executability_test_plan(id: &str, nodes: &[&str], relative_compute: f64) -> PlanIR {
         PlanIR {
             id: id.into(),
             placement: if nodes.len() > 1 {
