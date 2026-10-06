@@ -102,9 +102,9 @@ impl BenchmarkComparisonReport {
             );
         }
         out.push_str(
-            "| Candidate | Strategy | Samples | p95 TTFT | Decode | Cost / 1M output tok | Regret |\n",
+            "| Candidate | Strategy | Runs | Samples | p95 TTFT | Decode | Cost / 1M output tok | Regret |\n",
         );
-        out.push_str("|---|---|---:|---:|---:|---:|---:|\n");
+        out.push_str("|---|---|---:|---:|---:|---:|---:|---:|\n");
 
         for candidate in &self.candidates {
             let decode = candidate
@@ -116,9 +116,10 @@ impl BenchmarkComparisonReport {
                 .map(|value| format!("USD {value:.3}"))
                 .unwrap_or_else(|| "n/a".into());
             out.push_str(&format!(
-                "| {} | {} | {} | {:.2} ms | {} | {} | {:.1}% |\n",
+                "| {} | {} | {} | {} | {:.2} ms | {} | {} | {:.1}% |\n",
                 candidate.name,
                 candidate.strategy,
+                candidate.bundle_count,
                 candidate.sample_count,
                 candidate.p95_ttft_ms,
                 decode,
@@ -539,7 +540,7 @@ mod tests {
 
         let markdown = report.to_markdown();
         assert!(markdown.contains("MeshFit placement regret"));
-        assert!(markdown.contains("| meshfit | topology-aware | 20 |"));
+        assert!(markdown.contains("| meshfit | topology-aware | 2 | 20 |"));
         assert!(markdown.contains("Observed oracle: **meshfit**"));
     }
 
