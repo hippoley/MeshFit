@@ -155,7 +155,7 @@ meshfit benchmark-run-one . meshfit 1 --dry-run
 meshfit benchmark-run-one . meshfit 1
 ```
 
-The real execution path reuses `benchmark-preflight`, so a non-ready kit, wrong host, missing runtime, missing explicit local model, out-of-range run number, or accidental bundle overwrite is rejected before evidence is written. If the executable is missing it is compiled from the materialized snapshot/target first. The resulting bundle is validated and atomically renamed into its fixed result slot. A local experiment lock serializes real runs from the same kit on one host, preventing fixed-port conflicts and benchmark interference; result slots and first-time executable compilation are separately locked against concurrent writers.
+The real execution path reuses `benchmark-preflight`, so a non-ready kit, wrong host, missing runtime, missing explicit local model, out-of-range run number, or accidental bundle overwrite is rejected before evidence is written. If the executable is missing it is compiled from the materialized snapshot/target first. The resulting bundle is validated and atomically renamed into its fixed result slot. A host-local execution lock in the operating-system temporary directory is scoped to MeshFit's benchmark runtime port, so real runs using different kit copies on the same machine cannot collide on the fixed port or contaminate each other's measurements. Because the lock is host-local rather than stored inside the kit, separate machines sharing a kit over NFS do not block each other. Result slots and executable compilation remain separately locked against concurrent writers.
 
 During real execution, inspect progress at any time:
 
