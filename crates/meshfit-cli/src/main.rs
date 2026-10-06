@@ -200,8 +200,16 @@ struct BenchmarkProofReceipt {
     valid_bundles: usize,
     evidence_publishable: bool,
     evidence_status: String,
+    inputs: Vec<BenchmarkProofInput>,
     candidates: Vec<BenchmarkProofCandidate>,
     report: BenchmarkComparisonReport,
+}
+
+#[derive(Debug, Serialize)]
+struct BenchmarkProofInput {
+    role: String,
+    path: String,
+    sha256: String,
 }
 
 #[derive(Debug, Serialize)]
@@ -1297,6 +1305,26 @@ fn build_benchmark_proof_receipt(kit_dir: &Path) -> Result<BenchmarkProofReceipt
 
     let kit = load_benchmark_execution_kit(kit_dir)?;
     let report = finalize_benchmark_kit(kit_dir)?;
+
+    let input_specs = [
+        ("kit", "kit.yaml".to_string()),
+        ("comparison", "comparison.yaml".to_string()),
+        ("snapshot", kit.snapshot.clone()),
+        ("target", kit.target.clone()),
+        ("model_identity", kit.model_identity.clone()),
+    ];
+    let mut inputs = Vec::new();
+    for (role, rel) in input_specs {
+        let path = kit_dir.join(&rel);
+        let bytes =
+            fs::read(&path).map_err(|e| format!("read proof input {}: {e}", path.display()))?;
+        inputs.push(BenchmarkProofInput {
+            role: role.to_string(),
+            path: rel,
+            sha256: sha256_hex(&bytes),
+        });
+    }
+
     let mut candidates = Vec::new();
 
     for candidate in &kit.candidates {
@@ -1355,6 +1383,7 @@ fn build_benchmark_proof_receipt(kit_dir: &Path) -> Result<BenchmarkProofReceipt
         valid_bundles: status.valid_bundles,
         evidence_publishable: report.publishable,
         evidence_status: report.evidence_status.clone(),
+        inputs,
         candidates,
         report,
     })
