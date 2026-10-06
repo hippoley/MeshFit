@@ -1793,9 +1793,14 @@ fn plan_benchmark_candidate_runs(
         model_path_override,
         true,
     )?;
-    let expected_hardware =
-        load_expected_benchmark_hardware(kit_dir, &kit, &candidate.benchmark_host)?;
-    let expected_model = load_expected_benchmark_model(kit_dir, &kit)?;
+    let resume_contract = if resume {
+        Some((
+            load_expected_benchmark_hardware(kit_dir, &kit, &candidate.benchmark_host)?,
+            load_expected_benchmark_model(kit_dir, &kit)?,
+        ))
+    } else {
+        None
+    };
 
     let mut existing_valid_runs = Vec::new();
     let mut pending_runs = Vec::new();
@@ -1812,11 +1817,14 @@ fn plan_benchmark_candidate_runs(
             continue;
         }
         if resume {
+            let (expected_hardware, expected_model) = resume_contract
+                .as_ref()
+                .ok_or_else(|| "resume evidence contract is unavailable".to_string())?;
             validate_existing_candidate_bundle(
                 &bundle_path,
                 candidate,
-                &expected_hardware,
-                &expected_model,
+                expected_hardware,
+                expected_model,
                 kit.listen_port,
             )?;
             existing_valid_runs.push(run_number);
