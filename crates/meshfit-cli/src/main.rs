@@ -2857,6 +2857,8 @@ fn materialize_benchmark_kit(
         .map_err(|e| format!("write target input: {e}"))?;
     fs::write(inputs_dir.join("model-identity.yaml"), model_identity_raw)
         .map_err(|e| format!("write model identity input: {e}"))?;
+    fs::write(inputs_dir.join("prompt.txt"), &kit.prompt)
+        .map_err(|e| format!("write benchmark prompt input: {e}"))?;
 
     let mut localized = kit.clone();
     localized.snapshot = "inputs/snapshot.yaml".to_string();
@@ -2888,11 +2890,16 @@ fn materialize_benchmark_kit(
                 .map(|run| {
                     let bundle = format!("{}/run-{run:02}.yaml", candidate.result_dir);
                     format!(
-                        "meshfit benchmark-auto {} {} --concurrency {} --measured-requests {} > {}",
+                        "meshfit benchmark-auto {} {} --concurrency {} --measured-requests {} --prompt-file {} --max-tokens {} --warmup-requests {} --request-timeout-ms {} --startup-timeout-ms {} > {}",
                         shell_quote(&candidate.executable_path),
                         shell_quote(&localized.model_identity),
                         localized.concurrency,
                         localized.measured_requests_per_run,
+                        shell_quote("inputs/prompt.txt"),
+                        localized.max_tokens,
+                        localized.warmup_requests,
+                        localized.request_timeout_ms,
+                        localized.startup_timeout_ms,
                         shell_quote(&bundle),
                     )
                 })
@@ -2958,7 +2965,7 @@ fn render_benchmark_runbook(kit: &BenchmarkExecutionKit) -> String {
         kit.model_path
     ));
     out.push_str(&format!(
-        "**Benchmark prompt bytes:** {}  \n\n",
+        "**Benchmark prompt bytes:** {}  \n**Materialized prompt:** `inputs/prompt.txt`  \n\n",
         kit.prompt.len()
     ));
     out.push_str(
