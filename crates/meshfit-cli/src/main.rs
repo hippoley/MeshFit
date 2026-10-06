@@ -372,18 +372,12 @@ fn benchmark_hardware_profile_attestation(
         u64,
         Option<&str>,
     )| {
-        (
-            left.0,
-            left.1,
-            format!("{:?}", left.2),
-            left.3,
-        )
-            .cmp(&(
-                right.0,
-                right.1,
-                format!("{:?}", right.2),
-                right.3,
-            ))
+        (left.0, left.1, format!("{:?}", left.2), left.3).cmp(&(
+            right.0,
+            right.1,
+            format!("{:?}", right.2),
+            right.3,
+        ))
     };
     expected_devices.sort_by(compare_devices);
     observed_devices.sort_by(compare_devices);
