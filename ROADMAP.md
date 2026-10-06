@@ -61,6 +61,9 @@ MeshFit's roadmap is ordered by the shortest path to a real closed loop.
 - [x] preflight-gated one-run executor — logical host override, locking, source-plan validation, atomic bundle write; full CLI Reality Verified on CI run #576
 - [x] evidence-safe overwrite — backup/restore replacement protects existing benchmark evidence; full CI Reality Verified on run #583
 - [x] candidate-level repeated-run executor — shared one-run core, pre-scan, validated resume, explicit overwrite, completeness recheck; 62-step CI Reality Verified on run #616
+- [x] host-oriented worklist — logical-host pending/valid/invalid run visibility; CI Reality Verified on run #601
+- [x] host-local model artifact override — SHA-256 identity verification across preflight/run paths; CI Reality Verified on run #641
+- [x] fail-fast host-level executor — run every candidate assigned to one logical host through the shared safe execution core; CI Reality Verified on run #655
 - [ ] real repeated-run distributions on heterogeneous hardware
 - [ ] prediction intervals
 - [ ] memory calibration
