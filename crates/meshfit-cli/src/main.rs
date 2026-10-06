@@ -1058,6 +1058,8 @@ fn render_benchmark_runbook(kit: &BenchmarkExecutionKit) -> String {
         }
     }
 
+    out.push_str("## Verify completion\n\n");
+    out.push_str("    meshfit benchmark-status . --require-complete\n\n");
     out.push_str("## Compare\n\n");
     out.push_str(
         "    meshfit compare-benchmarks comparison.yaml --markdown --require-publishable\n",
