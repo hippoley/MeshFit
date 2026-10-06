@@ -14,6 +14,7 @@ use crate::{
     discovery::{discover_local, topology_identity_from_discovery, LocalDiscovery},
     evidence::BenchmarkProvenance,
     identity::{ExecutionIdentity, ModelArtifactIdentity, RuntimeIdentity},
+    resource_observation::ResourceSampler,
     runtime_discovery::discover_runtimes,
 };
 
@@ -265,12 +266,13 @@ fn run_against_child(
     wait_for_health(request, child)?;
 
     for _ in 0..request.config.warmup_requests {
-        let _ = run_streaming_request(request)?;
+        let _ = run_streaming_request(request, None)?;
     }
 
+    let runtime_pid = child.id();
     let mut measurements = Vec::new();
     for _ in 0..request.config.measured_requests {
-        measurements.push(run_streaming_request(request)?);
+        measurements.push(run_streaming_request(request, Some(runtime_pid))?);
     }
 
     let unix_seconds = SystemTime::now()
@@ -341,7 +343,10 @@ fn wait_for_health(request: &BenchmarkRequestIR, child: &mut Child) -> Result<()
     }
 }
 
-fn run_streaming_request(request: &BenchmarkRequestIR) -> Result<RequestMeasurement, String> {
+fn run_streaming_request(
+    request: &BenchmarkRequestIR,
+    runtime_pid: Option<u32>,
+) -> Result<RequestMeasurement, String> {
     let url = format!(
         "{}://{}:{}{}",
         request.executable.service.scheme,
@@ -369,6 +374,8 @@ fn run_streaming_request(request: &BenchmarkRequestIR) -> Result<RequestMeasurem
     let max_time_seconds = request.config.request_timeout_ms.saturating_add(999) / 1000;
 
     let max_time_seconds_text = max_time_seconds.to_string();
+    let sampler = runtime_pid
+        .map(|pid| ResourceSampler::start(pid, Duration::from_millis(50)));
     let start = Instant::now();
     let mut curl = Command::new("curl")
         .args([
@@ -432,6 +439,7 @@ fn run_streaming_request(request: &BenchmarkRequestIR) -> Result<RequestMeasurem
     }
 
     let total_ms = start.elapsed().as_secs_f64() * 1000.0;
+    let peaks = sampler.map(ResourceSampler::finish).unwrap_or_default();
     let ttft_ms = ttft_ms.ok_or_else(|| {
         "streaming response completed without a non-empty content delta; TTFT unavailable"
             .to_string()
@@ -441,8 +449,8 @@ fn run_streaming_request(request: &BenchmarkRequestIR) -> Result<RequestMeasurem
         ttft_ms,
         total_ms,
         output_tokens,
-        peak_vram_gb: None,
-        peak_ram_gb: None,
+        peak_vram_gb: peaks.peak_vram_gb,
+        peak_ram_gb: peaks.peak_ram_gb,
     })
 }
 
@@ -715,6 +723,7 @@ HTTPServer(("127.0.0.1", {port}), Handler).serve_forever()
         let bundle = result.unwrap();
         assert_eq!(bundle.measurements.len(), 1);
         assert_eq!(bundle.measurements[0].output_tokens, Some(2));
+        assert!(bundle.measurements[0].peak_ram_gb.is_some());
         assert!(bundle.measurements[0].ttft_ms > 0.0);
         assert!(bundle.measurements[0].total_ms >= bundle.measurements[0].ttft_ms);
     }
