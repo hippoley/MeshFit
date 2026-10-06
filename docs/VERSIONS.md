@@ -24,6 +24,7 @@ Delivered:
 - hard feasibility pruning
 - single-host candidates
 - conservative two-node TP admission
+- per-device tensor-parallel shard gate; aggregate VRAM is not treated as sufficient capacity
 - Pareto frontier
 - explicit rejection/exclusion reasons
 - executable YAML scenario
