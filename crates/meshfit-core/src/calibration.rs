@@ -44,7 +44,6 @@ pub struct MemoryCalibrationSummary {
     pub samples: Vec<MemoryCalibrationSample>,
 }
 
-
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum PerformanceMetricKind {
@@ -282,9 +281,7 @@ pub fn calibrate_plan_performance(
     }
     if let Some(value) = prediction.predicted_mean_decode_tokens_per_second {
         if value <= 0.0 {
-            return Err(
-                "predicted_mean_decode_tokens_per_second must be greater than zero".into(),
-            );
+            return Err("predicted_mean_decode_tokens_per_second must be greater than zero".into());
         }
     }
 
