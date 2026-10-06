@@ -283,8 +283,8 @@ fn run() -> Result<(), String> {
 
             let snapshot_raw = fs::read_to_string(snapshot_path)
                 .map_err(|e| format!("read {snapshot_path}: {e}"))?;
-            let target_raw = fs::read_to_string(target_path)
-                .map_err(|e| format!("read {target_path}: {e}"))?;
+            let target_raw =
+                fs::read_to_string(target_path).map_err(|e| format!("read {target_path}: {e}"))?;
             let snapshot: InfrastructureSnapshot = serde_yaml::from_str(&snapshot_raw)
                 .map_err(|e| format!("parse {snapshot_path}: {e}"))?;
             let target: PlacementTargetIR = serde_yaml::from_str(&target_raw)
