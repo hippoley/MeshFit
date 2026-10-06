@@ -630,6 +630,7 @@ mod tests {
                 active_parameters_b: None,
                 weight_memory_gb: 41.0,
                 kv_cache_gb: 5.0,
+                kv_cache_model: None,
                 is_moe: false,
                 required_backends: vec![],
             },
@@ -660,6 +661,7 @@ mod tests {
             workload: WorkloadIR {
                 context_tokens: 32768,
                 concurrency: 20,
+                max_active_sequences: None,
                 p95_latency_ms: Some(2000),
                 budget_per_day_usd: Some(200.0),
             },
