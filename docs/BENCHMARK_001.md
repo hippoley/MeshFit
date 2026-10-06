@@ -156,6 +156,18 @@ meshfit benchmark-run-candidate benchmark-001 meshfit \
   --model-path /data/models/qwen.gguf --resume
 ```
 
+Before starting any runtime on a real machine, run one host-level readiness audit. This reuses the same candidate preflight and hardware-attestation logic as real execution, but performs no benchmark launch and writes no evidence:
+
+```bash
+meshfit benchmark-host-check benchmark-001 --host node-b
+
+# on the real machine, prefer its current logical ID and make readiness a shell gate
+MESHFIT_NODE_ID=node-b \
+  meshfit benchmark-host-check benchmark-001 --current-host --require-ready
+```
+
+The report includes the current machine's discovered hardware identity plus every assigned candidate's runtime availability, host match, hardware-profile match, model verification, warnings, and preflight issues. `--require-ready` exits non-zero if any assigned candidate is not safe to run.
+
 For a real host, prefer configuring the local path once instead of repeating it on every command:
 
 ```bash

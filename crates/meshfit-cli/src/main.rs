@@ -229,8 +229,14 @@ struct BenchmarkRunCandidatePlan {
     benchmark_id: String,
     candidate: String,
     benchmark_host: String,
+    runtime: String,
+    runtime_found: bool,
+    host_match: bool,
+    hardware_profile_match: bool,
+    hardware_profile_issues: Vec<String>,
     preflight_ready: bool,
     preflight_issues: Vec<String>,
+    preflight_warnings: Vec<String>,
     model_path: String,
     model_path_overridden: bool,
     model_artifact_verified: bool,
@@ -253,6 +259,16 @@ struct BenchmarkRunHostPlan {
     resume: bool,
     overwrite: bool,
     candidates: Vec<BenchmarkRunCandidatePlan>,
+}
+
+#[derive(Debug, Serialize)]
+struct BenchmarkHostCheck {
+    benchmark_id: String,
+    host: String,
+    ready: bool,
+    local_hardware: HardwareIdentity,
+    local_discovery_warnings: Vec<String>,
+    plan: BenchmarkRunHostPlan,
 }
 
 #[derive(Debug)]
@@ -1082,6 +1098,37 @@ fn run() -> Result<(), String> {
                 );
             }
         }
+        "benchmark-host-check" => {
+            let kit_dir = args.get(2).ok_or_else(|| {
+                "usage: meshfit benchmark-host-check <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--require-ready]"
+                    .to_string()
+            })?;
+            let explicit_host = option_value(&args[3..], "--host")?.map(str::to_string);
+            let current_host = args.iter().any(|arg| arg == "--current-host");
+            if explicit_host.is_some() == current_host {
+                return Err("exactly one of --host NODE or --current-host is required".to_string());
+            }
+            let host = explicit_host.unwrap_or_else(|| discover_local().node.id);
+            let model_path_override = benchmark_model_path_override(&args[3..])?;
+            let report = inspect_benchmark_host_check(
+                Path::new(kit_dir),
+                &host,
+                model_path_override.as_deref(),
+            )?;
+            let yaml = serde_yaml::to_string(&report).map_err(|e| e.to_string())?;
+            print!("{yaml}");
+            if args.iter().any(|arg| arg == "--require-ready") && !report.ready {
+                return Err(format!(
+                    "Benchmark 001 host check failed for '{}': {}",
+                    report.host,
+                    if report.plan.issues.is_empty() {
+                        "unknown host readiness failure".to_string()
+                    } else {
+                        report.plan.issues.join(" ")
+                    }
+                ));
+            }
+        }
         "benchmark-run-host" => {
             let kit_dir = args.get(2).ok_or_else(|| {
                 "usage: meshfit benchmark-run-host <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--dry-run] [--resume|--overwrite]"
@@ -1682,8 +1729,14 @@ fn plan_benchmark_candidate_runs(
         benchmark_id: kit.benchmark_id,
         candidate: candidate.name.clone(),
         benchmark_host: candidate.benchmark_host.clone(),
+        runtime: preflight.runtime,
+        runtime_found: preflight.runtime_found,
+        host_match: preflight.host_match,
+        hardware_profile_match: preflight.hardware_profile_match,
+        hardware_profile_issues: preflight.hardware_profile_issues,
         preflight_ready: preflight.ready,
         preflight_issues: preflight.issues,
+        preflight_warnings: preflight.warnings,
         model_path: preflight.model_path,
         model_path_overridden: preflight.model_path_overridden,
         model_artifact_verified: preflight.model_artifact_verified,
@@ -1760,6 +1813,24 @@ fn plan_benchmark_host_runs(
         resume,
         overwrite,
         candidates,
+    })
+}
+
+fn inspect_benchmark_host_check(
+    kit_dir: &Path,
+    host: &str,
+    model_path_override: Option<&str>,
+) -> Result<BenchmarkHostCheck, String> {
+    let local = discover_local();
+    let plan = plan_benchmark_host_runs(kit_dir, host, model_path_override, true, false)?;
+
+    Ok(BenchmarkHostCheck {
+        benchmark_id: plan.benchmark_id.clone(),
+        host: host.to_string(),
+        ready: plan.ready,
+        local_hardware: local.hardware_identity,
+        local_discovery_warnings: local.warnings,
+        plan,
     })
 }
 
@@ -2794,7 +2865,11 @@ fn render_benchmark_runbook(kit: &BenchmarkExecutionKit) -> String {
         out.push_str(&format!("export MESHFIT_NODE_ID={}\n", shell_quote(host)));
         out.push_str("# If this host stores the same immutable model at another path:\n");
         out.push_str("# export MESHFIT_MODEL_PATH=/data/models/model.gguf\n\n");
-        out.push_str("# Inspect the whole host plan before any runtime starts.\n");
+        out.push_str(
+            "# Audit this physical host and every assigned candidate before any runtime starts.\n",
+        );
+        out.push_str("meshfit benchmark-host-check . --current-host --require-ready\n\n");
+        out.push_str("# Inspect the exact execution plan.\n");
         out.push_str("meshfit benchmark-run-host . --current-host --resume --dry-run\n\n");
         out.push_str("# Execute every pending candidate/run assigned to this host.\n");
         out.push_str("meshfit benchmark-run-host . --current-host --resume\n");
@@ -3039,7 +3114,7 @@ fn print_prediction(prediction: &Prediction) {
 
 fn print_help() {
     println!(
-        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--listen-port N] [--require-ready] [--write-dir DIR]\n  meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--host NODE] [--model-path PATH] [--dry-run] [--overwrite]\n  meshfit benchmark-run-candidate <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  meshfit benchmark-run-host <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  env MESHFIT_MODEL_PATH may provide the host-local model path when --model-path is omitted\n  meshfit benchmark-worklist <kit-dir> [--host NODE | --current-host] [--pending-only]\n  meshfit benchmark-status <kit-dir> [--require-complete]\n  meshfit benchmark-finalize <kit-dir> [--markdown] [--require-publishable]\n  meshfit benchmark-preflight <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--allow-existing] [--require-ready]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
+        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--listen-port N] [--require-ready] [--write-dir DIR]\n  meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--host NODE] [--model-path PATH] [--dry-run] [--overwrite]\n  meshfit benchmark-run-candidate <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  meshfit benchmark-host-check <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--require-ready]\n  meshfit benchmark-run-host <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  env MESHFIT_MODEL_PATH may provide the host-local model path when --model-path is omitted\n  meshfit benchmark-worklist <kit-dir> [--host NODE | --current-host] [--pending-only]\n  meshfit benchmark-status <kit-dir> [--require-complete]\n  meshfit benchmark-finalize <kit-dir> [--markdown] [--require-publishable]\n  meshfit benchmark-preflight <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--allow-existing] [--require-ready]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
     );
 }
 
