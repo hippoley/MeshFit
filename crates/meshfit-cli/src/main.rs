@@ -2822,6 +2822,10 @@ fn inspect_benchmark_kit(kit_dir: &Path) -> Result<BenchmarkKitStatus, String> {
             continue;
         };
 
+        let expected_hardware =
+            load_expected_benchmark_hardware(kit_dir, &kit, &candidate.benchmark_host)?;
+        let expected_model = load_expected_benchmark_model(kit_dir, &kit)?;
+
         expected_bundles += comparison.bundles.len();
         let mut valid_runs = 0_usize;
         let mut missing_bundles = Vec::new();
@@ -2856,21 +2860,16 @@ fn inspect_benchmark_kit(kit_dir: &Path) -> Result<BenchmarkKitStatus, String> {
                 }
             };
 
-            if let Err(error) = bundle.validate() {
+            if let Err(error) = validate_benchmark_bundle_for_candidate(
+                &bundle,
+                candidate,
+                &expected_hardware,
+                &expected_model,
+                kit.listen_port,
+            ) {
                 invalid_bundles.push(BenchmarkInvalidBundle {
                     path: bundle_rel.clone(),
                     error,
-                });
-                continue;
-            }
-
-            if bundle.request.executable.source_plan_id != candidate.plan_id {
-                invalid_bundles.push(BenchmarkInvalidBundle {
-                    path: bundle_rel.clone(),
-                    error: format!(
-                        "source plan '{}' does not match candidate plan '{}'",
-                        bundle.request.executable.source_plan_id, candidate.plan_id
-                    ),
                 });
                 continue;
             }
