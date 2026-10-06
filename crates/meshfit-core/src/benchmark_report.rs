@@ -125,7 +125,7 @@ impl BenchmarkComparisonReport {
                 lower * 100.0,
                 upper * 100.0
             ),
-            _ => String::new(),
+            _ => " · **run-level 95% interval:** unavailable (<2 independent runs)".to_string(),
         };
 
         let mut out = String::new();
@@ -834,6 +834,35 @@ mod tests {
             evidence_qualification(&[candidate], ComparisonObjective::P95TtftMs);
         assert!(!publishable);
         assert!(status.contains("contains no benchmark bundles"));
+    }
+
+    #[test]
+    fn markdown_reports_unavailable_interval_instead_of_hiding_it() {
+        let mut report = BenchmarkComparisonReport {
+            benchmark_id: "benchmark-001".into(),
+            objective: ComparisonObjective::P95TtftMs,
+            publishable: false,
+            evidence_status: "insufficient independent runs".into(),
+            oracle_candidate: "meshfit".into(),
+            meshfit_candidate: "meshfit".into(),
+            oracle_objective_value: 100.0,
+            meshfit_objective_value: 100.0,
+            meshfit_regret_fraction: 0.0,
+            best_baseline_candidate: "heuristic".into(),
+            best_baseline_objective_value: 125.0,
+            best_baseline_regret_fraction: 0.25,
+            meshfit_improvement_vs_best_baseline_fraction: 0.20,
+            meshfit_improvement_ci95_lower_fraction: None,
+            meshfit_improvement_ci95_upper_fraction: None,
+            regret_reduction_vs_best_baseline_fraction: Some(1.0),
+            candidates: vec![],
+        };
+        report.publishable = false;
+
+        let markdown = report.to_markdown();
+        assert!(markdown.contains(
+            "run-level 95% interval:** unavailable (<2 independent runs)"
+        ));
     }
 
     #[test]
