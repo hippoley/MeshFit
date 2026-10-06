@@ -12,6 +12,7 @@ MeshFit's roadmap is ordered by the shortest path to a real closed loop.
 - [x] per-device TP shard capacity — weakest-device headroom, no aggregate-VRAM false positives; CI Reality Verified on run #353
 - [x] analytical TP communication admission — measured fabric + explicit model profile + workload ms/token budget; CI Reality Verified on run #418
 - [x] Pareto frontier
+- [x] communication-aware Pareto — lower known TP communication tax participates in dominance; unknown TP communication is not treated as zero; CI Reality Verified on run #445
 - [x] explicit rejection / exclusion
 - [x] CI/build verification — Reality Verified on PR CI run #295: fmt, clippy -D warnings, 45 workspace tests, release build, and full CLI smoke chain all passed
 
