@@ -2657,6 +2657,253 @@ fn inspect_benchmark_worklist(
     })
 }
 
+fn sha256_hex(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+fn benchmark_expected_host_slots(
+    kit: &BenchmarkExecutionKit,
+    host: &str,
+) -> Result<Vec<(String, String, usize, String)>, String> {
+    let mut slots = Vec::new();
+
+    for candidate in kit
+        .candidates
+        .iter()
+        .filter(|candidate| candidate.benchmark_host == host)
+    {
+        let comparison = kit
+            .comparison_manifest
+            .candidates
+            .iter()
+            .find(|item| item.name == candidate.name)
+            .ok_or_else(|| {
+                format!(
+                    "candidate '{}' is missing from comparison manifest",
+                    candidate.name
+                )
+            })?;
+
+        for (index, path) in comparison.bundles.iter().enumerate() {
+            slots.push((
+                candidate.name.clone(),
+                candidate.plan_id.clone(),
+                index + 1,
+                path.clone(),
+            ));
+        }
+    }
+
+    if slots.is_empty() {
+        return Err(format!(
+            "benchmark host '{host}' has no assigned evidence slots in this kit"
+        ));
+    }
+
+    Ok(slots)
+}
+
+fn export_benchmark_host_evidence(
+    kit_dir: &Path,
+    host: &str,
+) -> Result<BenchmarkHostEvidenceTransfer, String> {
+    let kit = load_benchmark_execution_kit(kit_dir)?;
+    if !kit.ready {
+        return Err("Benchmark 001 execution kit is not marked ready".to_string());
+    }
+
+    let slots = benchmark_expected_host_slots(&kit, host)?;
+    let mut bundles = Vec::with_capacity(slots.len());
+
+    for (candidate, plan_id, run_number, path) in slots {
+        let bundle_path = kit_dir.join(&path);
+        let bytes = fs::read(&bundle_path)
+            .map_err(|e| format!("read evidence bundle '{}': {e}", bundle_path.display()))?;
+        let content = String::from_utf8(bytes.clone())
+            .map_err(|e| format!("evidence bundle '{}' is not UTF-8 YAML: {e}", bundle_path.display()))?;
+        let bundle: BenchmarkBundle = serde_yaml::from_slice(&bytes)
+            .map_err(|e| format!("parse evidence bundle '{}': {e}", bundle_path.display()))?;
+        bundle.validate()?;
+
+        if bundle.request.executable.source_plan_id != plan_id {
+            return Err(format!(
+                "evidence bundle '{}' source plan '{}' does not match candidate plan '{}'",
+                path, bundle.request.executable.source_plan_id, plan_id
+            ));
+        }
+
+        bundles.push(BenchmarkTransferredBundle {
+            candidate,
+            plan_id,
+            run_number,
+            path,
+            sha256: sha256_hex(&bytes),
+            content,
+        });
+    }
+
+    Ok(BenchmarkHostEvidenceTransfer {
+        schema: "meshfit.benchmark-host-evidence/v1".to_string(),
+        benchmark_id: kit.benchmark_id,
+        host: host.to_string(),
+        bundles,
+    })
+}
+
+fn import_benchmark_host_evidence(
+    kit_dir: &Path,
+    transfer: &BenchmarkHostEvidenceTransfer,
+) -> Result<BenchmarkEvidenceImportResult, String> {
+    if transfer.schema != "meshfit.benchmark-host-evidence/v1" {
+        return Err(format!(
+            "unsupported benchmark host evidence schema '{}'",
+            transfer.schema
+        ));
+    }
+
+    let kit = load_benchmark_execution_kit(kit_dir)?;
+    if !kit.ready {
+        return Err("Benchmark 001 execution kit is not marked ready".to_string());
+    }
+    if transfer.benchmark_id != kit.benchmark_id {
+        return Err(format!(
+            "benchmark evidence package id '{}' does not match kit '{}'",
+            transfer.benchmark_id, kit.benchmark_id
+        ));
+    }
+
+    let slots = benchmark_expected_host_slots(&kit, &transfer.host)?;
+    if transfer.bundles.len() != slots.len() {
+        return Err(format!(
+            "benchmark host '{}' evidence package has {} bundle(s); kit requires {}",
+            transfer.host,
+            transfer.bundles.len(),
+            slots.len()
+        ));
+    }
+
+    let mut seen = std::collections::HashSet::new();
+    let mut validated = Vec::with_capacity(slots.len());
+
+    for (candidate, plan_id, run_number, expected_path) in slots {
+        let item = transfer
+            .bundles
+            .iter()
+            .find(|item| item.candidate == candidate && item.run_number == run_number)
+            .ok_or_else(|| {
+                format!(
+                    "benchmark host '{}' evidence package is missing candidate '{}' run {}",
+                    transfer.host, candidate, run_number
+                )
+            })?;
+
+        if !seen.insert((item.candidate.clone(), item.run_number)) {
+            return Err(format!(
+                "duplicate transferred evidence for candidate '{}' run {}",
+                item.candidate, item.run_number
+            ));
+        }
+        if item.plan_id != plan_id {
+            return Err(format!(
+                "transferred candidate '{}' run {} plan '{}' does not match kit plan '{}'",
+                candidate, run_number, item.plan_id, plan_id
+            ));
+        }
+        if item.path != expected_path {
+            return Err(format!(
+                "transferred candidate '{}' run {} path '{}' does not match kit slot '{}'",
+                candidate, run_number, item.path, expected_path
+            ));
+        }
+
+        let bytes = item.content.as_bytes();
+        let observed_sha = sha256_hex(bytes);
+        if observed_sha != item.sha256 {
+            return Err(format!(
+                "transferred candidate '{}' run {} SHA-256 mismatch: declared={} observed={}",
+                candidate, run_number, item.sha256, observed_sha
+            ));
+        }
+
+        let bundle: BenchmarkBundle = serde_yaml::from_slice(bytes).map_err(|e| {
+            format!(
+                "parse transferred candidate '{}' run {}: {e}",
+                candidate, run_number
+            )
+        })?;
+        bundle.validate()?;
+        if bundle.request.executable.source_plan_id != plan_id {
+            return Err(format!(
+                "transferred candidate '{}' run {} source plan '{}' does not match kit plan '{}'",
+                candidate, run_number, bundle.request.executable.source_plan_id, plan_id
+            ));
+        }
+
+        let destination = kit_dir.join(&expected_path);
+        if destination.exists() {
+            let existing = fs::read(&destination)
+                .map_err(|e| format!("read existing evidence '{}': {e}", destination.display()))?;
+            if sha256_hex(&existing) != item.sha256 {
+                return Err(format!(
+                    "evidence slot '{}' already exists with different content; refusing import",
+                    expected_path
+                ));
+            }
+        }
+
+        validated.push((expected_path, item.content.clone(), item.sha256.clone()));
+    }
+
+    let mut imported = 0_usize;
+    let mut already_present = 0_usize;
+
+    for (expected_path, content, expected_sha) in validated {
+        let destination = kit_dir.join(&expected_path);
+        if destination.exists() {
+            already_present += 1;
+            continue;
+        }
+
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("create evidence directory '{}': {e}", parent.display()))?;
+        }
+        let temp_path = PathBuf::from(format!("{}.meshfit-import.tmp", destination.display()));
+        if temp_path.exists() {
+            return Err(format!(
+                "stale evidence import staging file '{}' exists; refusing import",
+                temp_path.display()
+            ));
+        }
+
+        fs::write(&temp_path, content.as_bytes())
+            .map_err(|e| format!("stage evidence import '{}': {e}", temp_path.display()))?;
+        let staged = fs::read(&temp_path)
+            .map_err(|e| format!("verify staged evidence '{}': {e}", temp_path.display()))?;
+        if sha256_hex(&staged) != expected_sha {
+            let _ = fs::remove_file(&temp_path);
+            return Err(format!(
+                "staged evidence '{}' failed SHA-256 verification",
+                temp_path.display()
+            ));
+        }
+
+        if let Err(error) = commit_benchmark_bundle(&temp_path, &destination, false) {
+            let _ = fs::remove_file(&temp_path);
+            return Err(error);
+        }
+        imported += 1;
+    }
+
+    Ok(BenchmarkEvidenceImportResult {
+        benchmark_id: kit.benchmark_id,
+        host: transfer.host.clone(),
+        imported,
+        already_present,
+        total: transfer.bundles.len(),
+    })
+}
+
 fn inspect_work_slot(
     bundle_path: &Path,
     expected_plan_id: &str,
