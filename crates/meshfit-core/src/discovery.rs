@@ -5,8 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     identity::{DeviceIdentity, HardwareIdentity, LinkIdentity, TopologyIdentity},
     ir::{
-        AcceleratorBackend, AcceleratorIR, FabricEdgeIR, FabricEndpointIR, HardwareNodeIR,
-        LinkKind,
+        AcceleratorBackend, AcceleratorIR, FabricEdgeIR, FabricEndpointIR, HardwareNodeIR, LinkKind,
     },
 };
 
@@ -53,10 +52,7 @@ pub fn discover_local() -> LocalDiscovery {
         }
     };
 
-    let devices = discovered
-        .iter()
-        .map(|gpu| gpu.identity.clone())
-        .collect();
+    let devices = discovered.iter().map(|gpu| gpu.identity.clone()).collect();
 
     let accelerators = discovered
         .iter()
@@ -100,10 +96,7 @@ fn query_nvidia_smi() -> Result<String, String> {
         .map_err(|e| format!("nvidia-smi unavailable: {e}"))?;
 
     if !output.status.success() {
-        return Err(format!(
-            "nvidia-smi failed with status {}",
-            output.status
-        ));
+        return Err(format!("nvidia-smi failed with status {}", output.status));
     }
 
     String::from_utf8(output.stdout).map_err(|e| format!("nvidia-smi output is not UTF-8: {e}"))
@@ -162,23 +155,16 @@ pub fn topology_identity_from_discovery(discovery: &LocalDiscovery) -> TopologyI
             bandwidth_mbps: edge
                 .bandwidth_gbps
                 .map(|gbps| (gbps * 1000.0).round() as u64),
-            latency_micros: edge
-                .latency_ms
-                .map(|ms| (ms * 1000.0).round() as u64),
+            latency_micros: edge.latency_ms.map(|ms| (ms * 1000.0).round() as u64),
         })
         .collect::<Vec<_>>();
 
     links.sort_by(|a, b| {
-        (
-            a.from.as_str(),
-            a.to.as_str(),
-            format!("{:?}", a.kind),
-        )
-            .cmp(&(
-                b.from.as_str(),
-                b.to.as_str(),
-                format!("{:?}", b.kind),
-            ))
+        (a.from.as_str(), a.to.as_str(), format!("{:?}", a.kind)).cmp(&(
+            b.from.as_str(),
+            b.to.as_str(),
+            format!("{:?}", b.kind),
+        ))
     });
 
     TopologyIdentity { links }
@@ -395,10 +381,7 @@ mod tests {
 
         let topology = topology_identity_from_discovery(&discovery);
         assert_eq!(topology.links.len(), 1);
-        assert_eq!(
-            topology.links[0].from,
-            "accelerator:node-a/gpu0"
-        );
+        assert_eq!(topology.links[0].from, "accelerator:node-a/gpu0");
         assert_eq!(topology.links[0].bandwidth_mbps, None);
     }
 
