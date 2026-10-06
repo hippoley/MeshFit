@@ -334,9 +334,7 @@ fn run() -> Result<(), String> {
             let set = BenchmarkPlanSet {
                 candidates: selected
                     .into_iter()
-                    .map(|(name, strategy, plan)| {
-                        benchmark_plan_candidate(name, strategy, plan)
-                    })
+                    .map(|(name, strategy, plan)| benchmark_plan_candidate(name, strategy, plan))
                     .collect(),
                 warnings,
             };
@@ -372,8 +370,9 @@ fn run() -> Result<(), String> {
 
             let model_identity_raw = fs::read_to_string(model_identity_path)
                 .map_err(|e| format!("read {model_identity_path}: {e}"))?;
-            let model_identity: ModelArtifactIdentity = serde_yaml::from_str(&model_identity_raw)
-                .map_err(|e| format!("parse {model_identity_path}: {e}"))?;
+            let model_identity: ModelArtifactIdentity =
+                serde_yaml::from_str(&model_identity_raw)
+                    .map_err(|e| format!("parse {model_identity_path}: {e}"))?;
 
             let snapshot_raw = fs::read_to_string(snapshot_path)
                 .map_err(|e| format!("read {snapshot_path}: {e}"))?;
