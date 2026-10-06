@@ -476,6 +476,8 @@ The direct MeshFit-vs-best-baseline headline then reports a conservative improve
 - lower-is-better: worst case uses MeshFit upper bound against baseline lower bound;
 - higher-is-better: worst case uses MeshFit lower bound against baseline upper bound.
 
-This interval is an approximate run-level uncertainty interval around repeated-run performance. It is **not** a substitute for more independent hardware runs, and it does not change the existing publishability gates for provenance, distinct plans, sample count, run stability, or complete experiment evidence.
+The candidate intervals are run-level 95% Student-t intervals. The derived MeshFit-vs-baseline interval is a conservative bound formed from those two marginal intervals; it is **not itself claimed to be a 95% confidence interval**, because marginal 95% coverage for each candidate does not automatically imply 95% joint coverage for the derived ratio/improvement.
+
+This interval is an approximate run-level uncertainty bound around repeated-run performance. It is **not** a substitute for more independent hardware runs, and it does not change the existing publishability gates for provenance, distinct plans, sample count, run stability, or complete experiment evidence.
 
 For degrees of freedom above the embedded Student-t table, MeshFit keeps the df=30 critical value (2.042) rather than dropping to 1.96, deliberately preserving a slightly conservative interval.
