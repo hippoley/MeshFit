@@ -69,6 +69,17 @@ jobs:
       - run: cargo run -p meshfit -- benchmark-preflight /tmp/meshfit-benchmark-001-materialized meshfit --host node-b > /tmp/meshfit-benchmark-preflight.yaml
       - run: 'grep -q "candidate: meshfit" /tmp/meshfit-benchmark-preflight.yaml'
       - run: '! cargo run -p meshfit -- benchmark-preflight /tmp/meshfit-benchmark-001-materialized meshfit --host node-b --require-ready'
+      - run: cp examples/model-artifact-demo.bin /tmp/meshfit-model-copy.bin
+      - run: cargo run -p meshfit -- benchmark-preflight /tmp/meshfit-benchmark-001-materialized meshfit --host node-b --model-path /tmp/meshfit-model-copy.bin > /tmp/meshfit-model-path-preflight.yaml
+      - run: grep -q 'model_path_source: cli' /tmp/meshfit-model-path-preflight.yaml
+      - run: grep -q 'model_path_status: local_verified' /tmp/meshfit-model-path-preflight.yaml
+      - run: grep -q 'model_artifact_verified: true' /tmp/meshfit-model-path-preflight.yaml
+      - run: MESHFIT_MODEL_PATH=/tmp/meshfit-model-copy.bin cargo run -p meshfit -- benchmark-preflight /tmp/meshfit-benchmark-001-materialized meshfit --host node-b > /tmp/meshfit-model-env-preflight.yaml
+      - run: grep -q 'model_path_source: env' /tmp/meshfit-model-env-preflight.yaml
+      - run: printf 'different-model-bytes' > /tmp/meshfit-model-wrong.bin
+      - run: cargo run -p meshfit -- benchmark-preflight /tmp/meshfit-benchmark-001-materialized meshfit --host node-b --model-path /tmp/meshfit-model-wrong.bin > /tmp/meshfit-model-mismatch-preflight.yaml
+      - run: grep -q 'model_path_status: local_hash_mismatch' /tmp/meshfit-model-mismatch-preflight.yaml
+      - run: grep -q 'SHA-256 mismatch' /tmp/meshfit-model-mismatch-preflight.yaml
       - run: '! cargo run -p meshfit -- benchmark-status /tmp/meshfit-benchmark-001-materialized --require-complete'
       - run: printf '[' > /tmp/meshfit-benchmark-001-materialized/results/meshfit/run-01.yaml
       - run: cargo run -p meshfit -- benchmark-status /tmp/meshfit-benchmark-001-materialized > /tmp/meshfit-benchmark-status-invalid.yaml
