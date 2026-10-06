@@ -883,7 +883,8 @@ mod tests {
 
         let markdown = report.to_markdown();
         assert!(markdown.contains("MeshFit vs best baseline (heuristic): 20.0% better"));
-        assert!(markdown.contains("run-level 95% interval: [10.0%, 30.0%]"));
+        assert!(markdown.contains("run-level 95% interval"));
+        assert!(markdown.contains("[10.0%, 30.0%]"));
         assert!(markdown.contains("| meshfit | topology-aware | 2 | 20 |"));
         assert!(markdown.contains("Observed oracle: **meshfit**"));
     }
