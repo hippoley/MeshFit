@@ -57,6 +57,7 @@ MeshFit's roadmap is ordered by the shortest path to a real closed loop.
 - [x] repeated-run candidate aggregation and observed-oracle placement regret
 - [x] stability-aware publishability gate — objective-specific independent-run CV <= 20%; CI Reality Verified on run #463
 - [x] direct best-baseline headline — objective-aware MeshFit improvement/regression delta, still gated by publishability; CI Reality Verified on run #480
+- [x] per-host benchmark preflight — host/runtime/model/evidence hard gates; full CLI Reality Verified on CI run #553
 - [ ] real repeated-run distributions on heterogeneous hardware
 - [ ] prediction intervals
 - [ ] memory calibration
