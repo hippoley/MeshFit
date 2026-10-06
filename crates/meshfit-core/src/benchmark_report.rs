@@ -566,10 +566,7 @@ fn summarize_candidate(
     })
 }
 
-fn bundle_objective_value(
-    bundle: &BenchmarkBundle,
-    objective: ComparisonObjective,
-) -> Option<f64> {
+fn bundle_objective_value(bundle: &BenchmarkBundle, objective: ComparisonObjective) -> Option<f64> {
     match objective {
         ComparisonObjective::P95TtftMs => {
             let values = bundle
