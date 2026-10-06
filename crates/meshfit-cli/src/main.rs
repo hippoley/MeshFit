@@ -1282,4 +1282,103 @@ mod tests {
             assert_eq!(measured % concurrency, 0);
         }
     }
+
+    fn status_test_kit() -> BenchmarkExecutionKit {
+        BenchmarkExecutionKit {
+            benchmark_id: "benchmark-001-test".into(),
+            ready: true,
+            snapshot: "inputs/snapshot.yaml".into(),
+            target: "inputs/target.yaml".into(),
+            model_path: "demo".into(),
+            model_identity: "inputs/model-identity.yaml".into(),
+            concurrency: 1,
+            measured_requests_per_run: 10,
+            runs_per_candidate: 1,
+            candidates: vec![BenchmarkExecutionCandidate {
+                name: "meshfit".into(),
+                plan_id: "plan-test".into(),
+                nodes: vec!["node-a".into()],
+                benchmark_host: "node-a".into(),
+                result_dir: "results/meshfit".into(),
+                executable_path: "artifacts/meshfit/executable.yaml".into(),
+                compile_ready: true,
+                compile_error: None,
+                compile_command: None,
+                run_commands: vec![],
+            }],
+            comparison_manifest: BenchmarkExecutionComparison {
+                benchmark_id: "benchmark-001-test".into(),
+                meshfit_candidate: "meshfit".into(),
+                objective: "p95_ttft_ms".into(),
+                candidates: vec![BenchmarkExecutionComparisonCandidate {
+                    name: "meshfit".into(),
+                    strategy: "test".into(),
+                    hourly_cost_usd: 0.0,
+                    bundles: vec!["results/meshfit/run-01.yaml".into()],
+                }],
+            },
+            warnings: vec![],
+        }
+    }
+
+    fn status_test_dir(label: &str) -> PathBuf {
+        use std::time::{SystemTime, UNIX_EPOCH};
+
+        let nonce = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_nanos();
+        std::env::temp_dir().join(format!(
+            "meshfit-{label}-{}-{nonce}",
+            std::process::id()
+        ))
+    }
+
+    #[test]
+    fn benchmark_status_reports_missing_bundle() {
+        let dir = status_test_dir("missing");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("kit.yaml"),
+            serde_yaml::to_string(&status_test_kit()).unwrap(),
+        )
+        .unwrap();
+
+        let status = inspect_benchmark_kit(&dir).unwrap();
+        assert!(!status.complete);
+        assert_eq!(status.expected_bundles, 1);
+        assert_eq!(status.valid_bundles, 0);
+        assert_eq!(
+            status.candidates[0].missing_bundles,
+            vec!["results/meshfit/run-01.yaml"]
+        );
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn benchmark_status_reports_corrupt_bundle() {
+        let dir = status_test_dir("corrupt");
+        fs::create_dir_all(dir.join("results/meshfit")).unwrap();
+        fs::write(
+            dir.join("kit.yaml"),
+            serde_yaml::to_string(&status_test_kit()).unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            dir.join("results/meshfit/run-01.yaml"),
+            "not-valid-yaml: [",
+        )
+        .unwrap();
+
+        let status = inspect_benchmark_kit(&dir).unwrap();
+        assert!(!status.complete);
+        assert_eq!(status.valid_bundles, 0);
+        assert_eq!(status.candidates[0].invalid_bundles.len(), 1);
+        assert!(status.candidates[0].invalid_bundles[0]
+            .error
+            .contains("parse failed"));
+
+        let _ = fs::remove_dir_all(dir);
+    }
 }
