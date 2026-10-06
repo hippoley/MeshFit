@@ -849,7 +849,7 @@ fn run() -> Result<(), String> {
                 let candidate_status = status
                     .candidates
                     .iter()
-                    .find(|candidate| candidate.name == candidate_name)
+                    .find(|candidate| candidate.name == *candidate_name)
                     .ok_or_else(|| {
                         format!(
                             "candidate '{}' disappeared from benchmark status after execution",
@@ -1127,6 +1127,69 @@ fn acquire_benchmark_file_lock(
             "create {kind} lock '{}': {error}",
             lock_path.display()
         )),
+    }
+}
+
+fn commit_benchmark_bundle(
+    temp_path: &Path,
+    bundle_path: &Path,
+    overwrite: bool,
+) -> Result<(), String> {
+    if !bundle_path.exists() {
+        return fs::rename(temp_path, bundle_path).map_err(|e| {
+            format!(
+                "move {} to {}: {e}",
+                temp_path.display(),
+                bundle_path.display()
+            )
+        });
+    }
+
+    if !overwrite {
+        return Err(format!(
+            "bundle '{}' already exists; refusing replacement without --overwrite",
+            bundle_path.display()
+        ));
+    }
+
+    let backup_path = bundle_path.with_extension("yaml.meshfit-backup");
+    if backup_path.exists() {
+        return Err(format!(
+            "backup '{}' already exists; refusing to overwrite evidence until it is resolved",
+            backup_path.display()
+        ));
+    }
+
+    fs::rename(bundle_path, &backup_path).map_err(|e| {
+        format!(
+            "move existing evidence {} to backup {}: {e}",
+            bundle_path.display(),
+            backup_path.display()
+        )
+    })?;
+
+    match fs::rename(temp_path, bundle_path) {
+        Ok(()) => {
+            fs::remove_file(&backup_path).map_err(|e| {
+                format!(
+                    "replacement committed to '{}' but backup '{}' could not be removed: {e}",
+                    bundle_path.display(),
+                    backup_path.display()
+                )
+            })?;
+            Ok(())
+        }
+        Err(commit_error) => match fs::rename(&backup_path, bundle_path) {
+            Ok(()) => Err(format!(
+                "replacement of '{}' failed: {commit_error}; previous evidence was restored",
+                bundle_path.display()
+            )),
+            Err(restore_error) => Err(format!(
+                "replacement of '{}' failed: {commit_error}; restoring backup '{}' also failed: {restore_error}",
+                bundle_path.display(),
+                backup_path.display()
+            )),
+        },
     }
 }
 
