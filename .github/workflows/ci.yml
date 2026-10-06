@@ -38,6 +38,9 @@ jobs:
       - run: cargo run -p meshfit -- plan examples/v0.1-placement.yaml
       - run: cargo run -p meshfit -- predict examples/v0.2-evidence.yaml examples/v0.2-query.yaml
       - run: cargo run -p meshfit -- evidence-from-benchmark examples/benchmark-bundle.yaml > /tmp/meshfit-benchmark-evidence.yaml
+      - run: cargo run -p meshfit -- calibrate-memory examples/calibration-plan.yaml examples/benchmark-bundle.yaml > /tmp/meshfit-memory-calibration.yaml
+      - run: grep -q 'direction: under_prediction' /tmp/meshfit-memory-calibration.yaml
+      - run: grep -q 'conservative_observed_to_predicted_ratio:' /tmp/meshfit-memory-calibration.yaml
       - run: cargo run -p meshfit -- benchmark-candidates /tmp/meshfit-snapshot-manifest.yaml examples/placement-target.yaml node-b:gpu0:vllm:SingleHost > /tmp/meshfit-benchmark-candidates.yaml
       - run: cargo run -p meshfit -- benchmark-kit /tmp/meshfit-snapshot-manifest.yaml examples/placement-target.yaml node-b:gpu0:vllm:SingleHost Qwen/Qwen3-32B /tmp/meshfit-model-identity.yaml > /tmp/meshfit-benchmark-kit.yaml
       - run: "! cargo run -p meshfit -- benchmark-kit /tmp/meshfit-snapshot-manifest.yaml examples/placement-target.yaml node-b:gpu0:vllm:SingleHost Qwen/Qwen3-32B /tmp/meshfit-model-identity.yaml --listen-port 0"
