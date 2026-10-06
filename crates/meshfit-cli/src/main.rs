@@ -8,13 +8,13 @@ use serde::{Deserialize, Serialize};
 
 use meshfit_core::{
     calibrate_plan_memory, calibrate_plan_performance, compare_benchmarks, compile_plan,
-    discover_local, discover_runtimes, inspect_model_artifact, prepare_local_benchmark_request,
-    probe_peer, run_local_benchmark, solve, BenchmarkBundle, BenchmarkCandidate,
-    BenchmarkComparisonReport, BenchmarkComparisonRequest, BenchmarkConfig, BenchmarkRequestIR,
-    ComparisonObjective, CompileRequest, EvidenceStore, ExecutablePlanIR, HardwareIdentity,
-    InfrastructureSnapshot, LinkKind, LocalDiscovery, ModelArtifactIdentity, PeerProbeResult,
-    PerformancePredictionInput, PlacementKind, PlacementReport, PlacementTargetIR, PlanIR,
-    Prediction, PredictionQuery, ScenarioIR, SnapshotManifest,
+    discover_local, discover_runtimes, estimate_plan_cost, inspect_model_artifact,
+    prepare_local_benchmark_request, probe_peer, run_local_benchmark, solve, BenchmarkBundle,
+    BenchmarkCandidate, BenchmarkComparisonReport, BenchmarkComparisonRequest, BenchmarkConfig,
+    BenchmarkRequestIR, ComparisonObjective, CompileRequest, EvidenceStore, ExecutablePlanIR,
+    HardwareIdentity, InfrastructureSnapshot, LinkKind, LocalDiscovery, ModelArtifactIdentity,
+    PeerProbeResult, PerformancePredictionInput, PlacementKind, PlacementReport, PlacementTargetIR,
+    PlanIR, Prediction, PredictionQuery, ScenarioIR, SnapshotManifest,
 };
 
 const BENCHMARK_LISTEN_PORT: u16 = 18080;
@@ -1343,6 +1343,23 @@ fn run() -> Result<(), String> {
 
             let summary = calibrate_plan_performance(&prediction, &bundles)?;
             let yaml = serde_yaml::to_string(&summary).map_err(|e| e.to_string())?;
+            print!("{yaml}");
+        }
+        "estimate-cost" => {
+            let plan_path = args.get(2).ok_or_else(|| {
+                "usage: meshfit estimate-cost <plan.yaml> --predicted-output-tps N".to_string()
+            })?;
+            let predicted_output_tps = option_value(&args[3..], "--predicted-output-tps")?
+                .ok_or_else(|| "--predicted-output-tps is required".to_string())?
+                .parse::<f64>()
+                .map_err(|e| format!("invalid --predicted-output-tps: {e}"))?;
+
+            let raw =
+                fs::read_to_string(plan_path).map_err(|e| format!("read {plan_path}: {e}"))?;
+            let plan: PlanIR =
+                serde_yaml::from_str(&raw).map_err(|e| format!("parse {plan_path}: {e}"))?;
+            let estimate = estimate_plan_cost(&plan, predicted_output_tps)?;
+            let yaml = serde_yaml::to_string(&estimate).map_err(|e| e.to_string())?;
             print!("{yaml}");
         }
         "calibrate-memory" => {
