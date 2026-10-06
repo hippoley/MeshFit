@@ -314,10 +314,8 @@ pub fn compare_benchmarks(
         request.objective,
     );
 
-    let performance_claim_publishable = publishable
-        && improvement_interval
-            .map(|(lower, _)| lower > 0.0)
-            .unwrap_or(false);
+    let performance_claim_publishable =
+        performance_claim_publishable(publishable, improvement_interval);
     let performance_claim_status = if !publishable {
         "benchmark evidence is not publishable".to_string()
     } else if improvement_interval.is_none() {
@@ -773,6 +771,16 @@ fn log_student_t_interval_95(values: &[f64]) -> Option<(f64, f64)> {
     Some(((log_mean - margin).exp(), (log_mean + margin).exp()))
 }
 
+fn performance_claim_publishable(
+    evidence_publishable: bool,
+    improvement_interval: Option<(f64, f64)>,
+) -> bool {
+    evidence_publishable
+        && improvement_interval
+            .map(|(lower, _)| lower > 0.0)
+            .unwrap_or(false)
+}
+
 fn conservative_improvement_interval(
     meshfit_lower: Option<f64>,
     meshfit_upper: Option<f64>,
@@ -1046,6 +1054,40 @@ mod tests {
         assert!(interval.0 > 0.0);
         assert!(interval.0 < 100.0);
         assert!(interval.1 > 110.0);
+    }
+
+    #[test]
+    fn performance_claim_gate_requires_strictly_positive_interval() {
+        assert!(performance_claim_publishable(true, Some((0.01, 0.20))));
+        assert!(!performance_claim_publishable(true, Some((0.0, 0.20))));
+        assert!(!performance_claim_publishable(true, Some((-0.05, 0.20))));
+        assert!(!performance_claim_publishable(false, Some((0.10, 0.30))));
+        assert!(!performance_claim_publishable(true, None));
+    }
+
+    #[test]
+    fn higher_and_lower_objectives_produce_positive_advantage_bounds_consistently() {
+        let lower_better = conservative_improvement_interval(
+            Some(80.0),
+            Some(90.0),
+            Some(100.0),
+            Some(110.0),
+            ComparisonObjective::P95TtftMs,
+        )
+        .unwrap();
+        let higher_better = conservative_improvement_interval(
+            Some(110.0),
+            Some(120.0),
+            Some(90.0),
+            Some(100.0),
+            ComparisonObjective::MeanDecodeTokensPerSecond,
+        )
+        .unwrap();
+
+        assert!(lower_better.0 > 0.0);
+        assert!(higher_better.0 > 0.0);
+        assert!(performance_claim_publishable(true, Some(lower_better)));
+        assert!(performance_claim_publishable(true, Some(higher_better)));
     }
 
     #[test]
