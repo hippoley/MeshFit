@@ -720,6 +720,8 @@ fn run() -> Result<(), String> {
             let executable_path = kit_dir.join(&candidate.executable_path);
             let bundle_rel = &comparison.bundles[run_number - 1];
             let bundle_path = kit_dir.join(bundle_rel);
+            let compile_required =
+                !executable_matches_model_path(&executable_path, &preflight.model_path)?;
             let plan = BenchmarkRunOnePlan {
                 benchmark_id: kit.benchmark_id.clone(),
                 kit_ready: kit.ready,
@@ -737,7 +739,7 @@ fn run() -> Result<(), String> {
                 run_number,
                 executable_path: executable_path.display().to_string(),
                 bundle_path: bundle_path.display().to_string(),
-                compile_required: !executable_path.is_file(),
+                compile_required,
                 bundle_exists: bundle_path.is_file(),
             };
 
@@ -1234,6 +1236,13 @@ fn inspect_model_path_for_host(
             ));
         }
 
+        let effective_path = path
+            .canonicalize()
+            .map_err(|e| format!("canonicalize model override '{}': {e}", path.display()))?
+            .to_string_lossy()
+            .into_owned();
+        let path = Path::new(&effective_path);
+
         let identity_path = kit_dir.join(&kit.model_identity);
         let identity_raw = fs::read_to_string(&identity_path)
             .map_err(|e| format!("read {}: {e}", identity_path.display()))?;
@@ -1324,6 +1333,61 @@ fn inspect_model_path_for_host(
     ))
 }
 
+fn commit_executable_artifact(
+    temp_path: &Path,
+    executable_path: &Path,
+) -> Result<(), String> {
+    if !executable_path.exists() {
+        return fs::rename(temp_path, executable_path).map_err(|e| {
+            format!(
+                "move {} to {}: {e}",
+                temp_path.display(),
+                executable_path.display()
+            )
+        });
+    }
+
+    let backup_path = PathBuf::from(format!("{}.meshfit-backup", executable_path.display()));
+    if backup_path.exists() {
+        return Err(format!(
+            "executable backup '{}' already exists; refusing replacement until it is resolved",
+            backup_path.display()
+        ));
+    }
+
+    fs::rename(executable_path, &backup_path).map_err(|e| {
+        format!(
+            "move existing executable {} to backup {}: {e}",
+            executable_path.display(),
+            backup_path.display()
+        )
+    })?;
+
+    match fs::rename(temp_path, executable_path) {
+        Ok(()) => {
+            fs::remove_file(&backup_path).map_err(|e| {
+                format!(
+                    "replacement committed to '{}' but backup '{}' could not be removed: {e}",
+                    executable_path.display(),
+                    backup_path.display()
+                )
+            })?;
+            Ok(())
+        }
+        Err(commit_error) => match fs::rename(&backup_path, executable_path) {
+            Ok(()) => Err(format!(
+                "replacement of executable '{}' failed: {commit_error}; previous artifact was restored",
+                executable_path.display()
+            )),
+            Err(restore_error) => Err(format!(
+                "replacement of executable '{}' failed: {commit_error}; restoring backup '{}' also failed: {restore_error}",
+                executable_path.display(),
+                backup_path.display()
+            )),
+        },
+    }
+}
+
 fn ensure_candidate_executable(
     kit_dir: &Path,
     kit: &BenchmarkExecutionKit,
@@ -1391,13 +1455,7 @@ fn ensure_candidate_executable(
     let yaml = serde_yaml::to_string(&executable).map_err(|e| e.to_string())?;
     let temp_path = PathBuf::from(format!("{}.tmp", executable_path.display()));
     fs::write(&temp_path, yaml).map_err(|e| format!("write {}: {e}", temp_path.display()))?;
-    fs::rename(&temp_path, executable_path).map_err(|e| {
-        format!(
-            "move {} to {}: {e}",
-            temp_path.display(),
-            executable_path.display()
-        )
-    })
+    commit_executable_artifact(&temp_path, executable_path)
 }
 
 fn benchmark_preflight_issues(
@@ -2286,6 +2344,94 @@ mod tests {
 
         assert_eq!(fs::read_to_string(&target).unwrap(), "new");
         assert!(!dir.join("run-01.yaml.meshfit-backup").exists());
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    fn write_model_override_fixture(
+        dir: &Path,
+        model_bytes: &[u8],
+        override_bytes: &[u8],
+    ) -> (BenchmarkExecutionKit, PathBuf) {
+        let inputs = dir.join("inputs");
+        fs::create_dir_all(&inputs).unwrap();
+        let source = dir.join("source-model.bin");
+        let override_path = dir.join("host-model.bin");
+        fs::write(&source, model_bytes).unwrap();
+        fs::write(&override_path, override_bytes).unwrap();
+
+        let identity = inspect_model_artifact(
+            &source,
+            "benchmark-model",
+            "bin",
+            "test",
+            Some("fixture".into()),
+        )
+        .unwrap();
+        fs::write(
+            inputs.join("model-identity.yaml"),
+            serde_yaml::to_string(&identity).unwrap(),
+        )
+        .unwrap();
+
+        let mut kit = status_test_kit();
+        kit.model_identity = "inputs/model-identity.yaml".into();
+        (kit, override_path)
+    }
+
+    #[test]
+    fn model_path_override_is_verified_by_artifact_hash() {
+        let dir = status_test_dir("model-override-match");
+        fs::create_dir_all(&dir).unwrap();
+        let (kit, override_path) =
+            write_model_override_fixture(&dir, b"same-model", b"same-model");
+
+        let (path, status, overridden, verified, issue, warnings) =
+            inspect_model_path_for_host(&dir, &kit, Some(override_path.to_str().unwrap())).unwrap();
+
+        assert_eq!(status, "local_override_verified");
+        assert!(Path::new(&path).is_absolute());
+        assert!(overridden);
+        assert!(verified);
+        assert!(issue.is_none());
+        assert!(warnings.is_empty());
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn model_path_override_rejects_hash_mismatch() {
+        let dir = status_test_dir("model-override-mismatch");
+        fs::create_dir_all(&dir).unwrap();
+        let (kit, override_path) =
+            write_model_override_fixture(&dir, b"expected-model", b"different-model");
+
+        let (_, status, overridden, verified, issue, _) =
+            inspect_model_path_for_host(&dir, &kit, Some(override_path.to_str().unwrap())).unwrap();
+
+        assert_eq!(status, "local_override_hash_mismatch");
+        assert!(overridden);
+        assert!(!verified);
+        assert!(issue.unwrap().contains("SHA-256"));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn executable_replacement_preserves_old_artifact_on_commit_failure_guard() {
+        let dir = status_test_dir("executable-backup-guard");
+        fs::create_dir_all(&dir).unwrap();
+        let executable = dir.join("executable.yaml");
+        let temp = dir.join("executable.yaml.tmp");
+        let backup = PathBuf::from(format!("{}.meshfit-backup", executable.display()));
+        fs::write(&executable, "old").unwrap();
+        fs::write(&temp, "new").unwrap();
+        fs::write(&backup, "stale-backup").unwrap();
+
+        let error = commit_executable_artifact(&temp, &executable).unwrap_err();
+        assert!(error.contains("backup"));
+        assert_eq!(fs::read_to_string(&executable).unwrap(), "old");
+        assert_eq!(fs::read_to_string(&temp).unwrap(), "new");
 
         let _ = fs::remove_dir_all(dir);
     }
