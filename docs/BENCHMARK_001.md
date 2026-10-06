@@ -95,6 +95,7 @@ The kit fixes:
 - `results/<strategy>/run-01.yaml` and `run-02.yaml`;
 - executable artifact paths;
 - compile commands;
+- the exact `benchmark_host` where each runtime must execute;
 - benchmark commands;
 - the final comparison-manifest skeleton.
 
