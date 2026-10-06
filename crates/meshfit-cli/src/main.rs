@@ -191,7 +191,6 @@ struct BenchmarkInvalidBundle {
     error: String,
 }
 
-
 #[derive(Debug, Serialize)]
 struct BenchmarkMemoryCalibrationReport {
     benchmark_id: String,
@@ -1301,9 +1300,7 @@ fn run() -> Result<(), String> {
                 "usage: meshfit benchmark-calibrate-memory <kit-dir> <candidate> [--require-complete]"
                     .to_string()
             })?;
-            let candidate = args
-                .get(3)
-                .ok_or_else(|| "missing candidate".to_string())?;
+            let candidate = args.get(3).ok_or_else(|| "missing candidate".to_string())?;
             let require_complete = args.iter().any(|arg| arg == "--require-complete");
             let report = calibrate_benchmark_candidate_memory(
                 Path::new(kit_dir),
@@ -2086,9 +2083,8 @@ fn calibrate_benchmark_candidate_memory(
     let model_identity_path = kit_dir.join(&kit.model_identity);
     let model_identity_raw = fs::read_to_string(&model_identity_path)
         .map_err(|e| format!("read {}: {e}", model_identity_path.display()))?;
-    let expected_model_identity: ModelArtifactIdentity =
-        serde_yaml::from_str(&model_identity_raw)
-            .map_err(|e| format!("parse {}: {e}", model_identity_path.display()))?;
+    let expected_model_identity: ModelArtifactIdentity = serde_yaml::from_str(&model_identity_raw)
+        .map_err(|e| format!("parse {}: {e}", model_identity_path.display()))?;
     let expected_hardware = snapshot
         .hardware_identities
         .get(&candidate.benchmark_host)
