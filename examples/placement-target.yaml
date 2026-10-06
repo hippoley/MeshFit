@@ -6,6 +6,12 @@ model:
   kv_cache_model:
     mode: bytes_per_token
     bytes_per_token: 327680
+  tp_communication_model:
+    mode: transformer
+    layers: 80
+    hidden_size: 8192
+    bytes_per_element: 2
+    collectives_per_layer: 2
   is_moe: false
   required_backends: []
 
@@ -30,5 +36,6 @@ workload:
   context_tokens: 32768
   concurrency: 20
   max_active_sequences: 2
+  max_tp_communication_ms_per_token: 2.0
   p95_latency_ms: 2000
   budget_per_day_usd: 200
