@@ -836,8 +836,10 @@ fn run() -> Result<(), String> {
                 }
 
                 let execution_marker = kit_dir.join(".meshfit-benchmark");
-                let _execution_lock =
-                    acquire_benchmark_file_lock(&execution_marker, "benchmark candidate execution")?;
+                let _execution_lock = acquire_benchmark_file_lock(
+                    &execution_marker,
+                    "benchmark candidate execution",
+                )?;
 
                 for run_number in &plan.pending_runs {
                     execute_benchmark_run_one(
