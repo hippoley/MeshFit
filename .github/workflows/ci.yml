@@ -64,6 +64,8 @@ jobs:
       - run: grep -q 'benchmark-host-check . --current-host --require-ready' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
       - run: grep -q 'benchmark-run-host . --current-host --resume --dry-run' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
       - run: grep -q 'benchmark-run-host . --current-host --resume' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
+      - run: grep -q 'benchmark-export-host . --current-host' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
+      - run: grep -q 'benchmark-import-host .' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
       - run: grep -q 'benchmark-finalize . --markdown --require-publishable' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
       - run: grep -q '## Recovery and debugging' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
       - run: test -f /tmp/meshfit-benchmark-001-materialized/inputs/snapshot.yaml
