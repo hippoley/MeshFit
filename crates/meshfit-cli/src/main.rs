@@ -123,6 +123,7 @@ struct BenchmarkExecutableFallback {
     hourly_cost_usd: f64,
 }
 
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct BenchmarkExecutionComparison {
     benchmark_id: String,
     meshfit_candidate: String,
