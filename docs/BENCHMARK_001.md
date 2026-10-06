@@ -113,6 +113,20 @@ meshfit benchmark-kit \
 
 This writes `kit.yaml`, `comparison.yaml`, `RUNBOOK.md`, an `inputs/` snapshot of the small control files, and per-strategy `artifacts/` + `results/` directories. Commands in the materialized kit are rewritten to run from that directory. Local model paths are canonicalized instead of copying large weights; model hub identifiers are preserved as-is.
 
+Run one assigned candidate/run directly from the materialized kit:
+
+```bash
+cd benchmark-001
+
+# inspect the exact slot plus host/runtime/model preflight result
+meshfit benchmark-run-one . meshfit 1 --dry-run
+
+# execute on the candidate's required benchmark_host
+meshfit benchmark-run-one . meshfit 1
+```
+
+The real execution path reuses `benchmark-preflight`, so a non-ready kit, wrong host, missing runtime, missing explicit local model, out-of-range run number, or accidental bundle overwrite is rejected before evidence is written. If the executable is missing it is compiled from the materialized snapshot/target first. The resulting bundle is validated and then atomically renamed into its fixed result slot.
+
 During real execution, inspect progress at any time:
 
 ```bash
