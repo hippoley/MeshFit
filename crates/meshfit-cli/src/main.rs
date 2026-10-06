@@ -2523,8 +2523,12 @@ fn render_benchmark_runbook(kit: &BenchmarkExecutionKit) -> String {
         kit.runs_per_candidate,
         kit.listen_port
     ));
+    out.push_str(&format!(
+        "**Model source recorded by coordinator:** `{}`  \n",
+        kit.model_path
+    ));
     out.push_str(
-        "Run commands from this directory. Execute each candidate on its listed benchmark_host.\n\n",
+        "Run commands from this materialized directory. Each real machine should execute only the candidates assigned to its logical benchmark host.\n\n",
     );
 
     if !kit.warnings.is_empty() {
@@ -2535,39 +2539,86 @@ fn render_benchmark_runbook(kit: &BenchmarkExecutionKit) -> String {
         out.push('\n');
     }
 
+    let mut by_host =
+        std::collections::BTreeMap::<String, Vec<&BenchmarkExecutionCandidate>>::new();
+    for candidate in &kit.candidates {
+        by_host
+            .entry(candidate.benchmark_host.clone())
+            .or_default()
+            .push(candidate);
+    }
+
+    out.push_str("## Real-host execution\n\n");
+    out.push_str(
+        "Use one host-level command per machine. `MESHFIT_NODE_ID` must match the logical host in the snapshot. If the immutable model lives at a different local path, set `MESHFIT_MODEL_PATH`; MeshFit verifies its SHA-256 before execution.\n\n",
+    );
+
+    for (host, candidates) in &by_host {
+        out.push_str(&format!("### Host: {}\n\n", host));
+        out.push_str("Assigned candidates:\n\n");
+        for candidate in candidates {
+            out.push_str(&format!(
+                "- `{}` — plan `{}`, runtime `{}`, compile ready: {}\n",
+                candidate.name, candidate.plan_id, candidate.runtime, candidate.compile_ready
+            ));
+            if let Some(error) = &candidate.compile_error {
+                out.push_str(&format!("  - compiler preflight error: {error}\n"));
+            }
+        }
+        out.push_str("\n```bash\n");
+        out.push_str(&format!("export MESHFIT_NODE_ID={}\n", shell_quote(host)));
+        out.push_str("# If this host stores the same immutable model at another path:\n");
+        out.push_str("# export MESHFIT_MODEL_PATH=/data/models/model.gguf\n\n");
+        out.push_str("# Inspect the whole host plan before any runtime starts.\n");
+        out.push_str("meshfit benchmark-run-host . --current-host --resume --dry-run\n\n");
+        out.push_str("# Execute every pending candidate/run assigned to this host.\n");
+        out.push_str("meshfit benchmark-run-host . --current-host --resume\n");
+        out.push_str("```\n\n");
+    }
+
+    out.push_str("## Recovery and debugging\n\n");
+    out.push_str(
+        "Use these narrower commands only when diagnosing or recovering a specific candidate/run. The host-level path above is the normal operator workflow.\n\n",
+    );
     for candidate in &kit.candidates {
         out.push_str(&format!(
-            "## {}\n\n- Plan: {}\n- Benchmark host: {}\n- Runtime: {}\n- Compile ready: {}\n\n",
-            candidate.name,
-            candidate.plan_id,
-            candidate.benchmark_host,
-            candidate.runtime,
-            candidate.compile_ready
+            "### Candidate: {}\n\n- Plan: `{}`\n- Benchmark host: `{}`\n- Runtime: `{}`\n\n",
+            candidate.name, candidate.plan_id, candidate.benchmark_host, candidate.runtime
         ));
+        out.push_str("```bash\n");
         out.push_str(&format!(
-            "    meshfit benchmark-preflight . {} --host {} --require-ready\n\n",
+            "meshfit benchmark-preflight . {} --host {} --require-ready\n",
             shell_quote(&candidate.name),
             shell_quote(&candidate.benchmark_host)
         ));
-        if let Some(error) = &candidate.compile_error {
-            out.push_str(&format!("Compiler preflight error: {error}\n\n"));
-            continue;
-        }
+        out.push_str(&format!(
+            "meshfit benchmark-run-candidate . {} --host {} --resume\n",
+            shell_quote(&candidate.name),
+            shell_quote(&candidate.benchmark_host)
+        ));
         for run in 1..=kit.runs_per_candidate {
             out.push_str(&format!(
-                "    meshfit benchmark-run-one . {} {} --host {}\n\n",
+                "# meshfit benchmark-run-one . {} {} --host {}\n",
                 shell_quote(&candidate.name),
                 run,
                 shell_quote(&candidate.benchmark_host)
             ));
         }
+        out.push_str("```\n\n");
     }
 
-    out.push_str("## Verify completion\n\n");
-    out.push_str("    meshfit benchmark-status . --require-complete\n\n");
-    out.push_str("## Compare\n\n");
+    out.push_str("## Finalize the experiment\n\n");
     out.push_str(
-        "    meshfit compare-benchmarks comparison.yaml --markdown --require-publishable\n",
+        "Run these only after every benchmark host has completed its assigned work. Finalization refuses incomplete or non-publishable evidence.\n\n",
+    );
+    out.push_str("```bash\n");
+    out.push_str("meshfit benchmark-status . --require-complete\n");
+    out.push_str("meshfit benchmark-finalize . --markdown --require-publishable\n");
+    out.push_str("```\n\n");
+
+    out.push_str("## Low-level comparison\n\n");
+    out.push_str(
+        "The finalizer above is the preferred publication gate. For diagnostics only:\n\n```bash\nmeshfit compare-benchmarks comparison.yaml --markdown --require-publishable\n```\n",
     );
     out
 }
