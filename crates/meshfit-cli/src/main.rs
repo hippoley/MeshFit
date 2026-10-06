@@ -1,4 +1,8 @@
-use std::{env, fs, path::Path, process};
+use std::{
+    env, fs,
+    path::{Path, PathBuf},
+    process,
+};
 
 use serde::{Deserialize, Serialize};
 
@@ -47,7 +51,7 @@ struct BenchmarkPlanCandidate {
     hourly_cost_usd: f64,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct BenchmarkExecutionKit {
     benchmark_id: String,
     ready: bool,
@@ -63,7 +67,7 @@ struct BenchmarkExecutionKit {
     warnings: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct BenchmarkExecutionCandidate {
     name: String,
     plan_id: String,
@@ -79,7 +83,7 @@ struct BenchmarkExecutionCandidate {
     run_commands: Vec<String>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct BenchmarkExecutionComparison {
     benchmark_id: String,
     meshfit_candidate: String,
@@ -87,7 +91,7 @@ struct BenchmarkExecutionComparison {
     candidates: Vec<BenchmarkExecutionComparisonCandidate>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Clone, Serialize)]
 struct BenchmarkExecutionComparisonCandidate {
     name: String,
     strategy: String,
@@ -353,7 +357,7 @@ fn run() -> Result<(), String> {
         }
         "benchmark-kit" => {
             let snapshot_path = args.get(2).ok_or_else(|| {
-                "usage: meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--require-ready]"
+                "usage: meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--require-ready] [--write-dir DIR]"
                     .to_string()
             })?;
             let target_path = args
@@ -530,8 +534,19 @@ fn run() -> Result<(), String> {
                 ));
             }
 
-            let yaml = serde_yaml::to_string(&kit).map_err(|e| e.to_string())?;
-            print!("{yaml}");
+            if let Some(write_dir) = option_value(&args[7..], "--write-dir")? {
+                let materialized = materialize_benchmark_kit(
+                    &kit,
+                    Path::new(write_dir),
+                    &snapshot_raw,
+                    &target_raw,
+                    &model_identity_raw,
+                )?;
+                println!("{}", materialized.display());
+            } else {
+                let yaml = serde_yaml::to_string(&kit).map_err(|e| e.to_string())?;
+                print!("{yaml}");
+            }
         }
         "compare-benchmarks" => {
             let manifest_path = args.get(2).ok_or_else(|| {
@@ -723,12 +738,154 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 
+fn materialize_benchmark_kit(
+    kit: &BenchmarkExecutionKit,
+    output_dir: &Path,
+    snapshot_raw: &str,
+    target_raw: &str,
+    model_identity_raw: &str,
+) -> Result<PathBuf, String> {
+    let inputs_dir = output_dir.join("inputs");
+    fs::create_dir_all(&inputs_dir).map_err(|e| format!("create {}: {e}", inputs_dir.display()))?;
+
+    fs::write(inputs_dir.join("snapshot.yaml"), snapshot_raw)
+        .map_err(|e| format!("write snapshot input: {e}"))?;
+    fs::write(inputs_dir.join("target.yaml"), target_raw)
+        .map_err(|e| format!("write target input: {e}"))?;
+    fs::write(inputs_dir.join("model-identity.yaml"), model_identity_raw)
+        .map_err(|e| format!("write model identity input: {e}"))?;
+
+    let mut localized = kit.clone();
+    localized.snapshot = "inputs/snapshot.yaml".to_string();
+    localized.target = "inputs/target.yaml".to_string();
+    localized.model_identity = "inputs/model-identity.yaml".to_string();
+    localized.model_path = portable_model_path(&kit.model_path)?;
+
+    for candidate in &mut localized.candidates {
+        fs::create_dir_all(output_dir.join(&candidate.result_dir))
+            .map_err(|e| format!("create result dir '{}': {e}", candidate.result_dir))?;
+
+        let executable_parent = Path::new(&candidate.executable_path)
+            .parent()
+            .ok_or_else(|| format!("invalid executable path '{}'", candidate.executable_path))?;
+        fs::create_dir_all(output_dir.join(executable_parent))
+            .map_err(|e| format!("create artifact dir '{}': {e}", executable_parent.display()))?;
+
+        if candidate.compile_ready {
+            candidate.compile_command = Some(format!(
+                "meshfit compile-snapshot {} {} {} {} > {}",
+                shell_quote(&localized.snapshot),
+                shell_quote(&localized.target),
+                shell_quote(&candidate.plan_id),
+                shell_quote(&localized.model_path),
+                shell_quote(&candidate.executable_path),
+            ));
+            candidate.run_commands = (1..=localized.runs_per_candidate)
+                .map(|run| {
+                    let bundle = format!("{}/run-{run:02}.yaml", candidate.result_dir);
+                    format!(
+                        "meshfit benchmark-auto {} {} --concurrency {} --measured-requests {} > {}",
+                        shell_quote(&candidate.executable_path),
+                        shell_quote(&localized.model_identity),
+                        localized.concurrency,
+                        localized.measured_requests_per_run,
+                        shell_quote(&bundle),
+                    )
+                })
+                .collect();
+        }
+    }
+
+    let kit_yaml = serde_yaml::to_string(&localized).map_err(|e| e.to_string())?;
+    fs::write(output_dir.join("kit.yaml"), kit_yaml).map_err(|e| format!("write kit.yaml: {e}"))?;
+
+    let comparison_yaml =
+        serde_yaml::to_string(&localized.comparison_manifest).map_err(|e| e.to_string())?;
+    fs::write(output_dir.join("comparison.yaml"), comparison_yaml)
+        .map_err(|e| format!("write comparison.yaml: {e}"))?;
+
+    let runbook = render_benchmark_runbook(&localized);
+    fs::write(output_dir.join("RUNBOOK.md"), runbook)
+        .map_err(|e| format!("write RUNBOOK.md: {e}"))?;
+
+    Ok(output_dir.to_path_buf())
+}
+
+fn portable_model_path(model_path: &str) -> Result<String, String> {
+    let path = Path::new(model_path);
+    if path.exists() {
+        path.canonicalize()
+            .map(|path| path.to_string_lossy().into_owned())
+            .map_err(|e| format!("canonicalize model path '{model_path}': {e}"))
+    } else {
+        Ok(model_path.to_string())
+    }
+}
+
+fn shell_quote(value: &str) -> String {
+    if value
+        .chars()
+        .all(|ch| ch.is_ascii_alphanumeric() || "/._:-".contains(ch))
+    {
+        return value.to_string();
+    }
+
+    let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("\"{escaped}\"")
+}
+
+fn render_benchmark_runbook(kit: &BenchmarkExecutionKit) -> String {
+    let mut out = String::new();
+    out.push_str("# MeshFit Benchmark 001 Runbook\n\n");
+    out.push_str(&format!(
+        "**Ready:** {}  \n**Concurrency:** {}  \n**Measured requests/run:** {}  \n**Runs/candidate:** {}\n\n",
+        kit.ready, kit.concurrency, kit.measured_requests_per_run, kit.runs_per_candidate
+    ));
+    out.push_str(
+        "Run commands from this directory. Execute each candidate on its listed benchmark_host.\n\n",
+    );
+
+    if !kit.warnings.is_empty() {
+        out.push_str("## Warnings\n\n");
+        for warning in &kit.warnings {
+            out.push_str(&format!("- {warning}\n"));
+        }
+        out.push('\n');
+    }
+
+    for candidate in &kit.candidates {
+        out.push_str(&format!(
+            "## {}\n\n- Plan: {}\n- Benchmark host: {}\n- Compile ready: {}\n\n",
+            candidate.name, candidate.plan_id, candidate.benchmark_host, candidate.compile_ready
+        ));
+        if let Some(error) = &candidate.compile_error {
+            out.push_str(&format!("Compiler preflight error: {error}\n\n"));
+            continue;
+        }
+        if let Some(command) = &candidate.compile_command {
+            out.push_str("    ");
+            out.push_str(command);
+            out.push_str("\n\n");
+        }
+        for command in &candidate.run_commands {
+            out.push_str("    ");
+            out.push_str(command);
+            out.push_str("\n\n");
+        }
+    }
+
+    out.push_str("## Compare\n\n");
+    out.push_str(
+        "    meshfit compare-benchmarks comparison.yaml --markdown --require-publishable\n",
+    );
+    out
+}
+
 fn default_measured_requests(concurrency: u32) -> u32 {
     let minimum_samples_per_run = 10_u32;
     let waves = minimum_samples_per_run.div_ceil(concurrency);
     waves.max(1).saturating_mul(concurrency)
 }
-
 fn select_benchmark_plans(
     report: &PlacementReport,
     meshfit_plan_id: &str,
@@ -915,7 +1072,7 @@ fn print_prediction(prediction: &Prediction) {
 
 fn print_help() {
     println!(
-        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--require-ready]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
+        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--require-ready] [--write-dir DIR]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
     );
 }
 

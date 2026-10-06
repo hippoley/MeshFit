@@ -99,7 +99,21 @@ The kit fixes:
 - benchmark commands;
 - the final comparison-manifest skeleton.
 
-The kit exposes a top-level `ready` boolean. Every candidate is compiler-preflighted before a command is emitted. Unsupported plans are marked `compile_ready: false` with the compiler error instead of receiving a command that is known to fail. The kit also validates that the model identity matches the target model and carries an artifact hash or revision.
+The kit exposes a top-level `ready` boolean. Every candidate is compiler-preflighted before a command is emitted. To materialize a self-contained experiment control directory (without copying the model weights), use:
+
+```bash
+meshfit benchmark-kit \
+  cluster.yaml \
+  target.yaml \
+  <meshfit-plan-id> \
+  <model-path> \
+  model-identity.yaml \
+  --write-dir benchmark-001
+```
+
+This writes `kit.yaml`, `comparison.yaml`, `RUNBOOK.md`, an `inputs/` snapshot of the small control files, and per-strategy `artifacts/` + `results/` directories. Commands in the materialized kit are rewritten to run from that directory. Local model paths are canonicalized instead of copying large weights; model hub identifiers are preserved as-is.
+
+Every candidate is compiler-preflighted before a command is emitted. Unsupported plans are marked `compile_ready: false` with the compiler error instead of receiving a command that is known to fail. The kit also validates that the model identity matches the target model and carries an artifact hash or revision.
 
 Then compile and execute each selected plan with the same model artifact and BenchmarkConfig, retaining every raw bundle. `benchmark-auto` defaults to at least 10 measured requests per run, so two independent runs can satisfy the 20-sample publication floor. Override with `--measured-requests N` when needed.
 
