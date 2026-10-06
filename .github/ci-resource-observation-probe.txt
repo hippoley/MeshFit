@@ -1,0 +1,1 @@
+Validation-only probe for benchmark resource observation.
