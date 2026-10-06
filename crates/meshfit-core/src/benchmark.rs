@@ -56,10 +56,29 @@ pub struct RequestMeasurement {
     pub total_ms: f64,
     #[serde(default)]
     pub output_tokens: Option<u32>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct WaveMeasurement {
+    pub request_count: u32,
+    pub total_ms: f64,
+    #[serde(default)]
+    pub output_tokens: Option<u32>,
     #[serde(default)]
     pub peak_vram_gb: Option<f64>,
     #[serde(default)]
     pub peak_ram_gb: Option<f64>,
+}
+
+impl WaveMeasurement {
+    pub fn throughput_tokens_per_second(&self) -> Option<f64> {
+        let output_tokens = self.output_tokens?;
+        if self.total_ms <= 0.0 {
+            return None;
+        }
+
+        Some(output_tokens as f64 / (self.total_ms / 1000.0))
+    }
 }
 
 impl RequestMeasurement {
@@ -93,6 +112,8 @@ pub struct BenchmarkBundle {
     pub request: BenchmarkRequestIR,
     #[serde(default)]
     pub measurements: Vec<RequestMeasurement>,
+    #[serde(default)]
+    pub waves: Vec<WaveMeasurement>,
     pub provenance: BenchmarkProvenance,
 }
 
@@ -129,7 +150,11 @@ impl BenchmarkBundle {
             return Err("benchmark requires at least one measured request".into());
         }
 
-        if self.request.config.measured_requests % self.request.concurrency != 0 {
+        if !self
+            .request
+            .config
+            .measured_requests
+            .is_multiple_of(self.request.concurrency) {
             return Err(
                 "measured_requests must be divisible by concurrency so every measured wave uses the declared concurrency"
                     .into(),
@@ -145,6 +170,15 @@ impl BenchmarkBundle {
                 "expected {} measured requests but bundle contains {}",
                 self.request.config.measured_requests,
                 self.measurements.len()
+            ));
+        }
+
+        let expected_waves =
+            (self.request.config.measured_requests / self.request.concurrency) as usize;
+        if self.waves.len() != expected_waves {
+            return Err(format!(
+                "expected {expected_waves} measured waves but bundle contains {}",
+                self.waves.len()
             ));
         }
 
@@ -165,6 +199,21 @@ impl BenchmarkBundle {
             }
         }
 
+        for (idx, wave) in self.waves.iter().enumerate() {
+            if wave.request_count != self.request.concurrency {
+                return Err(format!(
+                    "wave {idx} contains {} requests but declared concurrency is {}",
+                    wave.request_count, self.request.concurrency
+                ));
+            }
+            if wave.total_ms <= 0.0 {
+                return Err(format!("wave {idx} has non-positive total duration"));
+            }
+            if wave.output_tokens == Some(0) {
+                return Err(format!("wave {idx} has zero output tokens"));
+            }
+        }
+
         Ok(())
     }
 
@@ -178,13 +227,6 @@ impl BenchmarkBundle {
                 metric: MetricKind::TtftMs,
                 value: measurement.ttft_ms,
             }];
-
-            if let Some(output_tokens) = measurement.output_tokens {
-                observations.push(MetricObservation {
-                    metric: MetricKind::ThroughputTokensPerSecond,
-                    value: output_tokens as f64 / (measurement.total_ms / 1000.0),
-                });
-            }
 
             if let Some(tpot_ms) = measurement.tpot_ms() {
                 observations.push(MetricObservation {
@@ -200,22 +242,46 @@ impl BenchmarkBundle {
                 });
             }
 
-            if let Some(peak_vram_gb) = measurement.peak_vram_gb {
+            records.push(BenchmarkRecord {
+                id: format!("{}-request-{}", self.benchmark_id, idx + 1),
+                identity: self.request.identity.clone(),
+                context_tokens: self.request.context_tokens,
+                concurrency: self.request.concurrency,
+                observations,
+                provenance: self.provenance.clone(),
+            });
+        }
+
+        for (idx, wave) in self.waves.iter().enumerate() {
+            let mut observations = Vec::new();
+
+            if let Some(throughput_tps) = wave.throughput_tokens_per_second() {
+                observations.push(MetricObservation {
+                    metric: MetricKind::ThroughputTokensPerSecond,
+                    value: throughput_tps,
+                });
+            }
+
+            if let Some(peak_vram_gb) = wave.peak_vram_gb {
                 observations.push(MetricObservation {
                     metric: MetricKind::PeakVramGb,
                     value: peak_vram_gb,
                 });
             }
 
-            if let Some(peak_ram_gb) = measurement.peak_ram_gb {
+            if let Some(peak_ram_gb) = wave.peak_ram_gb {
                 observations.push(MetricObservation {
                     metric: MetricKind::PeakRamGb,
                     value: peak_ram_gb,
                 });
             }
 
+            if observations.is_empty() {
+                continue;
+            }
+
             records.push(BenchmarkRecord {
-                id: format!("{}-{}", self.benchmark_id, idx + 1),
+                id: format!("{}-wave-{}", self.benchmark_id, idx + 1),
                 identity: self.request.identity.clone(),
                 context_tokens: self.request.context_tokens,
                 concurrency: self.request.concurrency,
@@ -225,8 +291,7 @@ impl BenchmarkBundle {
         }
 
         Ok(records)
-    }
-}
+    }}
 
 #[cfg(test)]
 mod tests {
