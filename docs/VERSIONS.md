@@ -151,12 +151,14 @@ Add:
 - cost model
 - memory calibration contract and CLI: required-memory vs observed peak-VRAM error/correction ratios (synthetic CI verified; real GPU repeated calibration pending)
 - latency / throughput predictors
-- estimate-vs-observed reports — VRAM dimension implemented; TTFT/decode dimensions pending
+- estimate-vs-observed reports — VRAM plus exact-identity p95 TTFT / mean decode throughput calibration contracts implemented; real GPU performance calibration pending
 - carefully bounded cross-hardware transfer
 
 Calibration validation: CI runs #877 and #900 verified the strict VRAM calibration contract, CLI path, underprediction direction, conservative observed/predicted ratio, and compatibility with the evolving Benchmark 001 execution stack. These validations use synthetic fixtures; real GPU calibration remains pending.
 
 Prediction-interval validation: CI run #920 verified exact-match sample dispersion and 95% Student-t next-observation intervals through the CLI and the complete 124-step Benchmark 001 stack. These intervals do not transfer across execution identities.
+
+Performance calibration validation: CI run #956 verified exact execution fingerprint/context/concurrency/BenchmarkConfig binding, p95 TTFT and mean decode tok/s error reports, direction-aware optimistic error, conservative correction ratios, missing-usage rejection, CLI serialization, and compatibility with the complete 128-step Benchmark 001 stack. This remains a calibration contract, not a cross-hardware latency/throughput predictor.
 
 Principle:
 
