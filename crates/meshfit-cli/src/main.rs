@@ -2567,11 +2567,22 @@ fn inspect_benchmark_worklist(
                 )
             })?;
 
+        let expected_hardware =
+            load_expected_benchmark_hardware(kit_dir, &kit, &candidate.benchmark_host)?;
+        let expected_model = load_expected_benchmark_model(kit_dir, &kit)?;
+
         for (index, bundle_rel) in comparison.bundles.iter().enumerate() {
             let run_number = index + 1;
             let bundle_path = kit_dir.join(bundle_rel);
             let lock_path = PathBuf::from(format!("{}.lock", bundle_path.display()));
-            let (state, error) = inspect_work_slot(&bundle_path, &candidate.plan_id, &lock_path);
+            let (state, error) = inspect_work_slot(
+                &bundle_path,
+                candidate,
+                &expected_hardware,
+                &expected_model,
+                kit.listen_port,
+                &lock_path,
+            );
 
             let host = hosts
                 .entry(candidate.benchmark_host.clone())
@@ -2646,7 +2657,10 @@ fn inspect_benchmark_worklist(
 
 fn inspect_work_slot(
     bundle_path: &Path,
-    expected_plan_id: &str,
+    candidate: &BenchmarkExecutionCandidate,
+    expected_hardware: &HardwareIdentity,
+    expected_model: &ModelArtifactIdentity,
+    expected_listen_port: u16,
     lock_path: &Path,
 ) -> (&'static str, Option<String>) {
     if bundle_path.is_file() {
@@ -2658,17 +2672,14 @@ fn inspect_work_slot(
             Ok(bundle) => bundle,
             Err(error) => return ("invalid", Some(format!("parse failed: {error}"))),
         };
-        if let Err(error) = bundle.validate() {
+        if let Err(error) = validate_benchmark_bundle_for_candidate(
+            &bundle,
+            candidate,
+            expected_hardware,
+            expected_model,
+            expected_listen_port,
+        ) {
             return ("invalid", Some(error));
-        }
-        if bundle.request.executable.source_plan_id != expected_plan_id {
-            return (
-                "invalid",
-                Some(format!(
-                    "source plan '{}' does not match candidate plan '{}'",
-                    bundle.request.executable.source_plan_id, expected_plan_id
-                )),
-            );
         }
         return ("valid", None);
     }
