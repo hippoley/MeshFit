@@ -152,13 +152,49 @@ impl InfrastructureIR {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum KvCacheModelIR {
+    BytesPerToken {
+        bytes_per_token: u64,
+    },
+    Transformer {
+        layers: u32,
+        kv_heads: u32,
+        head_dim: u32,
+        bytes_per_element: u32,
+    },
+}
+
+impl KvCacheModelIR {
+    pub fn bytes_per_token(&self) -> f64 {
+        match self {
+            Self::BytesPerToken { bytes_per_token } => *bytes_per_token as f64,
+            Self::Transformer {
+                layers,
+                kv_heads,
+                head_dim,
+                bytes_per_element,
+            } => {
+                2.0 * *layers as f64
+                    * *kv_heads as f64
+                    * *head_dim as f64
+                    * *bytes_per_element as f64
+            }
+        }
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ModelIR {
     pub id: String,
     pub parameters_b: f64,
     #[serde(default)]
     pub active_parameters_b: Option<f64>,
     pub weight_memory_gb: f64,
+    #[serde(default)]
     pub kv_cache_gb: f64,
+    #[serde(default)]
+    pub kv_cache_model: Option<KvCacheModelIR>,
     #[serde(default)]
     pub is_moe: bool,
     #[serde(default)]
@@ -166,8 +202,19 @@ pub struct ModelIR {
 }
 
 impl ModelIR {
-    pub fn required_memory_gb(&self) -> f64 {
-        self.weight_memory_gb + self.kv_cache_gb
+    pub fn kv_cache_gb_for(&self, workload: &WorkloadIR) -> f64 {
+        let Some(model) = &self.kv_cache_model else {
+            return self.kv_cache_gb;
+        };
+
+        let bytes = model.bytes_per_token()
+            * workload.context_tokens as f64
+            * workload.active_sequences() as f64;
+        bytes / 1_000_000_000.0
+    }
+
+    pub fn required_memory_gb_for(&self, workload: &WorkloadIR) -> f64 {
+        self.weight_memory_gb + self.kv_cache_gb_for(workload)
     }
 }
 
@@ -200,9 +247,17 @@ pub struct WorkloadIR {
     #[serde(default = "default_concurrency")]
     pub concurrency: u32,
     #[serde(default)]
+    pub max_active_sequences: Option<u32>,
+    #[serde(default)]
     pub p95_latency_ms: Option<u64>,
     #[serde(default)]
     pub budget_per_day_usd: Option<f64>,
+}
+
+impl WorkloadIR {
+    pub fn active_sequences(&self) -> u32 {
+        self.max_active_sequences.unwrap_or(self.concurrency).max(1)
+    }
 }
 
 fn default_concurrency() -> u32 {
