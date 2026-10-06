@@ -128,6 +128,18 @@ MESHFIT_NODE_ID=node-b meshfit benchmark-worklist benchmark-001 --current-host -
 
 Each slot is reported as `pending`, `locked`, `valid`, or `invalid`. A `valid` slot must parse as a BenchmarkBundle, pass bundle validation, and match the candidate plan ID. `locked` means the result-slot lock exists; MeshFit deliberately does not claim the process is alive because the lock may be stale. Every visible slot includes the exact `benchmark-run-one` command.
 
+If the same model artifact lives at a different filesystem path on a benchmark host, override only the path—not the identity:
+
+```bash
+meshfit benchmark-preflight benchmark-001 meshfit \
+  --model-path /data/models/qwen.gguf
+
+meshfit benchmark-run-one benchmark-001 meshfit 1 \
+  --model-path /data/models/qwen.gguf
+```
+
+A local model-path override is accepted only when the materialized model identity contains `artifact_sha256` and the host-local file hashes to exactly the same value. The effective path is canonicalized before compilation. If an executable already exists with a different model source, MeshFit recompiles it under the executable lock and replaces it with backup/restore protection. The local benchmark runner hashes the executable's model source again immediately before launch, so the override is verified twice.
+
 Run one assigned candidate/run directly from the materialized kit:
 
 ```bash
