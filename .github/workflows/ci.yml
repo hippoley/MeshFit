@@ -67,6 +67,17 @@ jobs:
       - run: test -f /tmp/meshfit-benchmark-001-materialized/inputs/model-identity.yaml
       - run: test -d /tmp/meshfit-benchmark-001-materialized/results/meshfit
       - run: test -d /tmp/meshfit-benchmark-001-materialized/artifacts/meshfit
+      - run: cp -R /tmp/meshfit-benchmark-001-materialized /tmp/meshfit-memory-calibration-kit
+      - run: cp examples/benchmark-bundle-kit-calibration.yaml /tmp/meshfit-memory-calibration-kit/results/meshfit/run-01.yaml
+      - run: cargo run -p meshfit -- benchmark-calibrate-memory /tmp/meshfit-memory-calibration-kit meshfit > /tmp/meshfit-kit-memory-calibration.yaml
+      - run: "grep -q 'complete: false' /tmp/meshfit-kit-memory-calibration.yaml"
+      - run: "grep -q 'calibrated_runs: 1' /tmp/meshfit-kit-memory-calibration.yaml"
+      - run: "grep -q 'direction: under_prediction' /tmp/meshfit-kit-memory-calibration.yaml"
+      - run: "grep -q 'execution_fingerprint:' /tmp/meshfit-kit-memory-calibration.yaml"
+      - run: '! cargo run -p meshfit -- benchmark-calibrate-memory /tmp/meshfit-memory-calibration-kit meshfit --require-complete'
+      - run: cp -R /tmp/meshfit-benchmark-001-materialized /tmp/meshfit-memory-calibration-mismatch
+      - run: cp examples/benchmark-bundle.yaml /tmp/meshfit-memory-calibration-mismatch/results/meshfit/run-01.yaml
+      - run: '! cargo run -p meshfit -- benchmark-calibrate-memory /tmp/meshfit-memory-calibration-mismatch meshfit'
       - run: cargo run -p meshfit -- benchmark-worklist /tmp/meshfit-benchmark-001-materialized --host node-b > /tmp/meshfit-benchmark-worklist.yaml
       - run: grep -q 'node-b' /tmp/meshfit-benchmark-worklist.yaml
       - run: grep -q 'pending' /tmp/meshfit-benchmark-worklist.yaml
