@@ -86,6 +86,7 @@ jobs:
       - run: 'grep -q "candidate: meshfit" /tmp/meshfit-benchmark-preflight.yaml'
       - run: '! cargo run -p meshfit -- benchmark-preflight /tmp/meshfit-benchmark-001-materialized meshfit --host node-b --require-ready'
       - run: '! cargo run -p meshfit -- benchmark-status /tmp/meshfit-benchmark-001-materialized --require-complete'
+      - run: '! cargo run -p meshfit -- benchmark-finalize /tmp/meshfit-benchmark-001-materialized'
       - run: printf '[' > /tmp/meshfit-benchmark-001-materialized/results/meshfit/run-01.yaml
       - run: cargo run -p meshfit -- benchmark-status /tmp/meshfit-benchmark-001-materialized > /tmp/meshfit-benchmark-status-invalid.yaml
       - run: grep -q 'parse failed' /tmp/meshfit-benchmark-status-invalid.yaml
