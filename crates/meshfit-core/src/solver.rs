@@ -784,6 +784,67 @@ mod tests {
     }
 
     #[test]
+    fn local_tp_rejects_unbalanced_devices_even_when_aggregate_memory_fits() {
+        let mut scenario = scenario();
+        scenario.model.weight_memory_gb = 100.0;
+        scenario.model.kv_cache_gb = 0.0;
+        scenario.model.kv_cache_model = None;
+        scenario.infrastructure.nodes[0].accelerators[0].free_memory_gb = Some(80.0);
+        scenario.infrastructure.nodes[0].accelerators[1].free_memory_gb = Some(24.0);
+
+        let report = solve(&scenario);
+
+        assert!(!report.feasible.iter().any(|plan| {
+            plan.runtime == "vllm"
+                && plan.placement == PlacementKind::TensorParallel
+                && plan.nodes == vec!["local".to_string()]
+        }));
+        assert!(report.rejected.iter().any(|rejection| {
+            rejection.code == "tp_shard_does_not_fit"
+                && rejection.candidate.starts_with("vllm@local")
+        }));
+    }
+
+    #[test]
+    fn cross_node_tp_rejects_unbalanced_pair_even_when_aggregate_memory_fits() {
+        let mut scenario = scenario();
+        scenario.model.weight_memory_gb = 100.0;
+        scenario.model.kv_cache_gb = 0.0;
+        scenario.model.kv_cache_model = None;
+
+        scenario.infrastructure.nodes[0].accelerators[0].free_memory_gb = Some(80.0);
+        scenario.infrastructure.nodes[0].accelerators[1].free_memory_gb = Some(20.0);
+        scenario.infrastructure.nodes[1].accelerators[0].free_memory_gb = Some(24.0);
+        scenario.infrastructure.nodes[1].accelerators[1].free_memory_gb = Some(23.0);
+
+        let link = scenario
+            .infrastructure
+            .node_link("local", "remote")
+            .unwrap()
+            .clone();
+        let index = scenario
+            .infrastructure
+            .links
+            .iter()
+            .position(|candidate| candidate == &link)
+            .unwrap();
+        scenario.infrastructure.links[index].bandwidth_gbps = Some(100.0);
+        scenario.infrastructure.links[index].latency_ms = Some(0.5);
+
+        let report = solve(&scenario);
+
+        assert!(!report.feasible.iter().any(|plan| {
+            plan.runtime == "vllm"
+                && plan.placement == PlacementKind::TensorParallel
+                && plan.nodes.len() == 2
+        }));
+        assert!(report.rejected.iter().any(|rejection| {
+            rejection.code == "tp_shard_does_not_fit"
+                && rejection.candidate.starts_with("vllm@local+remote")
+        }));
+    }
+
+    #[test]
     fn slow_wan_pair_is_rejected_for_tp() {
         let report = solve(&scenario());
         assert!(report
