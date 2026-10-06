@@ -1220,6 +1220,36 @@ fn run() -> Result<(), String> {
             let yaml = serde_yaml::to_string(&worklist).map_err(|e| e.to_string())?;
             print!("{yaml}");
         }
+        "benchmark-export-host" => {
+            let kit_dir = args.get(2).ok_or_else(|| {
+                "usage: meshfit benchmark-export-host <kit-dir> (--host NODE | --current-host)"
+                    .to_string()
+            })?;
+            let explicit_host = option_value(&args[3..], "--host")?.map(str::to_string);
+            let current_host = args.iter().any(|arg| arg == "--current-host");
+            if explicit_host.is_some() == current_host {
+                return Err("exactly one of --host NODE or --current-host is required".to_string());
+            }
+            let host = explicit_host.unwrap_or_else(|| discover_local().node.id);
+            let transfer = export_benchmark_host_evidence(Path::new(kit_dir), &host)?;
+            let yaml = serde_yaml::to_string(&transfer).map_err(|e| e.to_string())?;
+            print!("{yaml}");
+        }
+        "benchmark-import-host" => {
+            let kit_dir = args.get(2).ok_or_else(|| {
+                "usage: meshfit benchmark-import-host <kit-dir> <host-evidence.yaml>".to_string()
+            })?;
+            let transfer_path = args
+                .get(3)
+                .ok_or_else(|| "missing host-evidence.yaml".to_string())?;
+            let raw = fs::read_to_string(transfer_path)
+                .map_err(|e| format!("read {transfer_path}: {e}"))?;
+            let transfer: BenchmarkHostEvidenceTransfer = serde_yaml::from_str(&raw)
+                .map_err(|e| format!("parse {transfer_path}: {e}"))?;
+            let result = import_benchmark_host_evidence(Path::new(kit_dir), &transfer)?;
+            let yaml = serde_yaml::to_string(&result).map_err(|e| e.to_string())?;
+            print!("{yaml}");
+        }
         "benchmark-status" => {
             let kit_dir = args.get(2).ok_or_else(|| {
                 "usage: meshfit benchmark-status <kit-dir> [--require-complete]".to_string()
@@ -3504,7 +3534,7 @@ fn print_prediction(prediction: &Prediction) {
 
 fn print_help() {
     println!(
-        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit calibrate-performance <bundle.yaml> [bundle.yaml ...] [--predicted-p95-ttft-ms N] [--predicted-decode-tps N]\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--listen-port N] [--require-ready] [--write-dir DIR]\n  meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--host NODE] [--model-path PATH] [--dry-run] [--overwrite]\n  meshfit benchmark-run-candidate <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  meshfit benchmark-host-check <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--require-ready]\n  meshfit benchmark-run-host <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  env MESHFIT_MODEL_PATH may provide the host-local model path when --model-path is omitted\n  meshfit benchmark-worklist <kit-dir> [--host NODE | --current-host] [--pending-only]\n  meshfit benchmark-status <kit-dir> [--require-complete]\n  meshfit benchmark-finalize <kit-dir> [--markdown] [--require-publishable]\n  meshfit benchmark-preflight <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--allow-existing] [--require-ready]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
+        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit calibrate-performance <bundle.yaml> [bundle.yaml ...] [--predicted-p95-ttft-ms N] [--predicted-decode-tps N]\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--listen-port N] [--require-ready] [--write-dir DIR]\n  meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--host NODE] [--model-path PATH] [--dry-run] [--overwrite]\n  meshfit benchmark-run-candidate <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  meshfit benchmark-host-check <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--require-ready]\n  meshfit benchmark-run-host <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  env MESHFIT_MODEL_PATH may provide the host-local model path when --model-path is omitted\n  meshfit benchmark-worklist <kit-dir> [--host NODE | --current-host] [--pending-only]\n  meshfit benchmark-export-host <kit-dir> (--host NODE | --current-host)\n  meshfit benchmark-import-host <kit-dir> <host-evidence.yaml>\n  meshfit benchmark-status <kit-dir> [--require-complete]\n  meshfit benchmark-finalize <kit-dir> [--markdown] [--require-publishable]\n  meshfit benchmark-preflight <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--allow-existing] [--require-ready]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
     );
 }
 
