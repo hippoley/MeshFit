@@ -2,8 +2,7 @@ use std::collections::{HashMap, HashSet};
 
 use crate::ir::{
     AcceleratorBackend, AcceleratorIR, AcceleratorRefIR, ExclusionIR, InfrastructureIR, ModelIR,
-    PlacementKind, PlacementReport, PlanIR, RejectionIR, RuntimeIR,
-    ScenarioIR,
+    PlacementKind, PlacementReport, PlanIR, RejectionIR, RuntimeIR, ScenarioIR,
 };
 
 const CROSS_NODE_MAX_LATENCY_MS: f64 = 2.0;
@@ -42,11 +41,7 @@ pub fn solve(scenario: &ScenarioIR) -> PlacementReport {
     }
 }
 
-fn accelerator_allowed(
-    accelerator: &AcceleratorIR,
-    model: &ModelIR,
-    runtime: &RuntimeIR,
-) -> bool {
+fn accelerator_allowed(accelerator: &AcceleratorIR, model: &ModelIR, runtime: &RuntimeIR) -> bool {
     runtime.supports_backend(accelerator.backend)
         && (model.required_backends.is_empty()
             || model.required_backends.contains(&accelerator.backend))
@@ -138,8 +133,10 @@ fn enumerate_single_node(
                         hourly_cost_usd: node.hourly_cost_usd,
                         memory_headroom_gb: capacity - required,
                         assumptions: vec![
-                            "CPU offload feasibility uses one explicitly selected accelerator".into(),
-                            "75% of system RAM is treated as structurally available for offload".into(),
+                            "CPU offload feasibility uses one explicitly selected accelerator"
+                                .into(),
+                            "75% of system RAM is treated as structurally available for offload"
+                                .into(),
                             "v0.1 does not predict offload throughput".into(),
                         ],
                     });
@@ -148,7 +145,15 @@ fn enumerate_single_node(
         }
 
         if !any_single_fit && runtime.supports_tp {
-            enumerate_local_tp(infra, node.id.as_str(), &compatible, model, runtime, feasible, rejected);
+            enumerate_local_tp(
+                infra,
+                node.id.as_str(),
+                &compatible,
+                model,
+                runtime,
+                feasible,
+                rejected,
+            );
         }
 
         if !feasible.iter().any(|plan| {
@@ -303,14 +308,13 @@ fn enumerate_two_node_tp(
                 continue;
             };
 
-            let (Some(latency_ms), Some(bandwidth_gbps)) =
-                (link.latency_ms, link.bandwidth_gbps)
+            let (Some(latency_ms), Some(bandwidth_gbps)) = (link.latency_ms, link.bandwidth_gbps)
             else {
                 rejected.push(RejectionIR {
                     candidate,
                     code: "unmeasured_link".into(),
-                    reason:
-                        "fabric relation is known but bandwidth/latency have not been measured".into(),
+                    reason: "fabric relation is known but bandwidth/latency have not been measured"
+                        .into(),
                 });
                 continue;
             };
