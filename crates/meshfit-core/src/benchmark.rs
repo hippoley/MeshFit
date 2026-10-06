@@ -111,7 +111,9 @@ impl BenchmarkBundle {
             return Err("benchmark executable placement does not match execution identity".into());
         }
         if self.request.executable.identity_flags != self.request.identity.runtime.flags {
-            return Err("benchmark executable identity flags do not match runtime identity flags".into());
+            return Err(
+                "benchmark executable identity flags do not match runtime identity flags".into(),
+            );
         }
         if self.request.identity.model.artifact_sha256.is_none()
             && self.request.identity.model.revision.is_none()
@@ -216,9 +218,7 @@ mod tests {
     use super::*;
     use crate::{
         compiler::{ExecutionScope, ServiceContract},
-        identity::{
-            HardwareIdentity, ModelArtifactIdentity, RuntimeIdentity, TopologyIdentity,
-        },
+        identity::{HardwareIdentity, ModelArtifactIdentity, RuntimeIdentity, TopologyIdentity},
         ir::PlacementKind,
     };
 
@@ -358,7 +358,8 @@ mod tests {
                 captured_at: None,
             },
         };
-        bundle.request.executable.identity_flags = vec!["--tensor-parallel-size".into(), "2".into()];
+        bundle.request.executable.identity_flags =
+            vec!["--tensor-parallel-size".into(), "2".into()];
 
         assert!(bundle.validate().is_err());
     }
