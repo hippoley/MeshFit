@@ -79,7 +79,10 @@ pub struct BenchmarkComparisonReport {
     pub oracle_objective_value: f64,
     pub meshfit_objective_value: f64,
     pub meshfit_regret_fraction: f64,
+    pub best_baseline_candidate: String,
+    pub best_baseline_objective_value: f64,
     pub best_baseline_regret_fraction: f64,
+    pub meshfit_improvement_vs_best_baseline_fraction: f64,
     #[serde(default)]
     pub regret_reduction_vs_best_baseline_fraction: Option<f64>,
     pub candidates: Vec<CandidateBenchmarkSummary>,
@@ -92,6 +95,18 @@ impl BenchmarkComparisonReport {
             .map(|value| format!("{:.1}%", value * 100.0))
             .unwrap_or_else(|| "n/a".into());
 
+        let improvement_label = if self.meshfit_improvement_vs_best_baseline_fraction >= 0.0 {
+            format!(
+                "{:.1}% better",
+                self.meshfit_improvement_vs_best_baseline_fraction * 100.0
+            )
+        } else {
+            format!(
+                "{:.1}% worse",
+                self.meshfit_improvement_vs_best_baseline_fraction.abs() * 100.0
+            )
+        };
+
         let mut out = String::new();
         out.push_str(&format!("## {}\n\n", self.benchmark_id));
         if self.publishable {
@@ -99,7 +114,9 @@ impl BenchmarkComparisonReport {
                 "**Evidence status:** PUBLISHABLE · independent repeated runs verified\n\n",
             );
             out.push_str(&format!(
-                "**MeshFit placement regret:** {:.1}% · **best baseline regret:** {:.1}% · **regret reduction:** {}\n\n",
+                "**MeshFit vs best baseline ({}): {}** · **placement regret:** {:.1}% · **baseline regret:** {:.1}% · **regret reduction:** {}\n\n",
+                self.best_baseline_candidate,
+                improvement_label,
                 self.meshfit_regret_fraction * 100.0,
                 self.best_baseline_regret_fraction * 100.0,
                 regret_reduction
@@ -109,9 +126,10 @@ impl BenchmarkComparisonReport {
                 "**Evidence status:** NOT PUBLISHABLE · {}\n\n",
                 self.evidence_status
             ));
-            out.push_str(
-                "Provisional comparison only. Do not publish these values as a MeshFit performance claim.\n\n",
-            );
+            out.push_str(&format!(
+                "Provisional comparison only. MeshFit vs best baseline ({}): {}. Do not publish this delta as a MeshFit performance claim.\n\n",
+                self.best_baseline_candidate, improvement_label
+            ));
         }
         out.push_str(
             "| Candidate | Strategy | Runs | Samples | p95 TTFT | Run CV | Decode | Throughput | Cost / 1M output tok | Regret |\n",
@@ -229,12 +247,27 @@ pub fn compare_benchmarks(
     let meshfit_objective_value = meshfit.objective_value;
     let meshfit_regret_fraction = meshfit.regret_fraction;
 
-    let best_baseline_regret = summaries
+    let best_baseline = summaries
         .iter()
         .filter(|summary| summary.name != request.meshfit_candidate)
-        .map(|summary| summary.regret_fraction)
-        .min_by(f64::total_cmp)
+        .min_by(|left, right| {
+            let ordering = left.objective_value.total_cmp(&right.objective_value);
+            if request.objective.lower_is_better() {
+                ordering
+            } else {
+                ordering.reverse()
+            }
+        })
         .ok_or_else(|| "comparison has no baseline candidate".to_string())?;
+
+    let best_baseline_candidate = best_baseline.name.clone();
+    let best_baseline_objective_value = best_baseline.objective_value;
+    let best_baseline_regret = best_baseline.regret_fraction;
+    let meshfit_improvement_vs_best_baseline_fraction = relative_improvement(
+        meshfit_objective_value,
+        best_baseline_objective_value,
+        request.objective,
+    )?;
 
     let regret_reduction = if best_baseline_regret > 0.0 {
         Some((best_baseline_regret - meshfit_regret_fraction) / best_baseline_regret)
@@ -252,7 +285,10 @@ pub fn compare_benchmarks(
         oracle_objective_value: oracle_value,
         meshfit_objective_value,
         meshfit_regret_fraction,
+        best_baseline_candidate,
+        best_baseline_objective_value,
         best_baseline_regret_fraction: best_baseline_regret,
+        meshfit_improvement_vs_best_baseline_fraction,
         regret_reduction_vs_best_baseline_fraction: regret_reduction,
         candidates: summaries,
     })
@@ -645,6 +681,22 @@ fn mean(values: &[f64]) -> Option<f64> {
     }
 }
 
+fn relative_improvement(
+    meshfit: f64,
+    baseline: f64,
+    objective: ComparisonObjective,
+) -> Result<f64, String> {
+    if meshfit <= 0.0 || baseline <= 0.0 {
+        return Err("comparison objective values must be greater than zero".into());
+    }
+
+    Ok(if objective.lower_is_better() {
+        (baseline - meshfit) / baseline
+    } else {
+        (meshfit - baseline) / baseline
+    })
+}
+
 fn regret_fraction(value: f64, oracle: f64, objective: ComparisonObjective) -> Result<f64, String> {
     if value <= 0.0 || oracle <= 0.0 {
         return Err("objective values must be greater than zero".into());
@@ -689,7 +741,10 @@ mod tests {
             oracle_objective_value: 100.0,
             meshfit_objective_value: 100.0,
             meshfit_regret_fraction: 0.0,
+            best_baseline_candidate: "heuristic".into(),
+            best_baseline_objective_value: 125.0,
             best_baseline_regret_fraction: 0.25,
+            meshfit_improvement_vs_best_baseline_fraction: 0.20,
             regret_reduction_vs_best_baseline_fraction: Some(1.0),
             candidates: vec![CandidateBenchmarkSummary {
                 name: "meshfit".into(),
@@ -739,6 +794,27 @@ mod tests {
     #[test]
     fn publication_stability_threshold_is_explicit() {
         assert_eq!(MAX_RUN_OBJECTIVE_CV_FOR_PUBLICATION, 0.20);
+    }
+
+    #[test]
+    fn relative_improvement_handles_lower_and_higher_is_better_metrics() {
+        assert_eq!(
+            relative_improvement(80.0, 100.0, ComparisonObjective::P95TtftMs).unwrap(),
+            0.20
+        );
+        assert_eq!(
+            relative_improvement(
+                120.0,
+                100.0,
+                ComparisonObjective::MeanDecodeTokensPerSecond
+            )
+            .unwrap(),
+            0.20
+        );
+        assert_eq!(
+            relative_improvement(120.0, 100.0, ComparisonObjective::P95TtftMs).unwrap(),
+            -0.20
+        );
     }
 
     #[test]
