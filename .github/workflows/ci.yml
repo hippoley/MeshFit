@@ -37,6 +37,10 @@ jobs:
       - run: 'grep -q "port: 18182" /tmp/meshfit-executable-custom-port.yaml'
       - run: cargo run -p meshfit -- plan examples/v0.1-placement.yaml
       - run: cargo run -p meshfit -- predict examples/v0.2-evidence.yaml examples/v0.2-query.yaml
+      - run: cargo run -p meshfit -- predict examples/v0.2-evidence.yaml examples/v0.2-query.yaml > /tmp/meshfit-prediction-interval.yaml
+      - run: "grep -q 'prediction_interval_95:' /tmp/meshfit-prediction-interval.yaml"
+      - run: "grep -q 'method: student_t_next_observation' /tmp/meshfit-prediction-interval.yaml"
+      - run: "grep -q 'sample_count: 2' /tmp/meshfit-prediction-interval.yaml"
       - run: cargo run -p meshfit -- evidence-from-benchmark examples/benchmark-bundle.yaml > /tmp/meshfit-benchmark-evidence.yaml
       - run: cargo run -p meshfit -- calibrate-memory examples/calibration-plan.yaml examples/benchmark-bundle.yaml > /tmp/meshfit-memory-calibration.yaml
       - run: "grep -q 'direction: under_prediction' /tmp/meshfit-memory-calibration.yaml"
