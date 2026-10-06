@@ -18,6 +18,27 @@ use meshfit_core::{
 
 const BENCHMARK_LISTEN_PORT: u16 = 18080;
 
+fn default_benchmark_listen_port() -> u16 {
+    BENCHMARK_LISTEN_PORT
+}
+
+fn parse_benchmark_listen_port(args: &[String]) -> Result<u16, String> {
+    let port = option_value(args, "--listen-port")?
+        .map(|value| {
+            value
+                .parse::<u16>()
+                .map_err(|e| format!("invalid --listen-port '{value}': {e}"))
+        })
+        .transpose()?
+        .unwrap_or(BENCHMARK_LISTEN_PORT);
+
+    if port == 0 {
+        return Err("--listen-port must be between 1 and 65535".to_string());
+    }
+
+    Ok(port)
+}
+
 #[derive(Debug, Deserialize)]
 struct BenchmarkComparisonManifest {
     benchmark_id: String,
@@ -64,6 +85,8 @@ struct BenchmarkExecutionKit {
     concurrency: u32,
     measured_requests_per_run: u32,
     runs_per_candidate: u32,
+    #[serde(default = "default_benchmark_listen_port")]
+    listen_port: u16,
     candidates: Vec<BenchmarkExecutionCandidate>,
     comparison_manifest: BenchmarkExecutionComparison,
     warnings: Vec<String>,
@@ -516,7 +539,7 @@ fn run() -> Result<(), String> {
         }
         "benchmark-kit" => {
             let snapshot_path = args.get(2).ok_or_else(|| {
-                "usage: meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--require-ready] [--write-dir DIR]"
+                "usage: meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--listen-port N] [--require-ready] [--write-dir DIR]"
                     .to_string()
             })?;
             let target_path = args
@@ -531,6 +554,7 @@ fn run() -> Result<(), String> {
             let model_identity_path = args
                 .get(6)
                 .ok_or_else(|| "missing model-identity.yaml".to_string())?;
+            let listen_port = parse_benchmark_listen_port(&args[7..])?;
 
             let model_identity_raw = fs::read_to_string(model_identity_path)
                 .map_err(|e| format!("read {model_identity_path}: {e}"))?;
@@ -588,7 +612,7 @@ fn run() -> Result<(), String> {
                     model_path: model_path.clone(),
                     model_id: target.model.id.clone(),
                     context_tokens: target.workload.context_tokens,
-                    listen_port: BENCHMARK_LISTEN_PORT,
+                    listen_port,
                     gpu_layers: None,
                     extra_args: vec![],
                 };
@@ -598,11 +622,12 @@ fn run() -> Result<(), String> {
                     match compile_result {
                         Ok(_) => {
                             let compile_command = format!(
-                                "mkdir -p artifacts/{name} {result_dir} && meshfit compile-snapshot {} {} {} {} > {}",
+                                "mkdir -p artifacts/{name} {result_dir} && meshfit compile-snapshot {} {} {} {} --listen-port {} > {}",
                                 snapshot_path,
                                 target_path,
                                 plan.id,
                                 model_path,
+                                listen_port,
                                 executable_path
                             );
                             let run_commands = bundles
@@ -673,6 +698,7 @@ fn run() -> Result<(), String> {
                 concurrency,
                 measured_requests_per_run,
                 runs_per_candidate,
+                listen_port,
                 candidates: execution_candidates,
                 comparison_manifest: BenchmarkExecutionComparison {
                     benchmark_id,
@@ -1000,7 +1026,7 @@ fn run() -> Result<(), String> {
         "compile-snapshot" => {
             let snapshot_path = args
                 .get(2)
-                .ok_or_else(|| "usage: meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]".to_string())?;
+                .ok_or_else(|| "usage: meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers] [--listen-port N] [--listen-port N]".to_string())?;
             let target_path = args
                 .get(3)
                 .ok_or_else(|| "missing target.yaml".to_string())?;
@@ -1008,14 +1034,17 @@ fn run() -> Result<(), String> {
             let model_path = args
                 .get(5)
                 .ok_or_else(|| "missing model-path".to_string())?;
-            let gpu_layers = args
-                .get(6)
+            let trailing = &args[6..];
+            let gpu_layers = trailing
+                .first()
+                .filter(|value| !value.starts_with("--"))
                 .map(|value| {
                     value
                         .parse::<u32>()
                         .map_err(|e| format!("invalid gpu-layers '{value}': {e}"))
                 })
                 .transpose()?;
+            let listen_port = parse_benchmark_listen_port(trailing)?;
 
             let snapshot_raw = fs::read_to_string(snapshot_path)
                 .map_err(|e| format!("read {snapshot_path}: {e}"))?;
@@ -1044,7 +1073,7 @@ fn run() -> Result<(), String> {
                 model_path: model_path.clone(),
                 model_id: target.model.id.clone(),
                 context_tokens: target.workload.context_tokens,
-                listen_port: BENCHMARK_LISTEN_PORT,
+                listen_port,
                 gpu_layers,
                 extra_args: vec![],
             };
@@ -2647,7 +2676,7 @@ fn print_prediction(prediction: &Prediction) {
 
 fn print_help() {
     println!(
-        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--require-ready] [--write-dir DIR]\n  meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--host NODE] [--model-path PATH] [--dry-run] [--overwrite]\n  meshfit benchmark-run-candidate <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  meshfit benchmark-run-host <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  meshfit benchmark-worklist <kit-dir> [--host NODE | --current-host] [--pending-only]\n  meshfit benchmark-status <kit-dir> [--require-complete]\n  meshfit benchmark-finalize <kit-dir> [--markdown] [--require-publishable]\n  meshfit benchmark-preflight <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--allow-existing] [--require-ready]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
+        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--listen-port N] [--require-ready] [--write-dir DIR]\n  meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--host NODE] [--model-path PATH] [--dry-run] [--overwrite]\n  meshfit benchmark-run-candidate <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  meshfit benchmark-run-host <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  meshfit benchmark-worklist <kit-dir> [--host NODE | --current-host] [--pending-only]\n  meshfit benchmark-status <kit-dir> [--require-complete]\n  meshfit benchmark-finalize <kit-dir> [--markdown] [--require-publishable]\n  meshfit benchmark-preflight <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--allow-existing] [--require-ready]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
     );
 }
 
