@@ -141,7 +141,21 @@ meshfit benchmark-run-candidate benchmark-001 meshfit \
   --model-path /data/models/qwen.gguf --resume
 ```
 
-A local model-path override is accepted only when the materialized model identity contains `artifact_sha256` and the host-local file hashes to exactly the same value. The path is canonicalized before compilation. Dry-run output for both one-run and candidate-level execution includes the effective path and verification state. If an executable already exists with a different model source, MeshFit recompiles it under the executable lock and replaces it with backup/restore protection. The local benchmark runner hashes the executable's model source again immediately before launch, so path relocation is verified twice while model identity remains immutable.
+For a real host, prefer configuring the local path once instead of repeating it on every command:
+
+```bash
+export MESHFIT_MODEL_PATH=/data/models/qwen.gguf
+
+meshfit benchmark-preflight benchmark-001 meshfit --host node-b
+meshfit benchmark-run-candidate benchmark-001 meshfit --host node-b --resume
+
+# or execute every candidate assigned to this host
+meshfit benchmark-run-host benchmark-001 --host node-b --resume
+```
+
+An explicit `--model-path` always wins over `MESHFIT_MODEL_PATH`.
+
+A local model-path override is accepted only when the materialized model identity contains `artifact_sha256` and the host-local file hashes to exactly the same value. The path is canonicalized before compilation. Dry-run output for both one-run and candidate-level execution includes the effective path and verification state. If an executable already exists with a different model source, MeshFit recompiles it under the executable lock and replaces it with backup/restore protection. The local benchmark runner hashes the executable's model source again immediately before launch, so path relocation is verified twice while model identity remains immutable. Candidate- and host-level repeated execution performs the expensive host-local artifact preflight once per planned candidate, then reuses that verified resolved path across its run slots instead of hashing a multi-gigabyte model before every independent run. Executable cache reuse requires both the expected plan ID and the resolved model source to match.
 
 Run one assigned candidate/run directly from the materialized kit:
 
