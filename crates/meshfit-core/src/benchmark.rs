@@ -415,11 +415,23 @@ mod tests {
         };
 
         let records = bundle.to_benchmark_records().unwrap();
-        assert_eq!(records.len(), 1);
-        assert!(records[0]
-            .observations
-            .iter()
-            .any(|o| o.metric == MetricKind::DecodeTokensPerSecond));
+        assert_eq!(records.len(), 2);
+        assert!(records.iter().any(|record| {
+            record
+                .observations
+                .iter()
+                .any(|o| o.metric == MetricKind::DecodeTokensPerSecond)
+        }));
+        assert!(records.iter().any(|record| {
+            record.observations.iter().any(|o| {
+                matches!(
+                    o.metric,
+                    MetricKind::ThroughputTokensPerSecond
+                        | MetricKind::PeakVramGb
+                        | MetricKind::PeakRamGb
+                )
+            })
+        }));
     }
 
     #[test]
