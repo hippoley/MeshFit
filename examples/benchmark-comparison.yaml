@@ -1,0 +1,25 @@
+benchmark_id: benchmark-001-ci-fixture
+meshfit_candidate: meshfit
+objective: p95_ttft_ms
+
+# CI plumbing fixture only. All candidates intentionally reference the same
+# synthetic bundle so this file exercises comparison wiring without making a
+# product-performance claim.
+candidates:
+  - name: single-best-node
+    strategy: ci fixture baseline
+    hourly_cost_usd: 1.0
+    bundles:
+      - benchmark-bundle.yaml
+
+  - name: max-aggregate-compute
+    strategy: ci fixture baseline
+    hourly_cost_usd: 1.0
+    bundles:
+      - benchmark-bundle.yaml
+
+  - name: meshfit
+    strategy: ci fixture candidate
+    hourly_cost_usd: 1.0
+    bundles:
+      - benchmark-bundle.yaml
