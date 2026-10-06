@@ -3122,6 +3122,24 @@ fn print_prediction(prediction: &Prediction) {
         println!("mean         {:.3}", mean);
         println!("range        {:.3} .. {:.3}", min, max);
     }
+    if let Some(stddev) = prediction.sample_standard_deviation {
+        println!("sample_standard_deviation: {:.6}", stddev);
+    }
+    if let Some(cv) = prediction.coefficient_of_variation {
+        println!("coefficient_of_variation: {:.6}", cv);
+    }
+    if let Some(interval) = &prediction.prediction_interval_95 {
+        println!("prediction_interval_95:");
+        println!("  confidence_level: {:.2}", interval.confidence_level);
+        println!("  lower: {:.6}", interval.lower);
+        println!("  upper: {:.6}", interval.upper);
+        println!("  method: {}", interval.method);
+        println!("  sample_count: {}", interval.sample_count);
+        println!(
+            "  lower_truncated_at_zero: {}",
+            interval.lower_truncated_at_zero
+        );
+    }
     println!("explanation  {}", prediction.explanation);
     if !prediction.evidence.is_empty() {
         println!("\nEVIDENCE");
