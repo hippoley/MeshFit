@@ -54,6 +54,10 @@ Start from a discovered snapshot and a placement target. The MeshFit-selected pl
 
 ```bash
 meshfit benchmark-candidates cluster.yaml target.yaml <meshfit-plan-id>
+
+# hard gate: exit non-zero if the three strategies collapse onto fewer than
+# three distinct plan IDs
+meshfit benchmark-candidates cluster.yaml target.yaml <meshfit-plan-id> --require-distinct
 ```
 
 This emits:
