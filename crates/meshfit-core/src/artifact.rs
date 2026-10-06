@@ -49,7 +49,10 @@ pub fn inspect_model_artifact(
 
 #[cfg(test)]
 mod tests {
-    use std::{fs, time::{SystemTime, UNIX_EPOCH}};
+    use std::{
+        fs,
+        time::{SystemTime, UNIX_EPOCH},
+    };
 
     use super::*;
 
@@ -63,8 +66,7 @@ mod tests {
         fs::write(&path, b"meshfit").unwrap();
 
         let identity =
-            inspect_model_artifact(&path, "demo", "gguf", "q4_k_m", Some("test".into()))
-                .unwrap();
+            inspect_model_artifact(&path, "demo", "gguf", "q4_k_m", Some("test".into())).unwrap();
 
         assert_eq!(
             identity.artifact_sha256.as_deref(),
