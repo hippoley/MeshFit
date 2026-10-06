@@ -832,6 +832,54 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 
+fn benchmark_preflight_issues(
+    kit_ready: bool,
+    candidate: &BenchmarkExecutionCandidate,
+    observed_host: &str,
+    runtime_found: bool,
+    model_issue: Option<String>,
+    existing_bundle_count: usize,
+    allow_existing: bool,
+) -> Vec<String> {
+    let mut issues = Vec::new();
+
+    if !kit_ready {
+        issues.push("execution kit is not marked ready".to_string());
+    }
+    if !candidate.compile_ready {
+        issues.push(format!(
+            "candidate is not compiler-ready{}",
+            candidate
+                .compile_error
+                .as_deref()
+                .map(|error| format!(": {error}"))
+                .unwrap_or_default()
+        ));
+    }
+    if observed_host != candidate.benchmark_host {
+        issues.push(format!(
+            "wrong benchmark host: candidate requires '{}' but current/declarative host is '{}'",
+            candidate.benchmark_host, observed_host
+        ));
+    }
+    if !runtime_found {
+        issues.push(format!(
+            "required runtime '{}' was not discovered on PATH",
+            candidate.runtime
+        ));
+    }
+    if let Some(issue) = model_issue {
+        issues.push(issue);
+    }
+    if existing_bundle_count > 0 && !allow_existing {
+        issues.push(format!(
+            "{existing_bundle_count} result bundle(s) already exist; refusing accidental evidence overwrite"
+        ));
+    }
+
+    issues
+}
+
 fn inspect_benchmark_preflight(
     kit_dir: &Path,
     candidate_name: &str,
@@ -896,42 +944,16 @@ fn inspect_benchmark_preflight(
         .cloned()
         .collect::<Vec<_>>();
 
-    let mut issues = Vec::new();
+    let mut issues = benchmark_preflight_issues(
+        kit.ready,
+        candidate,
+        &observed_host,
+        runtime_found,
+        model_issue,
+        existing_bundles.len(),
+        allow_existing,
+    );
     let mut warnings = Vec::new();
-    if !kit.ready {
-        issues.push("execution kit is not marked ready".to_string());
-    }
-    if !candidate.compile_ready {
-        issues.push(format!(
-            "candidate is not compiler-ready{}",
-            candidate
-                .compile_error
-                .as_deref()
-                .map(|error| format!(": {error}"))
-                .unwrap_or_default()
-        ));
-    }
-    if !host_match {
-        issues.push(format!(
-            "wrong benchmark host: candidate requires '{}' but current/declarative host is '{}'",
-            candidate.benchmark_host, observed_host
-        ));
-    }
-    if !runtime_found {
-        issues.push(format!(
-            "required runtime '{}' was not discovered on PATH",
-            candidate.runtime
-        ));
-    }
-    if let Some(issue) = model_issue {
-        issues.push(issue);
-    }
-    if !existing_bundles.is_empty() && !allow_existing {
-        issues.push(format!(
-            "{} result bundle(s) already exist; refusing accidental evidence overwrite",
-            existing_bundles.len()
-        ));
-    }
     if model_path_status == "runtime_resolved_unverified" {
         warnings.push(format!(
             "model path '{}' is not a local file; runtime resolution has not been verified",
@@ -1513,6 +1535,42 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("meshfit-{label}-{}-{nonce}", std::process::id()))
+    }
+
+    #[test]
+    fn preflight_hard_gates_host_runtime_and_existing_evidence() {
+        let candidate = &status_test_kit().candidates[0];
+        let issues = benchmark_preflight_issues(
+            true,
+            candidate,
+            "node-b",
+            false,
+            None,
+            1,
+            false,
+        );
+
+        assert!(issues.iter().any(|issue| issue.contains("wrong benchmark host")));
+        assert!(issues.iter().any(|issue| issue.contains("required runtime 'vllm'")));
+        assert!(issues
+            .iter()
+            .any(|issue| issue.contains("refusing accidental evidence overwrite")));
+    }
+
+    #[test]
+    fn preflight_can_resume_existing_evidence_only_when_explicitly_allowed() {
+        let candidate = &status_test_kit().candidates[0];
+        let issues = benchmark_preflight_issues(
+            true,
+            candidate,
+            "node-a",
+            true,
+            None,
+            1,
+            true,
+        );
+
+        assert!(issues.is_empty());
     }
 
     #[test]
