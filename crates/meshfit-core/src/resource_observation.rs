@@ -99,8 +99,8 @@ pub fn sample_resource_usage(root_pid: u32) -> ResourcePeaks {
             None
         };
 
-        let peak_vram_gb = sample_nvidia_vram_mib(&descendants)
-            .map(|memory_mib| memory_mib / 1024.0);
+        let peak_vram_gb =
+            sample_nvidia_vram_mib(&descendants).map(|memory_mib| memory_mib / 1024.0);
 
         ResourcePeaks {
             peak_ram_gb,
@@ -243,10 +243,9 @@ mod tests {
 
     #[test]
     fn parses_linux_status_fields() {
-        let process = parse_linux_status(
-            "Name:\tpython\nState:\tS (sleeping)\nPPid:\t42\nVmRSS:\t2048 kB\n",
-        )
-        .unwrap();
+        let process =
+            parse_linux_status("Name:\tpython\nState:\tS (sleeping)\nPPid:\t42\nVmRSS:\t2048 kB\n")
+                .unwrap();
 
         assert_eq!(
             process,
@@ -290,10 +289,7 @@ mod tests {
             ),
         ]);
 
-        assert_eq!(
-            descendant_pids(10, &processes),
-            HashSet::from([10, 11, 12])
-        );
+        assert_eq!(descendant_pids(10, &processes), HashSet::from([10, 11, 12]));
     }
 
     #[test]
