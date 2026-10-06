@@ -29,4 +29,6 @@ jobs:
       - run: cargo run -p meshfit -- plan examples/v0.1-placement.yaml
       - run: cargo run -p meshfit -- predict examples/v0.2-evidence.yaml examples/v0.2-query.yaml
       - run: cargo run -p meshfit -- evidence-from-benchmark examples/benchmark-bundle.yaml > /tmp/meshfit-benchmark-evidence.yaml
+      - run: cargo run -p meshfit -- compare-benchmarks examples/benchmark-comparison.yaml --markdown > /tmp/meshfit-benchmark-comparison.md
+      - run: '! cargo run -p meshfit -- compare-benchmarks examples/benchmark-comparison.yaml --require-publishable'
       - run: cargo run -p meshfit -- predict /tmp/meshfit-benchmark-evidence.yaml examples/benchmark-query.yaml
