@@ -34,7 +34,7 @@ jobs:
       - run: cargo run -p meshfit -- compile examples/compile-vllm.yaml > /tmp/meshfit-executable.yaml
       - run: cargo run -p meshfit -- compile-snapshot /tmp/meshfit-snapshot-manifest.yaml examples/placement-target.yaml node-b:gpu0:vllm:SingleHost Qwen/Qwen3-32B > /tmp/meshfit-executable-from-snapshot.yaml
       - run: cargo run -p meshfit -- compile-snapshot /tmp/meshfit-snapshot-manifest.yaml examples/placement-target.yaml node-b:gpu0:vllm:SingleHost Qwen/Qwen3-32B --listen-port 18182 > /tmp/meshfit-executable-custom-port.yaml
-      - run: grep -q 'port: 18182' /tmp/meshfit-executable-custom-port.yaml
+      - run: 'grep -q "port: 18182" /tmp/meshfit-executable-custom-port.yaml'
       - run: cargo run -p meshfit -- plan examples/v0.1-placement.yaml
       - run: cargo run -p meshfit -- predict examples/v0.2-evidence.yaml examples/v0.2-query.yaml
       - run: cargo run -p meshfit -- evidence-from-benchmark examples/benchmark-bundle.yaml > /tmp/meshfit-benchmark-evidence.yaml
