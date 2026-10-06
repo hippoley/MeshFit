@@ -885,19 +885,19 @@ fn run() -> Result<(), String> {
                         let code = error.code.clone();
                         let message = error.to_string();
                         let executable_fallbacks = benchmark_executable_fallbacks(
-                                &report,
-                                name,
-                                &plan,
-                                model_path,
-                                &target.model.id,
-                                target.workload.context_tokens,
-                                listen_port,
-                            );
+                            &report,
+                            name,
+                            &plan,
+                            model_path,
+                            &target.model.id,
+                            target.workload.context_tokens,
+                            listen_port,
+                        );
                         warnings.push(format!(
-                                "candidate '{name}' plan '{}' is not compile-ready [{code}]: {message}; {} compiler-ready diagnostic fallback(s) found",
-                                plan.id,
-                                executable_fallbacks.len()
-                            ));
+                            "candidate '{name}' plan '{}' is not compile-ready [{code}]: {message}; {} compiler-ready diagnostic fallback(s) found",
+                            plan.id,
+                            executable_fallbacks.len()
+                        ));
                         (
                             false,
                             Some(code),
