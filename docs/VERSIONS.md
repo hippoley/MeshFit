@@ -59,7 +59,9 @@ Remaining:
 - benchmark artifact schema validation
 - model artifact hash capture
 - runtime/driver capture from real execution
-- repeated-run statistics
+- repeated-run statistics and objective-specific run stability gate (CV <= 20%)
+
+Validation: PR CI run #463 passed fmt, clippy, workspace tests, release build, and the expanded Benchmark 001 CLI chain including candidate selection, execution-kit generation, provisional comparison, and publishability rejection.
 
 Exit gate:
 
