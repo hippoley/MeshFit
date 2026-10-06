@@ -101,6 +101,43 @@ struct BenchmarkExecutionComparisonCandidate {
 }
 
 #[derive(Debug, Serialize)]
+struct BenchmarkWorklist {
+    benchmark_id: String,
+    kit_ready: bool,
+    host_filter: Option<String>,
+    total_slots: usize,
+    valid_slots: usize,
+    pending_slots: usize,
+    locked_slots: usize,
+    invalid_slots: usize,
+    hosts: Vec<BenchmarkHostWork>,
+}
+
+#[derive(Debug, Serialize)]
+struct BenchmarkHostWork {
+    host: String,
+    total_slots: usize,
+    valid_slots: usize,
+    pending_slots: usize,
+    locked_slots: usize,
+    invalid_slots: usize,
+    slots: Vec<BenchmarkWorkSlot>,
+}
+
+#[derive(Debug, Serialize)]
+struct BenchmarkWorkSlot {
+    candidate: String,
+    runtime: String,
+    plan_id: String,
+    run_number: usize,
+    bundle_path: String,
+    state: String,
+    command: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    error: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
 struct BenchmarkKitStatus {
     benchmark_id: String,
     kit_ready: bool,
@@ -772,6 +809,30 @@ fn run() -> Result<(), String> {
                 println!("{}", bundle_path.display());
             }
         }
+        "benchmark-worklist" => {
+            let kit_dir = args.get(2).ok_or_else(|| {
+                "usage: meshfit benchmark-worklist <kit-dir> [--host NODE | --current-host] [--pending-only]"
+                    .to_string()
+            })?;
+            let explicit_host = option_value(&args[3..], "--host")?.map(str::to_string);
+            let current_host = args.iter().any(|arg| arg == "--current-host");
+            if explicit_host.is_some() && current_host {
+                return Err("--host and --current-host are mutually exclusive".to_string());
+            }
+            let host_filter = if current_host {
+                Some(discover_local().node.id)
+            } else {
+                explicit_host
+            };
+            let pending_only = args.iter().any(|arg| arg == "--pending-only");
+            let worklist = inspect_benchmark_worklist(
+                Path::new(kit_dir),
+                host_filter.as_deref(),
+                pending_only,
+            )?;
+            let yaml = serde_yaml::to_string(&worklist).map_err(|e| e.to_string())?;
+            print!("{yaml}");
+        }
         "benchmark-status" => {
             let kit_dir = args.get(2).ok_or_else(|| {
                 "usage: meshfit benchmark-status <kit-dir> [--require-complete]".to_string()
@@ -1333,6 +1394,148 @@ fn inspect_benchmark_preflight(
     })
 }
 
+fn inspect_benchmark_worklist(
+    kit_dir: &Path,
+    host_filter: Option<&str>,
+    pending_only: bool,
+) -> Result<BenchmarkWorklist, String> {
+    let kit = load_benchmark_execution_kit(kit_dir)?;
+    let mut hosts = std::collections::BTreeMap::<String, BenchmarkHostWork>::new();
+
+    for candidate in &kit.candidates {
+        if host_filter.is_some_and(|host| host != candidate.benchmark_host) {
+            continue;
+        }
+
+        let comparison = kit
+            .comparison_manifest
+            .candidates
+            .iter()
+            .find(|item| item.name == candidate.name)
+            .ok_or_else(|| {
+                format!(
+                    "candidate '{}' is missing from comparison manifest",
+                    candidate.name
+                )
+            })?;
+
+        for (index, bundle_rel) in comparison.bundles.iter().enumerate() {
+            let run_number = index + 1;
+            let bundle_path = kit_dir.join(bundle_rel);
+            let lock_path = PathBuf::from(format!("{}.lock", bundle_path.display()));
+            let (state, error) = inspect_work_slot(&bundle_path, &candidate.plan_id, &lock_path);
+
+            let host = hosts
+                .entry(candidate.benchmark_host.clone())
+                .or_insert_with(|| BenchmarkHostWork {
+                    host: candidate.benchmark_host.clone(),
+                    total_slots: 0,
+                    valid_slots: 0,
+                    pending_slots: 0,
+                    locked_slots: 0,
+                    invalid_slots: 0,
+                    slots: Vec::new(),
+                });
+            host.total_slots += 1;
+            match state {
+                "valid" => host.valid_slots += 1,
+                "pending" => host.pending_slots += 1,
+                "locked" => host.locked_slots += 1,
+                "invalid" => host.invalid_slots += 1,
+                _ => {}
+            }
+
+            if pending_only && state == "valid" {
+                continue;
+            }
+
+            let command = format!(
+                "meshfit benchmark-run-one . {} {}",
+                shell_quote(&candidate.name),
+                run_number
+            );
+            host.slots.push(BenchmarkWorkSlot {
+                candidate: candidate.name.clone(),
+                runtime: candidate.runtime.clone(),
+                plan_id: candidate.plan_id.clone(),
+                run_number,
+                bundle_path: bundle_rel.clone(),
+                state: state.to_string(),
+                command,
+                error,
+            });
+        }
+    }
+
+    if let Some(host) = host_filter {
+        if !hosts.contains_key(host) {
+            return Err(format!(
+                "benchmark host '{host}' has no assigned run slots in this kit"
+            ));
+        }
+    }
+
+    let hosts = hosts.into_values().collect::<Vec<_>>();
+    let total_slots = hosts.iter().map(|host| host.total_slots).sum();
+    let valid_slots = hosts.iter().map(|host| host.valid_slots).sum();
+    let pending_slots = hosts.iter().map(|host| host.pending_slots).sum();
+    let locked_slots = hosts.iter().map(|host| host.locked_slots).sum();
+    let invalid_slots = hosts.iter().map(|host| host.invalid_slots).sum();
+
+    Ok(BenchmarkWorklist {
+        benchmark_id: kit.benchmark_id,
+        kit_ready: kit.ready,
+        host_filter: host_filter.map(str::to_string),
+        total_slots,
+        valid_slots,
+        pending_slots,
+        locked_slots,
+        invalid_slots,
+        hosts,
+    })
+}
+
+fn inspect_work_slot(
+    bundle_path: &Path,
+    expected_plan_id: &str,
+    lock_path: &Path,
+) -> (&'static str, Option<String>) {
+    if bundle_path.is_file() {
+        let raw = match fs::read_to_string(bundle_path) {
+            Ok(raw) => raw,
+            Err(error) => return ("invalid", Some(format!("read failed: {error}"))),
+        };
+        let bundle: BenchmarkBundle = match serde_yaml::from_str(&raw) {
+            Ok(bundle) => bundle,
+            Err(error) => return ("invalid", Some(format!("parse failed: {error}"))),
+        };
+        if let Err(error) = bundle.validate() {
+            return ("invalid", Some(error));
+        }
+        if bundle.request.executable.source_plan_id != expected_plan_id {
+            return (
+                "invalid",
+                Some(format!(
+                    "source plan '{}' does not match candidate plan '{}'",
+                    bundle.request.executable.source_plan_id, expected_plan_id
+                )),
+            );
+        }
+        return ("valid", None);
+    }
+
+    if lock_path.exists() {
+        return (
+            "locked",
+            Some(
+                "run slot lock exists; the run may be active or the lock may be stale".to_string(),
+            ),
+        );
+    }
+
+    ("pending", None)
+}
+
 fn inspect_benchmark_kit(kit_dir: &Path) -> Result<BenchmarkKitStatus, String> {
     let kit_path = kit_dir.join("kit.yaml");
     let raw =
@@ -1814,7 +2017,7 @@ fn print_prediction(prediction: &Prediction) {
 
 fn print_help() {
     println!(
-        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--require-ready] [--write-dir DIR]\n  meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--host NODE] [--dry-run] [--overwrite]\n  meshfit benchmark-status <kit-dir> [--require-complete]\n  meshfit benchmark-preflight <kit-dir> <candidate> [--host NODE] [--allow-existing] [--require-ready]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
+        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--require-ready] [--write-dir DIR]\n  meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--host NODE] [--dry-run] [--overwrite]\n  meshfit benchmark-worklist <kit-dir> [--host NODE | --current-host] [--pending-only]\n  meshfit benchmark-status <kit-dir> [--require-complete]\n  meshfit benchmark-preflight <kit-dir> <candidate> [--host NODE] [--allow-existing] [--require-ready]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
     );
 }
 
@@ -1975,6 +2178,48 @@ mod tests {
         drop(first);
         let third = acquire_benchmark_run_slot(&bundle_path).unwrap();
         drop(third);
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn benchmark_worklist_rejects_unassigned_host() {
+        let dir = status_test_dir("worklist-host");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("kit.yaml"),
+            serde_yaml::to_string(&status_test_kit()).unwrap(),
+        )
+        .unwrap();
+
+        let error = inspect_benchmark_worklist(&dir, Some("node-z"), true).unwrap_err();
+        assert!(error.contains("has no assigned run slots"));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn benchmark_work_slot_distinguishes_pending_locked_and_invalid() {
+        let dir = status_test_dir("work-slot");
+        fs::create_dir_all(&dir).unwrap();
+        let bundle_path = dir.join("run-01.yaml");
+        let lock_path = PathBuf::from(format!("{}.lock", bundle_path.display()));
+
+        assert_eq!(
+            inspect_work_slot(&bundle_path, "plan-test", &lock_path),
+            ("pending", None)
+        );
+
+        fs::write(&lock_path, "").unwrap();
+        let locked = inspect_work_slot(&bundle_path, "plan-test", &lock_path);
+        assert_eq!(locked.0, "locked");
+        assert!(locked.1.unwrap().contains("may be stale"));
+
+        fs::remove_file(&lock_path).unwrap();
+        fs::write(&bundle_path, "not-valid-yaml: [").unwrap();
+        let invalid = inspect_work_slot(&bundle_path, "plan-test", &lock_path);
+        assert_eq!(invalid.0, "invalid");
+        assert!(invalid.1.unwrap().contains("parse failed"));
 
         let _ = fs::remove_dir_all(dir);
     }

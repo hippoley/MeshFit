@@ -113,6 +113,21 @@ meshfit benchmark-kit \
 
 This writes `kit.yaml`, `comparison.yaml`, `RUNBOOK.md`, an `inputs/` snapshot of the small control files, and per-strategy `artifacts/` + `results/` directories. Commands in the materialized kit are rewritten to run from that directory. Local model paths are canonicalized instead of copying large weights; model hub identifiers are preserved as-is.
 
+Before running anything, inspect the experiment as a host-oriented work queue:
+
+```bash
+# all hosts and all slots
+meshfit benchmark-worklist benchmark-001
+
+# only the work assigned to one logical host
+meshfit benchmark-worklist benchmark-001 --host node-b
+
+# on the real host, use its discovered MESHFIT_NODE_ID and hide completed slots
+MESHFIT_NODE_ID=node-b meshfit benchmark-worklist benchmark-001 --current-host --pending-only
+```
+
+Each slot is reported as `pending`, `locked`, `valid`, or `invalid`. A `valid` slot must parse as a BenchmarkBundle, pass bundle validation, and match the candidate plan ID. `locked` means the result-slot lock exists; MeshFit deliberately does not claim the process is alive because the lock may be stale. Every visible slot includes the exact `benchmark-run-one` command.
+
 Run one assigned candidate/run directly from the materialized kit:
 
 ```bash
