@@ -1372,26 +1372,6 @@ fn inspect_benchmark_worklist(
             let lock_path = PathBuf::from(format!("{}.lock", bundle_path.display()));
             let (state, error) = inspect_work_slot(&bundle_path, &candidate.plan_id, &lock_path);
 
-            if pending_only && state == "valid" {
-                continue;
-            }
-
-            let command = format!(
-                "meshfit benchmark-run-one . {} {}",
-                shell_quote(&candidate.name),
-                run_number
-            );
-            let slot = BenchmarkWorkSlot {
-                candidate: candidate.name.clone(),
-                runtime: candidate.runtime.clone(),
-                plan_id: candidate.plan_id.clone(),
-                run_number,
-                bundle_path: bundle_rel.clone(),
-                state: state.to_string(),
-                command,
-                error,
-            };
-
             let host = hosts
                 .entry(candidate.benchmark_host.clone())
                 .or_insert_with(|| BenchmarkHostWork {
@@ -1411,7 +1391,34 @@ fn inspect_benchmark_worklist(
                 "invalid" => host.invalid_slots += 1,
                 _ => {}
             }
-            host.slots.push(slot);
+
+            if pending_only && state == "valid" {
+                continue;
+            }
+
+            let command = format!(
+                "meshfit benchmark-run-one . {} {}",
+                shell_quote(&candidate.name),
+                run_number
+            );
+            host.slots.push(BenchmarkWorkSlot {
+                candidate: candidate.name.clone(),
+                runtime: candidate.runtime.clone(),
+                plan_id: candidate.plan_id.clone(),
+                run_number,
+                bundle_path: bundle_rel.clone(),
+                state: state.to_string(),
+                command,
+                error,
+            });
+        }
+    }
+
+    if let Some(host) = host_filter {
+        if !hosts.contains_key(host) {
+            return Err(format!(
+                "benchmark host '{host}' has no assigned run slots in this kit"
+            ));
         }
     }
 
@@ -2085,6 +2092,22 @@ mod tests {
         drop(first);
         let third = acquire_benchmark_run_slot(&bundle_path).unwrap();
         drop(third);
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn benchmark_worklist_rejects_unassigned_host() {
+        let dir = status_test_dir("worklist-host");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("kit.yaml"),
+            serde_yaml::to_string(&status_test_kit()).unwrap(),
+        )
+        .unwrap();
+
+        let error = inspect_benchmark_worklist(&dir, Some("node-z"), true).unwrap_err();
+        assert!(error.contains("has no assigned run slots"));
 
         let _ = fs::remove_dir_all(dir);
     }
