@@ -215,6 +215,18 @@ struct BenchmarkRunCandidatePlan {
     overwrite: bool,
 }
 
+#[derive(Debug, Serialize)]
+struct BenchmarkRunHostPlan {
+    benchmark_id: String,
+    host: String,
+    ready: bool,
+    issues: Vec<String>,
+    model_path_override: Option<String>,
+    resume: bool,
+    overwrite: bool,
+    candidates: Vec<BenchmarkRunCandidatePlan>,
+}
+
 #[derive(Debug)]
 struct BenchmarkModelPathCheck {
     path: String,
@@ -808,6 +820,41 @@ fn run() -> Result<(), String> {
                 );
             }
         }
+        "benchmark-run-host" => {
+            let kit_dir = args.get(2).ok_or_else(|| {
+                "usage: meshfit benchmark-run-host <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--dry-run] [--resume|--overwrite]"
+                    .to_string()
+            })?;
+            let explicit_host = option_value(&args[3..], "--host")?.map(str::to_string);
+            let current_host = args.iter().any(|arg| arg == "--current-host");
+            if explicit_host.is_some() == current_host {
+                return Err("exactly one of --host NODE or --current-host is required".to_string());
+            }
+            let host = explicit_host.unwrap_or_else(|| discover_local().node.id);
+            let model_path_override = option_value(&args[3..], "--model-path")?.map(str::to_string);
+            let dry_run = args.iter().any(|arg| arg == "--dry-run");
+            let resume = args.iter().any(|arg| arg == "--resume");
+            let overwrite = args.iter().any(|arg| arg == "--overwrite");
+            if resume && overwrite {
+                return Err("--resume and --overwrite are mutually exclusive".to_string());
+            }
+
+            let kit_dir = Path::new(kit_dir);
+            let plan = plan_benchmark_host_runs(
+                kit_dir,
+                &host,
+                model_path_override.as_deref(),
+                resume,
+                overwrite,
+            )?;
+            if dry_run {
+                let yaml = serde_yaml::to_string(&plan).map_err(|e| e.to_string())?;
+                print!("{yaml}");
+            } else {
+                let (valid_slots, total_slots) = execute_benchmark_host_plan(kit_dir, &plan)?;
+                println!("{}: {}/{} valid slots", plan.host, valid_slots, total_slots);
+            }
+        }
         "benchmark-worklist" => {
             let kit_dir = args.get(2).ok_or_else(|| {
                 "usage: meshfit benchmark-worklist <kit-dir> [--host NODE | --current-host] [--pending-only]"
@@ -1325,6 +1372,121 @@ fn plan_benchmark_candidate_runs(
         resume,
         overwrite,
     })
+}
+
+fn plan_benchmark_host_runs(
+    kit_dir: &Path,
+    host: &str,
+    model_path_override: Option<&str>,
+    resume: bool,
+    overwrite: bool,
+) -> Result<BenchmarkRunHostPlan, String> {
+    let kit = load_benchmark_execution_kit(kit_dir)?;
+    let assigned = kit
+        .candidates
+        .iter()
+        .filter(|candidate| candidate.benchmark_host == host)
+        .map(|candidate| candidate.name.clone())
+        .collect::<Vec<_>>();
+
+    if assigned.is_empty() {
+        return Err(format!(
+            "benchmark host '{host}' has no assigned candidates in this kit"
+        ));
+    }
+
+    let mut issues = Vec::new();
+    let mut candidates = Vec::new();
+
+    for candidate_name in assigned {
+        match plan_benchmark_candidate_runs(
+            kit_dir,
+            &candidate_name,
+            Some(host),
+            model_path_override,
+            resume,
+            overwrite,
+        ) {
+            Ok(plan) => {
+                if !plan.preflight_ready {
+                    if plan.preflight_issues.is_empty() {
+                        issues.push(format!(
+                            "candidate '{}' is not preflight-ready",
+                            candidate_name
+                        ));
+                    } else {
+                        for issue in &plan.preflight_issues {
+                            issues.push(format!("candidate '{}': {issue}", candidate_name));
+                        }
+                    }
+                }
+                candidates.push(plan);
+            }
+            Err(error) => {
+                issues.push(format!("candidate '{}': {error}", candidate_name));
+            }
+        }
+    }
+
+    Ok(BenchmarkRunHostPlan {
+        benchmark_id: kit.benchmark_id,
+        host: host.to_string(),
+        ready: issues.is_empty(),
+        issues,
+        model_path_override: model_path_override.map(str::to_string),
+        resume,
+        overwrite,
+        candidates,
+    })
+}
+
+fn execute_benchmark_host_plan(
+    kit_dir: &Path,
+    plan: &BenchmarkRunHostPlan,
+) -> Result<(usize, usize), String> {
+    if !plan.ready {
+        return Err(format!(
+            "Benchmark 001 host preflight failed for '{}': {}",
+            plan.host,
+            if plan.issues.is_empty() {
+                "unknown host preflight failure".to_string()
+            } else {
+                plan.issues.join(" ")
+            }
+        ));
+    }
+
+    for candidate_plan in &plan.candidates {
+        for run_number in &candidate_plan.pending_runs {
+            execute_benchmark_run_one(
+                kit_dir,
+                &candidate_plan.candidate,
+                *run_number,
+                Some(plan.host.as_str()),
+                plan.model_path_override.as_deref(),
+                plan.overwrite,
+            )?;
+        }
+    }
+
+    let worklist = inspect_benchmark_worklist(kit_dir, Some(&plan.host), false)?;
+    if worklist.valid_slots != worklist.total_slots
+        || worklist.pending_slots != 0
+        || worklist.locked_slots != 0
+        || worklist.invalid_slots != 0
+    {
+        return Err(format!(
+            "host '{}' remains incomplete after execution: {}/{} valid slots, {} pending, {} locked, {} invalid",
+            plan.host,
+            worklist.valid_slots,
+            worklist.total_slots,
+            worklist.pending_slots,
+            worklist.locked_slots,
+            worklist.invalid_slots
+        ));
+    }
+
+    Ok((worklist.valid_slots, worklist.total_slots))
 }
 
 fn execute_benchmark_run_one(
@@ -2437,7 +2599,7 @@ fn print_prediction(prediction: &Prediction) {
 
 fn print_help() {
     println!(
-        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--require-ready] [--write-dir DIR]\n  meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--host NODE] [--model-path PATH] [--dry-run] [--overwrite]\n  meshfit benchmark-worklist <kit-dir> [--host NODE | --current-host] [--pending-only]\n  meshfit benchmark-status <kit-dir> [--require-complete]\n  meshfit benchmark-preflight <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--allow-existing] [--require-ready]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
+        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--require-ready] [--write-dir DIR]\n  meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--host NODE] [--model-path PATH] [--dry-run] [--overwrite]\n  meshfit benchmark-run-candidate <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  meshfit benchmark-run-host <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  meshfit benchmark-worklist <kit-dir> [--host NODE | --current-host] [--pending-only]\n  meshfit benchmark-status <kit-dir> [--require-complete]\n  meshfit benchmark-preflight <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--allow-existing] [--require-ready]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
     );
 }
 
@@ -2699,6 +2861,41 @@ mod tests {
         drop(first);
         let third = acquire_benchmark_run_slot(&bundle_path).unwrap();
         drop(third);
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn benchmark_run_host_rejects_unassigned_host() {
+        let dir = status_test_dir("run-host-unassigned");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("kit.yaml"),
+            serde_yaml::to_string(&status_test_kit()).unwrap(),
+        )
+        .unwrap();
+
+        let error = plan_benchmark_host_runs(&dir, "node-z", None, false, false).unwrap_err();
+        assert!(error.contains("has no assigned candidates"));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn benchmark_run_host_collects_preflight_failures_before_execution() {
+        let dir = status_test_dir("run-host-preflight");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("kit.yaml"),
+            serde_yaml::to_string(&status_test_kit()).unwrap(),
+        )
+        .unwrap();
+
+        let plan = plan_benchmark_host_runs(&dir, "node-a", None, false, false).unwrap();
+        assert!(!plan.ready);
+        assert_eq!(plan.candidates.len(), 1);
+        assert!(!plan.issues.is_empty());
+        assert_eq!(plan.candidates[0].pending_runs, vec![1]);
 
         let _ = fs::remove_dir_all(dir);
     }

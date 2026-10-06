@@ -371,6 +371,31 @@ If the final commit rename fails, MeshFit attempts to restore the previous bundl
 This protects real benchmark evidence from a remove-then-rename failure window.
 
 
+## Host-level executor
+
+On a real benchmark machine, the preferred operator path is one command for all candidates assigned to that logical host:
+
+```bash
+MESHFIT_NODE_ID=node-b meshfit benchmark-run-host benchmark-001 \
+  --current-host \
+  --model-path /data/models/qwen.gguf \
+  --resume
+```
+
+Inspect the entire host plan without starting a runtime:
+
+```bash
+MESHFIT_NODE_ID=node-b meshfit benchmark-run-host benchmark-001 \
+  --current-host \
+  --model-path /data/models/qwen.gguf \
+  --resume \
+  --dry-run
+```
+
+Host execution is fail-fast before the first GPU process starts. MeshFit plans every candidate assigned to the host, runs the same host/runtime/model/evidence preflight for each one, and sets `ready: false` if any candidate is not executable. Only a fully ready host plan is executed. Runs are still performed sequentially through the existing one-run execution core, preserving local experiment locking, model SHA-256 verification, executable/source-plan checks, evidence validation, and atomic bundle commits. After execution, MeshFit re-reads the host worklist and requires every assigned slot to be valid with zero pending, locked, or invalid slots.
+
+Use `--resume` for the normal restartable workflow: already-existing bundles are skipped only after they parse, validate, and match the expected candidate plan. `--overwrite` is explicit destructive intent and remains mutually exclusive with `--resume`.
+
 ## Candidate-level repeated-run executor
 
 Run every independent slot for one candidate through the same validated execution core:
