@@ -12,6 +12,7 @@ use crate::{
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct DiscoveredAccelerator {
+    pub accelerator_id: String,
     pub identity: DeviceIdentity,
     pub free_memory_mib: Option<u64>,
 }
@@ -95,9 +96,8 @@ pub fn discover_local() -> LocalDiscovery {
 
     let accelerators = discovered
         .iter()
-        .enumerate()
-        .map(|(idx, gpu)| AcceleratorIR {
-            id: format!("gpu{idx}"),
+        .map(|gpu| AcceleratorIR {
+            id: gpu.accelerator_id.clone(),
             backend: gpu.identity.backend,
             memory_gb: gpu.identity.memory_mib as f64 / 1024.0,
             free_memory_gb: gpu.free_memory_mib.map(|mib| mib as f64 / 1024.0),
@@ -215,10 +215,12 @@ pub fn parse_nvidia_smi_csv(raw: &str) -> Vec<DiscoveredAccelerator> {
                 return None;
             }
 
+            let index = parts[0].parse::<u64>().ok()?;
             let memory_mib = parts[2].parse::<u64>().ok()?;
             let free_memory_mib = parts[3].parse::<u64>().ok();
 
             Some(DiscoveredAccelerator {
+                accelerator_id: format!("gpu{index}"),
                 identity: DeviceIdentity {
                     vendor: "nvidia".into(),
                     model: parts[1].to_string(),
@@ -369,6 +371,7 @@ pub fn parse_amd_smi_json(
         let free_memory_mib = used_memory_mib.map(|used| memory_mib.saturating_sub(used));
 
         devices.push(DiscoveredAccelerator {
+            accelerator_id: format!("amd{gpu_index}"),
             identity: DeviceIdentity {
                 vendor: "amd".into(),
                 model,
@@ -420,6 +423,7 @@ pub fn parse_intel_xpu_smi_json(raw: &str) -> Result<Vec<DiscoveredAccelerator>,
             .map(str::to_string);
 
         devices.push(DiscoveredAccelerator {
+            accelerator_id: format!("xpu{device_id}"),
             identity: DeviceIdentity {
                 vendor: "intel".into(),
                 model,
@@ -631,6 +635,7 @@ fn discover_apple_silicon_accelerator(
         })?;
 
     Ok(Some(DiscoveredAccelerator {
+        accelerator_id: "metal0".into(),
         identity: DeviceIdentity {
             vendor: "apple".into(),
             model: format!("{chip} GPU"),
@@ -716,6 +721,8 @@ mod tests {
         let raw = "0, NVIDIA H100 80GB HBM3, 81559, 80123, 580.65.06\n1, NVIDIA H100 80GB HBM3, 81559, 79999, 580.65.06\n";
         let devices = parse_nvidia_smi_csv(raw);
         assert_eq!(devices.len(), 2);
+        assert_eq!(devices[0].accelerator_id, "gpu0");
+        assert_eq!(devices[1].accelerator_id, "gpu1");
         assert_eq!(devices[0].identity.model, "NVIDIA H100 80GB HBM3");
         assert_eq!(devices[0].identity.memory_mib, 81559);
         assert_eq!(devices[0].free_memory_mib, Some(80123));
@@ -744,6 +751,7 @@ mod tests {
 
         let devices = parse_amd_smi_json(static_raw, Some(monitor_raw)).unwrap();
         assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].accelerator_id, "amd0");
         assert_eq!(devices[0].identity.vendor, "amd");
         assert_eq!(devices[0].identity.model, "AMD Instinct MI300X");
         assert_eq!(devices[0].identity.backend, AcceleratorBackend::Rocm);
@@ -767,6 +775,7 @@ mod tests {
 
         let devices = parse_intel_xpu_smi_json(raw).unwrap();
         assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].accelerator_id, "xpu0");
         assert_eq!(devices[0].identity.vendor, "intel");
         assert_eq!(
             devices[0].identity.model,
@@ -790,6 +799,24 @@ mod tests {
 
         assert!(amd.is_empty());
         assert!(intel.is_empty());
+    }
+
+    #[test]
+    fn vendor_local_accelerator_ids_do_not_share_a_global_sequence() {
+        let nvidia = parse_nvidia_smi_csv("3, NVIDIA H100 80GB HBM3, 81559, 80123, 580.65.06\n");
+        let amd = parse_amd_smi_json(
+            r#"{"gpu_data":[{"gpu":2,"asic":{"market_name":"AMD Instinct"},"vram":{"vram_size":{"value":81920,"unit":"MiB"}}}]}"#,
+            None,
+        )
+        .unwrap();
+        let intel = parse_intel_xpu_smi_json(
+            r#"{"device_list":[{"device_id":5,"device_type":"GPU","device_name":"Intel GPU","memory_physical_size_byte":8589934592}]}"#,
+        )
+        .unwrap();
+
+        assert_eq!(nvidia[0].accelerator_id, "gpu3");
+        assert_eq!(amd[0].accelerator_id, "amd2");
+        assert_eq!(intel[0].accelerator_id, "xpu5");
     }
 
     #[test]
