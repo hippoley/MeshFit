@@ -191,6 +191,21 @@ struct BenchmarkInvalidBundle {
     error: String,
 }
 
+#[derive(Debug, Serialize)]
+struct BenchmarkMemoryCalibrationReport {
+    benchmark_id: String,
+    candidate: String,
+    complete: bool,
+    expected_runs: usize,
+    calibrated_runs: usize,
+    context_tokens: u32,
+    concurrency: u32,
+    model_id: String,
+    execution_fingerprint: String,
+    missing_bundles: Vec<String>,
+    calibration: meshfit_core::MemoryCalibrationSummary,
+}
+
 #[derive(Debug)]
 struct BenchmarkRunSlotLock {
     path: PathBuf,
@@ -1280,6 +1295,21 @@ fn run() -> Result<(), String> {
                 print!("{yaml}");
             }
         }
+        "benchmark-calibrate-memory" => {
+            let kit_dir = args.get(2).ok_or_else(|| {
+                "usage: meshfit benchmark-calibrate-memory <kit-dir> <candidate> [--require-complete]"
+                    .to_string()
+            })?;
+            let candidate = args.get(3).ok_or_else(|| "missing candidate".to_string())?;
+            let require_complete = args.iter().any(|arg| arg == "--require-complete");
+            let report = calibrate_benchmark_candidate_memory(
+                Path::new(kit_dir),
+                candidate,
+                require_complete,
+            )?;
+            let yaml = serde_yaml::to_string(&report).map_err(|e| e.to_string())?;
+            print!("{yaml}");
+        }
         "calibrate-memory" => {
             let plan_path = args.get(2).ok_or_else(|| {
                 "usage: meshfit calibrate-memory <plan.yaml> <bundle.yaml> [bundle.yaml ...]"
@@ -2015,6 +2045,190 @@ fn execute_benchmark_run_one_prevalidated(
     commit_benchmark_bundle(&temp_path, &bundle_path, overwrite)?;
 
     Ok(bundle_path)
+}
+
+fn calibrate_benchmark_candidate_memory(
+    kit_dir: &Path,
+    candidate_name: &str,
+    require_complete: bool,
+) -> Result<BenchmarkMemoryCalibrationReport, String> {
+    let kit = load_benchmark_execution_kit(kit_dir)?;
+    let candidate = kit
+        .candidates
+        .iter()
+        .find(|candidate| candidate.name == candidate_name)
+        .ok_or_else(|| format!("unknown benchmark candidate '{candidate_name}'"))?;
+    let comparison = kit
+        .comparison_manifest
+        .candidates
+        .iter()
+        .find(|item| item.name == candidate.name)
+        .ok_or_else(|| {
+            format!(
+                "candidate '{}' is missing from comparison manifest",
+                candidate.name
+            )
+        })?;
+
+    let snapshot_path = kit_dir.join(&kit.snapshot);
+    let target_path = kit_dir.join(&kit.target);
+    let snapshot_raw = fs::read_to_string(&snapshot_path)
+        .map_err(|e| format!("read {}: {e}", snapshot_path.display()))?;
+    let target_raw = fs::read_to_string(&target_path)
+        .map_err(|e| format!("read {}: {e}", target_path.display()))?;
+    let snapshot: InfrastructureSnapshot = serde_yaml::from_str(&snapshot_raw)
+        .map_err(|e| format!("parse {}: {e}", snapshot_path.display()))?;
+    let target: PlacementTargetIR = serde_yaml::from_str(&target_raw)
+        .map_err(|e| format!("parse {}: {e}", target_path.display()))?;
+    let model_identity_path = kit_dir.join(&kit.model_identity);
+    let model_identity_raw = fs::read_to_string(&model_identity_path)
+        .map_err(|e| format!("read {}: {e}", model_identity_path.display()))?;
+    let expected_model_identity: ModelArtifactIdentity = serde_yaml::from_str(&model_identity_raw)
+        .map_err(|e| format!("parse {}: {e}", model_identity_path.display()))?;
+    let expected_hardware = snapshot
+        .hardware_identities
+        .get(&candidate.benchmark_host)
+        .ok_or_else(|| {
+            format!(
+                "frozen snapshot has no hardware identity for candidate host '{}'",
+                candidate.benchmark_host
+            )
+        })?;
+
+    let scenario = target
+        .clone()
+        .into_scenario(snapshot.infrastructure.clone());
+    let placement_report = solve(&scenario);
+    let plan = placement_report
+        .feasible
+        .iter()
+        .find(|plan| plan.id == candidate.plan_id)
+        .cloned()
+        .ok_or_else(|| {
+            format!(
+                "candidate plan '{}' is not feasible in the frozen Benchmark 001 snapshot/target",
+                candidate.plan_id
+            )
+        })?;
+
+    let mut bundles = Vec::new();
+    let mut missing_bundles = Vec::new();
+    let mut execution_fingerprint: Option<String> = None;
+    for bundle_rel in &comparison.bundles {
+        let bundle_path = kit_dir.join(bundle_rel);
+        if !bundle_path.is_file() {
+            missing_bundles.push(bundle_rel.clone());
+            continue;
+        }
+
+        let raw = fs::read_to_string(&bundle_path)
+            .map_err(|e| format!("read {}: {e}", bundle_path.display()))?;
+        let bundle: BenchmarkBundle = serde_yaml::from_str(&raw)
+            .map_err(|e| format!("parse {}: {e}", bundle_path.display()))?;
+        bundle
+            .validate()
+            .map_err(|e| format!("invalid bundle {}: {e}", bundle_path.display()))?;
+        if bundle.request.executable.source_plan_id != candidate.plan_id {
+            return Err(format!(
+                "bundle '{}' belongs to plan '{}' instead of candidate plan '{}'",
+                bundle_path.display(),
+                bundle.request.executable.source_plan_id,
+                candidate.plan_id
+            ));
+        }
+        if bundle.request.executable.model_id != target.model.id {
+            return Err(format!(
+                "bundle '{}' model '{}' does not match frozen target model '{}'",
+                bundle_path.display(),
+                bundle.request.executable.model_id,
+                target.model.id
+            ));
+        }
+        if bundle.request.identity.model != expected_model_identity {
+            return Err(format!(
+                "bundle '{}' model artifact identity does not match the materialized Benchmark 001 model identity",
+                bundle_path.display()
+            ));
+        }
+        if bundle.request.executable.runtime != candidate.runtime {
+            return Err(format!(
+                "bundle '{}' runtime '{}' does not match candidate runtime '{}'",
+                bundle_path.display(),
+                bundle.request.executable.runtime,
+                candidate.runtime
+            ));
+        }
+        if bundle.request.context_tokens != target.workload.context_tokens {
+            return Err(format!(
+                "bundle '{}' context {} does not match frozen target context {}",
+                bundle_path.display(),
+                bundle.request.context_tokens,
+                target.workload.context_tokens
+            ));
+        }
+        if bundle.request.concurrency != kit.concurrency {
+            return Err(format!(
+                "bundle '{}' concurrency {} does not match Benchmark 001 concurrency {}",
+                bundle_path.display(),
+                bundle.request.concurrency,
+                kit.concurrency
+            ));
+        }
+        if &bundle.request.identity.hardware != expected_hardware {
+            return Err(format!(
+                "bundle '{}' hardware identity does not match frozen snapshot host '{}'",
+                bundle_path.display(),
+                candidate.benchmark_host
+            ));
+        }
+
+        let fingerprint = bundle.request.identity.fingerprint();
+        if let Some(expected_fingerprint) = execution_fingerprint.as_deref() {
+            if fingerprint != expected_fingerprint {
+                return Err(format!(
+                    "bundle '{}' execution identity fingerprint differs from earlier calibration runs",
+                    bundle_path.display()
+                ));
+            }
+        } else {
+            execution_fingerprint = Some(fingerprint);
+        }
+
+        bundles.push(bundle);
+    }
+
+    if require_complete && !missing_bundles.is_empty() {
+        return Err(format!(
+            "candidate '{}' is incomplete: {}/{} bundles are present; missing {}",
+            candidate.name,
+            bundles.len(),
+            comparison.bundles.len(),
+            missing_bundles.join(", ")
+        ));
+    }
+    if bundles.is_empty() {
+        return Err(format!(
+            "candidate '{}' has no benchmark bundles available for memory calibration",
+            candidate.name
+        ));
+    }
+
+    let calibration = calibrate_plan_memory(&plan, &bundles)?;
+    let execution_fingerprint = execution_fingerprint
+        .ok_or_else(|| "memory calibration has no execution fingerprint".to_string())?;
+    Ok(BenchmarkMemoryCalibrationReport {
+        benchmark_id: kit.benchmark_id,
+        candidate: candidate.name.clone(),
+        complete: missing_bundles.is_empty(),
+        expected_runs: comparison.bundles.len(),
+        calibrated_runs: bundles.len(),
+        context_tokens: target.workload.context_tokens,
+        concurrency: kit.concurrency,
+        model_id: target.model.id.clone(),
+        execution_fingerprint,
+        missing_bundles,
+        calibration,
+    })
 }
 
 fn load_benchmark_execution_kit(kit_dir: &Path) -> Result<BenchmarkExecutionKit, String> {
