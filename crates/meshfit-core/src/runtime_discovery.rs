@@ -21,7 +21,9 @@ pub fn discover_runtimes() -> RuntimeDiscovery {
     ] {
         match discover_one(runtime, binaries) {
             Some(identity) => runtimes.push(identity),
-            None => warnings.push(format!("{runtime}: no supported runtime binary found on PATH")),
+            None => warnings.push(format!(
+                "{runtime}: no supported runtime binary found on PATH"
+            )),
         }
     }
 
