@@ -944,7 +944,7 @@ fn inspect_benchmark_preflight(
         .cloned()
         .collect::<Vec<_>>();
 
-    let mut issues = benchmark_preflight_issues(
+    let issues = benchmark_preflight_issues(
         kit.ready,
         candidate,
         &observed_host,
