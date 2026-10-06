@@ -1121,9 +1121,7 @@ fn run() -> Result<(), String> {
 }
 
 fn benchmark_execution_lock_target() -> PathBuf {
-    env::temp_dir().join(format!(
-        "meshfit-benchmark-port-{BENCHMARK_LISTEN_PORT}"
-    ))
+    env::temp_dir().join(format!("meshfit-benchmark-port-{BENCHMARK_LISTEN_PORT}"))
 }
 
 fn acquire_benchmark_file_lock(
