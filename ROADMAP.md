@@ -72,10 +72,10 @@ MeshFit's roadmap is ordered by the shortest path to a real closed loop.
 - [x] port-scoped batch execution isolation — run-one locks one slot, candidate/host executors hold the listen-port lock across the full batch to prevent interleaved timing evidence; 109-step main CI Reality Verified on run #764
 - [ ] real repeated-run distributions on heterogeneous hardware
 - [ ] prediction intervals
-- [ ] memory calibration
+- [x] memory calibration contract + CLI — PlanIR required-memory vs observed peak-VRAM error/correction ratios; synthetic CI Reality Verified on runs #877/#900; real GPU repeated calibration pending
 - [ ] latency / throughput model
 - [ ] cost model
-- [ ] estimate vs observed error
+- [x] estimate vs observed error — first dimension (VRAM) implemented with signed/absolute/percentage error and under/over-prediction direction; synthetic CI Reality Verified on runs #877/#900; latency/throughput error pending
 - [ ] bounded evidence transfer
 
 ## 6. Ask for the missing evidence — v0.5
