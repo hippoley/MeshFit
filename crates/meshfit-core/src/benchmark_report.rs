@@ -45,6 +45,8 @@ pub struct CandidateBenchmarkSummary {
     #[serde(default)]
     pub mean_decode_tokens_per_second: Option<f64>,
     #[serde(default)]
+    pub mean_wave_throughput_tokens_per_second: Option<f64>,
+    #[serde(default)]
     pub peak_vram_gb: Option<f64>,
     #[serde(default)]
     pub peak_ram_gb: Option<f64>,
@@ -102,13 +104,17 @@ impl BenchmarkComparisonReport {
             );
         }
         out.push_str(
-            "| Candidate | Strategy | Runs | Samples | p95 TTFT | Decode | Cost / 1M output tok | Regret |\n",
+            "| Candidate | Strategy | Runs | Samples | p95 TTFT | Decode | Throughput | Cost / 1M output tok | Regret |\n",
         );
-        out.push_str("|---|---|---:|---:|---:|---:|---:|---:|\n");
+        out.push_str("|---|---|---:|---:|---:|---:|---:|---:|---:|\n");
 
         for candidate in &self.candidates {
             let decode = candidate
                 .mean_decode_tokens_per_second
+                .map(|value| format!("{value:.2} tok/s"))
+                .unwrap_or_else(|| "n/a".into());
+            let throughput = candidate
+                .mean_wave_throughput_tokens_per_second
                 .map(|value| format!("{value:.2} tok/s"))
                 .unwrap_or_else(|| "n/a".into());
             let cost = candidate
@@ -116,13 +122,14 @@ impl BenchmarkComparisonReport {
                 .map(|value| format!("USD {value:.3}"))
                 .unwrap_or_else(|| "n/a".into());
             out.push_str(&format!(
-                "| {} | {} | {} | {} | {:.2} ms | {} | {} | {:.1}% |\n",
+                "| {} | {} | {} | {} | {:.2} ms | {} | {} | {} | {:.1}% |\n",
                 candidate.name,
                 candidate.strategy,
                 candidate.bundle_count,
                 candidate.sample_count,
                 candidate.p95_ttft_ms,
                 decode,
+                throughput,
                 cost,
                 candidate.regret_fraction * 100.0
             ));
@@ -383,6 +390,13 @@ fn summarize_candidate(
         .collect::<Vec<_>>();
 
     let mean_decode = mean(&decode);
+    let wave_throughput = candidate
+        .bundles
+        .iter()
+        .flat_map(|bundle| bundle.waves.iter())
+        .filter_map(|wave| wave.throughput_tokens_per_second())
+        .collect::<Vec<_>>();
+    let mean_wave_throughput = mean(&wave_throughput);
     let p50_ttft_ms = percentile(&ttft, 0.50)?;
     let p95_ttft_ms = percentile(&ttft, 0.95)?;
     let mean_total_ms = mean(&total).ok_or_else(|| "missing total duration".to_string())?;
@@ -442,6 +456,7 @@ fn summarize_candidate(
         p95_ttft_ms,
         mean_total_ms,
         mean_decode_tokens_per_second: mean_decode,
+        mean_wave_throughput_tokens_per_second: mean_wave_throughput,
         peak_vram_gb,
         peak_ram_gb,
         hourly_cost_usd: candidate.hourly_cost_usd,
@@ -529,6 +544,7 @@ mod tests {
                 p95_ttft_ms: 100.0,
                 mean_total_ms: 500.0,
                 mean_decode_tokens_per_second: Some(40.0),
+                mean_wave_throughput_tokens_per_second: Some(120.0),
                 peak_vram_gb: Some(20.0),
                 peak_ram_gb: Some(10.0),
                 hourly_cost_usd: Some(1.0),
