@@ -7,13 +7,14 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use meshfit_core::{
-    calibrate_plan_memory,     compare_benchmarks, compile_plan, discover_local, discover_runtimes, inspect_model_artifact,
-    prepare_local_benchmark_request, probe_peer, run_local_benchmark, solve, BenchmarkBundle,
-    BenchmarkCandidate, BenchmarkComparisonReport, BenchmarkComparisonRequest, BenchmarkConfig,
-    BenchmarkRequestIR, ComparisonObjective, CompileRequest, EvidenceStore, ExecutablePlanIR,
-    HardwareIdentity, InfrastructureSnapshot, LinkKind, LocalDiscovery, ModelArtifactIdentity,
-    PeerProbeResult, PlacementKind, PlacementReport, PlacementTargetIR, PlanIR, Prediction,
-    PredictionQuery, ScenarioIR, SnapshotManifest,
+    calibrate_plan_memory, compare_benchmarks, compile_plan, discover_local, discover_runtimes,
+    inspect_model_artifact, prepare_local_benchmark_request, probe_peer, run_local_benchmark,
+    solve, BenchmarkBundle, BenchmarkCandidate, BenchmarkComparisonReport,
+    BenchmarkComparisonRequest, BenchmarkConfig, BenchmarkRequestIR, ComparisonObjective,
+    CompileRequest, EvidenceStore, ExecutablePlanIR, HardwareIdentity, InfrastructureSnapshot,
+    LinkKind, LocalDiscovery, ModelArtifactIdentity, PeerProbeResult, PlacementKind,
+    PlacementReport, PlacementTargetIR, PlanIR, Prediction, PredictionQuery, ScenarioIR,
+    SnapshotManifest,
 };
 
 const BENCHMARK_LISTEN_PORT: u16 = 18080;
