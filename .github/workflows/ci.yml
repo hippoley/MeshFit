@@ -94,5 +94,6 @@ jobs:
       - run: cargo run -p meshfit -- compare-benchmarks examples/benchmark-comparison.yaml --markdown > /tmp/meshfit-benchmark-comparison.md
       - run: grep -q 'conservative improvement interval' /tmp/meshfit-benchmark-comparison.md
       - run: grep -q 'derived from candidate run-level 95% intervals' /tmp/meshfit-benchmark-comparison.md
+      - run: grep -Eq 'Performance claim|MeshFit vs best baseline' /tmp/meshfit-benchmark-comparison.md
       - run: '! cargo run -p meshfit -- compare-benchmarks examples/benchmark-comparison.yaml --require-publishable'
       - run: cargo run -p meshfit -- predict /tmp/meshfit-benchmark-evidence.yaml examples/benchmark-query.yaml
