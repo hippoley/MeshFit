@@ -42,6 +42,10 @@ jobs:
       - run: "grep -q 'method: student_t_next_observation' /tmp/meshfit-prediction-interval.yaml"
       - run: "grep -q 'sample_count: 2' /tmp/meshfit-prediction-interval.yaml"
       - run: cargo run -p meshfit -- evidence-from-benchmark examples/benchmark-bundle.yaml > /tmp/meshfit-benchmark-evidence.yaml
+      - run: cargo run -p meshfit -- calibrate-performance examples/benchmark-bundle.yaml --predicted-p95-ttft-ms 90 --predicted-decode-tps 12 > /tmp/meshfit-performance-calibration.yaml
+      - run: grep -q 'p95_ttft_ms:' /tmp/meshfit-performance-calibration.yaml
+      - run: grep -q 'mean_decode_tokens_per_second:' /tmp/meshfit-performance-calibration.yaml
+      - run: grep -q 'conservative_correction_ratio:' /tmp/meshfit-performance-calibration.yaml
       - run: cargo run -p meshfit -- calibrate-memory examples/calibration-plan.yaml examples/benchmark-bundle.yaml > /tmp/meshfit-memory-calibration.yaml
       - run: "grep -q 'direction: under_prediction' /tmp/meshfit-memory-calibration.yaml"
       - run: "grep -q 'conservative_observed_to_predicted_ratio:' /tmp/meshfit-memory-calibration.yaml"
