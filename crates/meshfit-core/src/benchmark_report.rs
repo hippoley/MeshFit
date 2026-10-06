@@ -921,8 +921,7 @@ mod tests {
             publishable: true,
             evidence_status: "independent repeated benchmark bundles verified".into(),
             performance_claim_publishable: true,
-            performance_claim_status:
-                "conservative improvement interval remains above zero".into(),
+            performance_claim_status: "conservative improvement interval remains above zero".into(),
             oracle_candidate: "meshfit".into(),
             meshfit_candidate: "meshfit".into(),
             oracle_objective_value: 100.0,
