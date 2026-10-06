@@ -671,3 +671,26 @@ fn print_help() {
         "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
     );
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn benchmark_auto_defaults_to_at_least_ten_samples() {
+        assert_eq!(default_measured_requests(1), 10);
+        assert_eq!(default_measured_requests(2), 10);
+        assert_eq!(default_measured_requests(4), 12);
+        assert_eq!(default_measured_requests(20), 20);
+    }
+
+    #[test]
+    fn benchmark_auto_default_is_divisible_by_concurrency() {
+        for concurrency in 1..=32 {
+            let measured = default_measured_requests(concurrency);
+            assert!(measured >= 10 || measured == concurrency);
+            assert_eq!(measured % concurrency, 0);
+        }
+    }
+}
