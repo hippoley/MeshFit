@@ -73,9 +73,10 @@ MeshFit's roadmap is ordered by the shortest path to a real closed loop.
 - [ ] real repeated-run distributions on heterogeneous hardware
 - [x] exact-evidence prediction intervals — sample stddev/CV + 95% Student-t next-observation interval for identical execution identity/context/concurrency; 124-step CI Reality Verified on run #920; cross-hardware intervals remain pending
 - [x] memory calibration contract + CLI — PlanIR required-memory vs observed peak-VRAM error/correction ratios; synthetic CI Reality Verified on runs #877/#900; real GPU repeated calibration pending
+- [x] exact-identity performance calibration contract — plan/fingerprint/context/concurrency/BenchmarkConfig hard-bound; TTFT/decode error reporting CI Reality Verified on run #956
 - [ ] latency / throughput model
 - [ ] cost model
-- [x] estimate vs observed error — first dimension (VRAM) implemented with signed/absolute/percentage error and under/over-prediction direction; synthetic CI Reality Verified on runs #877/#900; latency/throughput error pending
+- [x] estimate vs observed error — VRAM plus exact-identity p95 TTFT / mean decode throughput error contracts, direction-aware optimistic error and conservative correction ratios; synthetic full-stack CI Reality Verified on runs #877/#900/#956; real GPU performance calibration pending
 - [ ] bounded evidence transfer
 
 ## 6. Ask for the missing evidence — v0.5
