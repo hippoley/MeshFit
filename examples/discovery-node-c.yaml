@@ -5,9 +5,9 @@ hardware_identity:
   ram_mib: 131072
   devices:
     - vendor: nvidia
-      model: NVIDIA RTX 6000 Ada
+      model: NVIDIA H200
       backend: cuda
-      memory_mib: 49152
+      memory_mib: 143360
       driver_version: '580.65'
 node:
   id: node-c
@@ -16,8 +16,8 @@ node:
   accelerators:
     - id: gpu0
       backend: metal
-      memory_gb: 48
-      free_memory_gb: 46
+      memory_gb: 140
+      free_memory_gb: 136
       relative_compute: 110
   hourly_cost_usd: 0
 local_fabric: []
