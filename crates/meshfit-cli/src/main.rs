@@ -209,7 +209,6 @@ struct BenchmarkRunCandidatePlan {
     overwrite: bool,
 }
 
-
 #[derive(Debug, Serialize)]
 struct BenchmarkPreflight {
     benchmark_id: String,
