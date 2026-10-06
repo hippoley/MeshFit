@@ -1206,8 +1206,7 @@ fn inspect_benchmark_run_one_plan(
     )?;
     let executable_path = kit_dir.join(&candidate.executable_path);
     let bundle_path = kit_dir.join(&comparison.bundles[run_number - 1]);
-    let compile_required =
-        !executable_matches_model_path(&executable_path, &preflight.model_path)?;
+    let compile_required = !executable_matches_model_path(&executable_path, &preflight.model_path)?;
 
     Ok(BenchmarkRunOnePlan {
         benchmark_id: kit.benchmark_id,
@@ -1380,13 +1379,7 @@ fn execute_benchmark_run_one(
     }
     let _slot_lock = acquire_benchmark_run_slot(&bundle_path)?;
 
-    ensure_candidate_executable(
-        kit_dir,
-        &kit,
-        candidate,
-        &executable_path,
-        &plan.model_path,
-    )?;
+    ensure_candidate_executable(kit_dir, &kit, candidate, &executable_path, &plan.model_path)?;
     let executable_raw = fs::read_to_string(&executable_path)
         .map_err(|e| format!("read {}: {e}", executable_path.display()))?;
     let executable: ExecutablePlanIR = serde_yaml::from_str(&executable_raw)
@@ -2684,8 +2677,9 @@ mod tests {
         )
         .unwrap();
 
-        let error = inspect_benchmark_preflight(&dir, "not-a-candidate", Some("node-a"), None, false)
-            .unwrap_err();
+        let error =
+            inspect_benchmark_preflight(&dir, "not-a-candidate", Some("node-a"), None, false)
+                .unwrap_err();
         assert!(error.contains("not present in kit.yaml"));
 
         let _ = fs::remove_dir_all(dir);
