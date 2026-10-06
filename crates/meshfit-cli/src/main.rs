@@ -2915,6 +2915,31 @@ mod tests {
     }
 
     #[test]
+    fn benchmark_listen_port_defaults_and_rejects_zero() {
+        assert_eq!(parse_benchmark_listen_port(&[]).unwrap(), 18080);
+
+        let args = vec!["--listen-port".to_string(), "19002".to_string()];
+        assert_eq!(parse_benchmark_listen_port(&args).unwrap(), 19002);
+
+        let zero = vec!["--listen-port".to_string(), "0".to_string()];
+        assert!(parse_benchmark_listen_port(&zero)
+            .unwrap_err()
+            .contains("between 1 and 65535"));
+    }
+
+    #[test]
+    fn legacy_benchmark_kit_without_listen_port_uses_default() {
+        let yaml = serde_yaml::to_string(&status_test_kit()).unwrap();
+        let legacy = yaml
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("listen_port:"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let parsed: BenchmarkExecutionKit = serde_yaml::from_str(&legacy).unwrap();
+        assert_eq!(parsed.listen_port, BENCHMARK_LISTEN_PORT);
+    }
+
+    #[test]
     fn benchmark_listen_port_availability_tracks_bound_socket() {
         let listener = std::net::TcpListener::bind(("0.0.0.0", 0)).unwrap();
         let port = listener.local_addr().unwrap().port();
@@ -2926,11 +2951,11 @@ mod tests {
 
     #[test]
     fn benchmark_execution_lock_is_host_local_and_port_scoped() {
-        let target = benchmark_execution_lock_target(BENCHMARK_LISTEN_PORT);
+        let target = benchmark_execution_lock_target(19001);
         assert!(target.starts_with(env::temp_dir()));
         assert_eq!(
             target.file_name().and_then(|name| name.to_str()),
-            Some("meshfit-benchmark-port-18080")
+            Some("meshfit-benchmark-port-19001")
         );
     }
 
