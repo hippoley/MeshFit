@@ -1325,11 +1325,8 @@ fn inspect_benchmark_run_one_plan(
     )?;
     let executable_path = kit_dir.join(&candidate.executable_path);
     let bundle_path = kit_dir.join(&comparison.bundles[run_number - 1]);
-    let compile_required = !executable_matches_candidate(
-        &executable_path,
-        &candidate.plan_id,
-        &preflight.model_path,
-    )?;
+    let compile_required =
+        !executable_matches_candidate(&executable_path, &candidate.plan_id, &preflight.model_path)?;
 
     Ok(BenchmarkRunOnePlan {
         benchmark_id: kit.benchmark_id,
