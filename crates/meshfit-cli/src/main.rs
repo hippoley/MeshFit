@@ -833,15 +833,62 @@ fn shell_quote(value: &str) -> String {
         return value.to_string();
     }
 
-    let escaped = value
-        .replace('\\', "\\\\")
-        .replace('"', "\\\"")
-        .replace('
+    let escaped = value.replace('\\', "\\\\").replace('"', "\\\"");
+    format!("\"{escaped}\"")
+}
+
+fn render_benchmark_runbook(kit: &BenchmarkExecutionKit) -> String {
+    let mut out = String::new();
+    out.push_str("# MeshFit Benchmark 001 Runbook\n\n");
+    out.push_str(&format!(
+        "**Ready:** {}  \n**Concurrency:** {}  \n**Measured requests/run:** {}  \n**Runs/candidate:** {}\n\n",
+        kit.ready, kit.concurrency, kit.measured_requests_per_run, kit.runs_per_candidate
+    ));
+    out.push_str(
+        "Run commands from this directory. Execute each candidate on its listed benchmark_host.\n\n",
+    );
+
+    if !kit.warnings.is_empty() {
+        out.push_str("## Warnings\n\n");
+        for warning in &kit.warnings {
+            out.push_str(&format!("- {warning}\n"));
+        }
+        out.push('\n');
+    }
+
+    for candidate in &kit.candidates {
+        out.push_str(&format!(
+            "## {}\n\n- Plan: {}\n- Benchmark host: {}\n- Compile ready: {}\n\n",
+            candidate.name, candidate.plan_id, candidate.benchmark_host, candidate.compile_ready
+        ));
+        if let Some(error) = &candidate.compile_error {
+            out.push_str(&format!("Compiler preflight error: {error}\n\n"));
+            continue;
+        }
+        if let Some(command) = &candidate.compile_command {
+            out.push_str("    ");
+            out.push_str(command);
+            out.push_str("\n\n");
+        }
+        for command in &candidate.run_commands {
+            out.push_str("    ");
+            out.push_str(command);
+            out.push_str("\n\n");
+        }
+    }
+
+    out.push_str("## Compare\n\n");
+    out.push_str(
+        "    meshfit compare-benchmarks comparison.yaml --markdown --require-publishable\n",
+    );
+    out
+}
+
+fn default_measured_requests(concurrency: u32) -> u32 {
     let minimum_samples_per_run = 10_u32;
     let waves = minimum_samples_per_run.div_ceil(concurrency);
     waves.max(1).saturating_mul(concurrency)
 }
-
 fn select_benchmark_plans(
     report: &PlacementReport,
     meshfit_plan_id: &str,
