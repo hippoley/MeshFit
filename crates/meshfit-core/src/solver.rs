@@ -394,8 +394,7 @@ fn enumerate_two_node_tp(
                 continue;
             };
 
-            let Some(communication_budget_ms) =
-                context.workload.max_tp_communication_ms_per_token
+            let Some(communication_budget_ms) = context.workload.max_tp_communication_ms_per_token
             else {
                 rejected.push(RejectionIR {
                     candidate,
