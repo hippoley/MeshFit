@@ -46,6 +46,9 @@ jobs:
       - run: grep -q 'p95_ttft_ms:' /tmp/meshfit-performance-calibration.yaml
       - run: grep -q 'mean_decode_tokens_per_second:' /tmp/meshfit-performance-calibration.yaml
       - run: grep -q 'conservative_correction_ratio:' /tmp/meshfit-performance-calibration.yaml
+      - run: cargo run -p meshfit -- estimate-cost examples/calibration-plan.yaml --predicted-output-tps 100 > /tmp/meshfit-cost-estimate.yaml
+      - run: grep -q 'scope: declared_marginal' /tmp/meshfit-cost-estimate.yaml
+      - run: grep -q 'total_declared_marginal_cost_per_million_output_tokens_usd:' /tmp/meshfit-cost-estimate.yaml
       - run: cargo run -p meshfit -- calibrate-memory examples/calibration-plan.yaml examples/benchmark-bundle.yaml > /tmp/meshfit-memory-calibration.yaml
       - run: "grep -q 'direction: under_prediction' /tmp/meshfit-memory-calibration.yaml"
       - run: "grep -q 'conservative_observed_to_predicted_ratio:' /tmp/meshfit-memory-calibration.yaml"
