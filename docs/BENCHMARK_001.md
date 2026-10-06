@@ -466,3 +466,25 @@ benchmark-worklist
 ```
 
 `--require-publishable` still enforces the existing provenance, distinct-plan, repeated-run, sample-count and stability gates. Finalization does not weaken or duplicate those rules.
+
+
+## Batch execution isolation
+
+Benchmark 001 uses one global execution lock for the runtime listen port so concurrent benchmark processes cannot contaminate each other's timing.
+
+Lock ownership follows the execution scope:
+
+```text
+benchmark-run-one
+  → lock one run
+
+benchmark-run-candidate
+  → lock the full repeated-run candidate batch
+
+benchmark-run-host
+  → lock every candidate/run assigned to that host
+```
+
+Lower-level run slots still keep their own per-bundle locks. The batch lock prevents another MeshFit benchmark process from interleaving between repeated runs or between candidates on the same host, preserving comparability across the evidence set.
+
+The generated `RUNBOOK.md` now prefers one `benchmark-run-host` command per unique benchmark host. Candidate-level and run-one commands remain as explicit recovery and debugging paths.
