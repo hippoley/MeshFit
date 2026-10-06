@@ -5,6 +5,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use meshfit_core::{
     calibrate_plan_memory, calibrate_plan_performance, compare_benchmarks, compile_plan,
@@ -189,6 +190,36 @@ struct BenchmarkCandidateStatus {
 struct BenchmarkInvalidBundle {
     path: String,
     error: String,
+}
+
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct BenchmarkHostEvidenceTransfer {
+    schema: String,
+    benchmark_id: String,
+    host: String,
+    bundles: Vec<BenchmarkTransferredBundle>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct BenchmarkTransferredBundle {
+    candidate: String,
+    plan_id: String,
+    run_number: usize,
+    path: String,
+    sha256: String,
+    content: String,
+}
+
+#[derive(Debug, Serialize)]
+struct BenchmarkEvidenceImportResult {
+    benchmark_id: String,
+    host: String,
+    imported: usize,
+    already_present: usize,
+    total: usize,
 }
 
 #[derive(Debug)]
