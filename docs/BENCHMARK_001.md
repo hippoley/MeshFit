@@ -113,6 +113,21 @@ meshfit benchmark-kit \
 
 This writes `kit.yaml`, `comparison.yaml`, `RUNBOOK.md`, an `inputs/` snapshot of the small control files, and per-strategy `artifacts/` + `results/` directories. Commands in the materialized kit are rewritten to run from that directory. Local model paths are canonicalized instead of copying large weights; model hub identifiers are preserved as-is.
 
+The benchmark service port is part of the materialized execution contract. It defaults to `18080` for backward compatibility and can be selected when the kit is created:
+
+```bash
+meshfit benchmark-kit \
+  cluster.yaml \
+  target.yaml \
+  <meshfit-plan-id> \
+  <model-path> \
+  model-identity.yaml \
+  --listen-port 18181 \
+  --write-dir benchmark-001
+```
+
+That single `listen_port` value is reused by compiler preflight, executable generation, run-one/candidate/host dry-runs, the host-local execution lock, and the runtime service contract. Existing executables whose `service.port` differs are treated as stale and recompiled. `benchmark-preflight` also reports whether the selected port is currently bindable on the local machine; this is a point-in-time readiness check, while the host-local port lock remains the protection against competing MeshFit benchmark processes.
+
 Before running anything, inspect the experiment as a host-oriented work queue:
 
 ```bash
