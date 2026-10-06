@@ -1372,4 +1372,34 @@ mod tests {
 
         let _ = fs::remove_dir_all(dir);
     }
+
+    #[test]
+    fn benchmark_status_accepts_complete_valid_bundle_set() {
+        let dir = status_test_dir("complete");
+        fs::create_dir_all(dir.join("results/meshfit")).unwrap();
+
+        let mut kit = status_test_kit();
+        kit.candidates[0].plan_id = "node-b:vllm:SingleHost".into();
+
+        fs::write(
+            dir.join("kit.yaml"),
+            serde_yaml::to_string(&kit).unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            dir.join("results/meshfit/run-01.yaml"),
+            include_str!("../../../examples/benchmark-bundle.yaml"),
+        )
+        .unwrap();
+
+        let status = inspect_benchmark_kit(&dir).unwrap();
+        assert!(status.complete);
+        assert_eq!(status.expected_bundles, 1);
+        assert_eq!(status.valid_bundles, 1);
+        assert!(status.issues.is_empty());
+        assert!(status.candidates[0].missing_bundles.is_empty());
+        assert!(status.candidates[0].invalid_bundles.is_empty());
+
+        let _ = fs::remove_dir_all(dir);
+    }
 }
