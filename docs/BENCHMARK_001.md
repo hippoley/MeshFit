@@ -285,7 +285,19 @@ Before compiling or spending GPU time on one candidate, run the preflight on the
 meshfit benchmark-preflight benchmark-001 meshfit --require-ready
 ```
 
-If the logical snapshot node ID differs from the operating-system hostname, declare it explicitly:
+For real benchmark hosts, prefer a stable discovery identity instead of relying on a container or cloud-instance hostname:
+
+```bash
+export MESHFIT_NODE_ID=node-b
+meshfit discover > node-b.yaml
+
+# the same identity is then reused by preflight and benchmark-run-one
+meshfit benchmark-preflight benchmark-001 meshfit --require-ready
+```
+
+`MESHFIT_NODE_ID` overrides `HOSTNAME/COMPUTERNAME` for both the discovered node and local fabric endpoints. Leave it unset to use the operating-system hostname. An empty override is ignored.
+
+For diagnostics only, if the logical snapshot node ID differs from the current operating-system identity, preflight can still be declared explicitly:
 
 ```bash
 meshfit benchmark-preflight benchmark-001 meshfit --host node-b --require-ready
