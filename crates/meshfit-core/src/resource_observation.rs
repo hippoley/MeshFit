@@ -213,11 +213,12 @@ fn sample_nvidia_vram_mib(pids: &HashSet<u32>) -> Option<f64> {
     }
 
     let stdout = String::from_utf8(output.stdout).ok()?;
-    Some(parse_nvidia_compute_apps_mib(&stdout, pids))
+    parse_nvidia_compute_apps_mib(&stdout, pids)
 }
 
-fn parse_nvidia_compute_apps_mib(raw: &str, pids: &HashSet<u32>) -> f64 {
-    raw.lines()
+fn parse_nvidia_compute_apps_mib(raw: &str, pids: &HashSet<u32>) -> Option<f64> {
+    let matched = raw
+        .lines()
         .filter_map(|line| {
             let (pid, memory) = line.split_once(',')?;
             let pid = pid.trim().parse::<u32>().ok()?;
@@ -227,7 +228,13 @@ fn parse_nvidia_compute_apps_mib(raw: &str, pids: &HashSet<u32>) -> f64 {
 
             memory.trim().parse::<f64>().ok()
         })
-        .sum()
+        .collect::<Vec<_>>();
+
+    if matched.is_empty() {
+        None
+    } else {
+        Some(matched.into_iter().sum())
+    }
 }
 
 #[cfg(test)]
@@ -294,7 +301,15 @@ mod tests {
         let pids = HashSet::from([10, 11]);
         let raw = "10, 1024\n11, 512\n99, 4096\n";
 
-        assert_eq!(parse_nvidia_compute_apps_mib(raw, &pids), 1536.0);
+        assert_eq!(parse_nvidia_compute_apps_mib(raw, &pids), Some(1536.0));
+    }
+
+    #[test]
+    fn unmatched_compute_apps_do_not_claim_zero_vram() {
+        let pids = HashSet::from([10, 11]);
+        let raw = "99, 4096\n";
+
+        assert_eq!(parse_nvidia_compute_apps_mib(raw, &pids), None);
     }
 
     #[test]
