@@ -199,6 +199,9 @@ struct BenchmarkMemoryCalibrationReport {
     complete: bool,
     expected_runs: usize,
     calibrated_runs: usize,
+    context_tokens: u32,
+    concurrency: u32,
+    model_id: String,
     missing_bundles: Vec<String>,
     calibration: meshfit_core::MemoryCalibrationSummary,
 }
@@ -2079,6 +2082,12 @@ fn calibrate_benchmark_candidate_memory(
         .map_err(|e| format!("parse {}: {e}", snapshot_path.display()))?;
     let target: PlacementTargetIR = serde_yaml::from_str(&target_raw)
         .map_err(|e| format!("parse {}: {e}", target_path.display()))?;
+    let model_identity_path = kit_dir.join(&kit.model_identity);
+    let model_identity_raw = fs::read_to_string(&model_identity_path)
+        .map_err(|e| format!("read {}: {e}", model_identity_path.display()))?;
+    let expected_model_identity: ModelArtifactIdentity =
+        serde_yaml::from_str(&model_identity_raw)
+            .map_err(|e| format!("parse {}: {e}", model_identity_path.display()))?;
 
     let scenario = target
         .clone()
@@ -2120,6 +2129,44 @@ fn calibrate_benchmark_candidate_memory(
                 candidate.plan_id
             ));
         }
+        if bundle.request.executable.model_id != target.model.id {
+            return Err(format!(
+                "bundle '{}' model '{}' does not match frozen target model '{}'",
+                bundle_path.display(),
+                bundle.request.executable.model_id,
+                target.model.id
+            ));
+        }
+        if bundle.request.identity.model != expected_model_identity {
+            return Err(format!(
+                "bundle '{}' model artifact identity does not match the materialized Benchmark 001 model identity",
+                bundle_path.display()
+            ));
+        }
+        if bundle.request.executable.runtime != candidate.runtime {
+            return Err(format!(
+                "bundle '{}' runtime '{}' does not match candidate runtime '{}'",
+                bundle_path.display(),
+                bundle.request.executable.runtime,
+                candidate.runtime
+            ));
+        }
+        if bundle.request.context_tokens != target.workload.context_tokens {
+            return Err(format!(
+                "bundle '{}' context {} does not match frozen target context {}",
+                bundle_path.display(),
+                bundle.request.context_tokens,
+                target.workload.context_tokens
+            ));
+        }
+        if bundle.request.concurrency != kit.concurrency {
+            return Err(format!(
+                "bundle '{}' concurrency {} does not match Benchmark 001 concurrency {}",
+                bundle_path.display(),
+                bundle.request.concurrency,
+                kit.concurrency
+            ));
+        }
         bundles.push(bundle);
     }
 
@@ -2146,6 +2193,9 @@ fn calibrate_benchmark_candidate_memory(
         complete: missing_bundles.is_empty(),
         expected_runs: comparison.bundles.len(),
         calibrated_runs: bundles.len(),
+        context_tokens: target.workload.context_tokens,
+        concurrency: kit.concurrency,
+        model_id: target.model.id.clone(),
         missing_bundles,
         calibration,
     })
