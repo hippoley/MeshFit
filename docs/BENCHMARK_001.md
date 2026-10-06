@@ -99,7 +99,9 @@ The kit fixes:
 - benchmark commands;
 - the final comparison-manifest skeleton.
 
-The kit exposes a top-level `ready` boolean. Every candidate is compiler-preflighted before a command is emitted. To materialize a self-contained experiment control directory (without copying the model weights), use:
+The kit exposes a top-level `ready` boolean. Every candidate is compiler-preflighted before a command is emitted.
+
+Compiler feasibility is intentionally separate from structural placement feasibility. If a frozen Benchmark 001 candidate is structurally feasible but the current runtime adapter cannot launch it, the kit keeps that exact candidate and records a machine-readable `compile_error_code` plus the compiler error. For baseline candidates, MeshFit also lists up to three lower-ranked plans that the current compiler can launch as **diagnostic fallbacks**. They are never substituted automatically: changing the frozen baseline would change the experiment. For an explicit `meshfit` plan, no fallback is proposed because the selected MeshFit decision itself must be executable or explicitly changed. To materialize a self-contained experiment control directory (without copying the model weights), use:
 
 ```bash
 meshfit benchmark-kit \
