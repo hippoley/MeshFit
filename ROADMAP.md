@@ -6,11 +6,11 @@ MeshFit's roadmap is ordered by the shortest path to a real closed loop.
 
 - [x] core IRs
 - [x] hard feasibility pruning
-- [x] single-host candidates
-- [x] conservative cross-node TP gate
+- [x] single-host candidates — explicit accelerator-level selection; no host-wide VRAM aggregation
+- [x] conservative cross-node TP gate — explicit device pairs over measured node fabric
 - [x] Pareto frontier
 - [x] explicit rejection / exclusion
-- [x] CI/build verification — strict PR CI passed fmt, clippy, workspace tests, release build, and CLI E2E (run #201)
+- [x] CI/build verification — Reality Verified on PR CI run #295: fmt, clippy -D warnings, 45 workspace tests, release build, and full CLI smoke chain all passed
 
 ## 2. Evidence identity — v0.2
 
@@ -39,14 +39,14 @@ MeshFit's roadmap is ordered by the shortest path to a real closed loop.
 
 - [x] llama.cpp plan compiler — single-host and explicit CPU-offload launch specs implemented
 - [x] vLLM plan compiler — single-host and same-node TP launch specs implemented
-- [x] executable launch plan contract — program/args/service endpoint
+- [x] executable launch plan contract — program/args/service endpoint + explicit accelerator binding
 - [x] benchmark source provenance — build-time MeshFit Git commit embedded and CI-verified (run #224)
-- [x] benchmark bundle contract + evidence conversion — real process/HTTP runner still pending
-- [x] TTFT / TPOT metric derivation contract — real measurement runner pending
-- [x] decode tok/s derivation contract — prefill and real measurement runner pending
+- [x] benchmark bundle + evidence conversion — request-level latency/decode records plus wave-level throughput/resource records
+- [x] TTFT / TPOT — local HTTP/SSE measurement runner implemented and mock-runtime CI verified
+- [x] decode tok/s — usage-backed derivation implemented; no token-rate invention when usage is unavailable
 - [x] peak RAM — process-tree RSS sampling integrated and Linux mock-runtime CI verified (run #216)
 - [ ] peak VRAM — NVIDIA process-tree sampler implemented and parser-tested; real GPU validation pending
-- [ ] evidence bundle
+- [x] evidence bundle — ExecutionIdentity + provenance + request/wave measurements emitted; real model/GPU validation still pending
 
 ## 5. Predict and calibrate — v0.4
 
@@ -73,3 +73,14 @@ MeshFit's roadmap is ordered by the shortest path to a real closed loop.
 - [ ] counterfactual plan comparison
 
 See [docs/VERSIONS.md](docs/VERSIONS.md) for exit criteria.
+
+
+## Device placement invariant
+
+MeshFit plans concrete accelerators, not just hosts.
+
+- single-device plans account only for the selected accelerator's usable memory
+- local TP plans list every selected accelerator explicitly
+- vLLM launch specs bind CUDA selections through `CUDA_VISIBLE_DEVICES`
+- TP size is derived from selected devices, never inferred from aggregate memory
+- runtime evidence fingerprints preserve flag/value ordering to avoid accidental identity collisions
