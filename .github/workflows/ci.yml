@@ -20,6 +20,7 @@ jobs:
       - run: cargo run -p meshfit -- discover
       - run: cargo run -p meshfit -- runtimes
       - run: cargo run -p meshfit -- inspect-model examples/model-artifact-demo.bin demo gguf q4_k_m test
+      - run: cargo run -p meshfit -- inspect-model examples/model-artifact-demo.bin Qwen/Qwen3-32B gguf q4_k_m test > /tmp/meshfit-model-identity.yaml
       - run: cargo run -p meshfit -- snapshot examples/discovery-node-a.yaml examples/discovery-node-b.yaml examples/probe-a-b.yaml > /tmp/meshfit-snapshot.yaml
       - run: cargo run -p meshfit -- plan-snapshot /tmp/meshfit-snapshot.yaml examples/placement-target.yaml
       - run: cargo run -p meshfit -- snapshot-manifest examples/snapshot-manifest.yaml > /tmp/meshfit-snapshot-manifest.yaml
@@ -30,6 +31,7 @@ jobs:
       - run: cargo run -p meshfit -- predict examples/v0.2-evidence.yaml examples/v0.2-query.yaml
       - run: cargo run -p meshfit -- evidence-from-benchmark examples/benchmark-bundle.yaml > /tmp/meshfit-benchmark-evidence.yaml
       - run: cargo run -p meshfit -- benchmark-candidates /tmp/meshfit-snapshot-manifest.yaml examples/placement-target.yaml node-b:gpu0:vllm:SingleHost > /tmp/meshfit-benchmark-candidates.yaml
+      - run: cargo run -p meshfit -- benchmark-kit /tmp/meshfit-snapshot-manifest.yaml examples/placement-target.yaml node-b:gpu0:vllm:SingleHost Qwen/Qwen3-32B /tmp/meshfit-model-identity.yaml > /tmp/meshfit-benchmark-kit.yaml
       - run: cargo run -p meshfit -- compare-benchmarks examples/benchmark-comparison.yaml --markdown > /tmp/meshfit-benchmark-comparison.md
       - run: '! cargo run -p meshfit -- compare-benchmarks examples/benchmark-comparison.yaml --require-publishable'
       - run: cargo run -p meshfit -- predict /tmp/meshfit-benchmark-evidence.yaml examples/benchmark-query.yaml
