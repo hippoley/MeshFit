@@ -147,7 +147,7 @@ Add:
 - exact empirical aggregation
 - p50 / p95
 - variance
-- prediction intervals
+- exact-evidence 95% next-observation intervals with sample stddev/CV; cross-hardware intervals pending
 - cost model
 - memory calibration contract and CLI: required-memory vs observed peak-VRAM error/correction ratios (synthetic CI verified; real GPU repeated calibration pending)
 - latency / throughput predictors
@@ -155,6 +155,8 @@ Add:
 - carefully bounded cross-hardware transfer
 
 Calibration validation: CI runs #877 and #900 verified the strict VRAM calibration contract, CLI path, underprediction direction, conservative observed/predicted ratio, and compatibility with the evolving Benchmark 001 execution stack. These validations use synthetic fixtures; real GPU calibration remains pending.
+
+Prediction-interval validation: CI run #920 verified exact-match sample dispersion and 95% Student-t next-observation intervals through the CLI and the complete 124-step Benchmark 001 stack. These intervals do not transfer across execution identities.
 
 Principle:
 
