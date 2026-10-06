@@ -100,7 +100,11 @@ pub fn resolve_node_id(
         .map(str::trim)
         .filter(|value| !value.is_empty())
         .or_else(|| hostname.map(str::trim).filter(|value| !value.is_empty()))
-        .or_else(|| computername.map(str::trim).filter(|value| !value.is_empty()))
+        .or_else(|| {
+            computername
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+        })
         .unwrap_or("localhost")
         .to_string()
 }
@@ -311,7 +315,11 @@ mod tests {
     #[test]
     fn node_id_prefers_explicit_meshfit_override() {
         assert_eq!(
-            resolve_node_id(Some("  local-4090  "), Some("docker-abc"), Some("windows-host")),
+            resolve_node_id(
+                Some("  local-4090  "),
+                Some("docker-abc"),
+                Some("windows-host")
+            ),
             "local-4090"
         );
     }
