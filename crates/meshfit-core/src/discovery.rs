@@ -282,11 +282,7 @@ fn json_number(value: &Value) -> Option<f64> {
 }
 
 fn json_unit(value: &Value) -> Option<&str> {
-    value
-        .as_object()?
-        .get("unit")?
-        .as_str()
-        .map(str::trim)
+    value.as_object()?.get("unit")?.as_str().map(str::trim)
 }
 
 fn value_to_mib(value: &Value, default_unit: &str) -> Option<u64> {
@@ -295,7 +291,9 @@ fn value_to_mib(value: &Value, default_unit: &str) -> Option<u64> {
         return None;
     }
 
-    let unit = json_unit(value).unwrap_or(default_unit).to_ascii_lowercase();
+    let unit = json_unit(value)
+        .unwrap_or(default_unit)
+        .to_ascii_lowercase();
     let bytes = match unit.as_str() {
         "b" | "byte" | "bytes" => number,
         "kb" => number * 1_000.0,
@@ -334,7 +332,10 @@ pub fn parse_amd_smi_json(
         .unwrap_or_default();
 
     let mut devices = Vec::new();
-    for (position, record) in json_records(&static_json, "gpu_data").into_iter().enumerate() {
+    for (position, record) in json_records(&static_json, "gpu_data")
+        .into_iter()
+        .enumerate()
+    {
         let gpu_index = json_gpu_index(record).unwrap_or(position as u64);
         let monitor = monitor_records
             .iter()
@@ -350,20 +351,16 @@ pub fn parse_amd_smi_json(
             "MB",
         )
         .or_else(|| {
-            monitor.and_then(|value| {
-                json_memory_mib(value, &["vram_total", "vram_size"], "MB")
-            })
+            monitor.and_then(|value| json_memory_mib(value, &["vram_total", "vram_size"], "MB"))
         });
 
         let Some(memory_mib) = memory_mib.filter(|memory| *memory > 0) else {
             continue;
         };
 
-        let used_memory_mib = monitor.and_then(|value| {
-            json_memory_mib(value, &["vram_used", "vram_used_mb"], "MB")
-        });
-        let free_memory_mib =
-            used_memory_mib.map(|used| memory_mib.saturating_sub(used));
+        let used_memory_mib =
+            monitor.and_then(|value| json_memory_mib(value, &["vram_used", "vram_used_mb"], "MB"));
+        let free_memory_mib = used_memory_mib.map(|used| memory_mib.saturating_sub(used));
 
         devices.push(DiscoveredAccelerator {
             identity: DeviceIdentity {
