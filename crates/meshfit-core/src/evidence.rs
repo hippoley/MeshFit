@@ -63,6 +63,16 @@ pub struct EvidenceRef {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PredictionInterval {
+    pub confidence_level: f64,
+    pub lower: f64,
+    pub upper: f64,
+    pub method: String,
+    pub sample_count: usize,
+    pub lower_truncated_at_zero: bool,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct Prediction {
     pub metric: MetricKind,
     pub status: PredictionStatus,
@@ -70,6 +80,12 @@ pub struct Prediction {
     pub mean: Option<f64>,
     pub min: Option<f64>,
     pub max: Option<f64>,
+    #[serde(default)]
+    pub sample_standard_deviation: Option<f64>,
+    #[serde(default)]
+    pub coefficient_of_variation: Option<f64>,
+    #[serde(default)]
+    pub prediction_interval_95: Option<PredictionInterval>,
     pub sample_count: usize,
     pub confidence: f64,
     #[serde(default)]
@@ -119,6 +135,9 @@ impl EvidenceStore {
                 mean: None,
                 min: None,
                 max: None,
+                sample_standard_deviation: None,
+                coefficient_of_variation: None,
+                prediction_interval_95: None,
                 sample_count: 0,
                 confidence: 0.0,
                 evidence,
@@ -133,6 +152,11 @@ impl EvidenceStore {
         let mean = sum / sample_count as f64;
         let min = values.iter().copied().fold(f64::INFINITY, f64::min);
         let max = values.iter().copied().fold(f64::NEG_INFINITY, f64::max);
+        let sample_standard_deviation = sample_standard_deviation(&values);
+        let coefficient_of_variation = sample_standard_deviation
+            .filter(|_| mean != 0.0)
+            .map(|stddev| stddev / mean.abs());
+        let prediction_interval_95 = next_observation_prediction_interval_95(&values);
 
         Prediction {
             metric: query.metric,
@@ -141,12 +165,67 @@ impl EvidenceStore {
             mean: Some(mean),
             min: Some(min),
             max: Some(max),
+            sample_standard_deviation,
+            coefficient_of_variation,
+            prediction_interval_95,
             sample_count,
             confidence: evidence_confidence(sample_count),
             evidence,
             explanation: "exact execution-identity empirical prediction; no cross-hardware extrapolation applied".into(),
         }
     }
+}
+
+fn sample_standard_deviation(values: &[f64]) -> Option<f64> {
+    if values.len() < 2 {
+        return None;
+    }
+
+    let mean = values.iter().sum::<f64>() / values.len() as f64;
+    let variance = values
+        .iter()
+        .map(|value| {
+            let delta = value - mean;
+            delta * delta
+        })
+        .sum::<f64>()
+        / (values.len() - 1) as f64;
+    Some(variance.sqrt())
+}
+
+fn student_t_975(df: usize) -> f64 {
+    const TABLE: [f64; 30] = [
+        12.706, 4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262, 2.228,
+        2.201, 2.179, 2.160, 2.145, 2.131, 2.120, 2.110, 2.101, 2.093, 2.086,
+        2.080, 2.074, 2.069, 2.064, 2.060, 2.056, 2.052, 2.048, 2.045, 2.042,
+    ];
+
+    if df == 0 {
+        f64::NAN
+    } else if df <= TABLE.len() {
+        TABLE[df - 1]
+    } else {
+        1.96
+    }
+}
+
+fn next_observation_prediction_interval_95(values: &[f64]) -> Option<PredictionInterval> {
+    let stddev = sample_standard_deviation(values)?;
+    let sample_count = values.len();
+    let mean = values.iter().sum::<f64>() / sample_count as f64;
+    let t = student_t_975(sample_count - 1);
+    let margin = t * stddev * (1.0 + 1.0 / sample_count as f64).sqrt();
+    let raw_lower = mean - margin;
+    let lower_truncated_at_zero = raw_lower < 0.0;
+
+    Some(PredictionInterval {
+        confidence_level: 0.95,
+        lower: raw_lower.max(0.0),
+        upper: mean + margin,
+        method: "student_t_next_observation".into(),
+        sample_count,
+        lower_truncated_at_zero,
+    })
 }
 
 fn matches_query(
@@ -284,7 +363,41 @@ mod tests {
         assert_eq!(prediction.mean, Some(70.0));
         assert_eq!(prediction.min, Some(68.0));
         assert_eq!(prediction.max, Some(72.0));
+        assert!(prediction.sample_standard_deviation.is_some());
+        assert!(prediction.coefficient_of_variation.is_some());
+        let interval = prediction.prediction_interval_95.as_ref().unwrap();
+        assert_eq!(interval.confidence_level, 0.95);
+        assert_eq!(interval.method, "student_t_next_observation");
+        assert_eq!(interval.sample_count, 2);
+        assert!(interval.lower < 68.0);
+        assert!(interval.upper > 72.0);
         assert_eq!(prediction.evidence.len(), 2);
+    }
+
+    #[test]
+    fn one_sample_does_not_invent_prediction_interval() {
+        let mut store = store();
+        store.records.truncate(1);
+
+        let prediction = store.predict_exact(&PredictionQuery {
+            identity: identity(),
+            context_tokens: 32768,
+            concurrency: 20,
+            metric: MetricKind::DecodeTokensPerSecond,
+        });
+
+        assert_eq!(prediction.sample_count, 1);
+        assert_eq!(prediction.sample_standard_deviation, None);
+        assert_eq!(prediction.coefficient_of_variation, None);
+        assert_eq!(prediction.prediction_interval_95, None);
+    }
+
+    #[test]
+    fn t_interval_is_wide_for_only_two_samples() {
+        let interval = next_observation_prediction_interval_95(&[68.0, 72.0]).unwrap();
+
+        assert!(interval.upper - interval.lower > 40.0);
+        assert!(!interval.lower_truncated_at_zero);
     }
 
     #[test]
