@@ -421,3 +421,34 @@ The command pre-scans every expected bundle before GPU execution:
 Dry-run reports preflight state, the effective model path and verification state, plus pending/existing-valid run numbers even when the host is not runtime-ready. Real execution requires preflight readiness and, after all pending slots finish, re-validates candidate completeness through `benchmark-status`. A `--model-path` supplied to candidate-level execution is reused for every pending run.
 
 `benchmark-run-one` and `benchmark-run-candidate` share one internal execution function so locking, compilation, source-plan validation, benchmark execution, bundle validation, and evidence-safe commit semantics cannot drift apart.
+
+
+## Experiment finalization
+
+After every assigned host has completed its work, finalize the materialized experiment directory directly:
+
+```bash
+meshfit benchmark-finalize benchmark-001 --markdown
+```
+
+For a release/README gate:
+
+```bash
+meshfit benchmark-finalize benchmark-001 --markdown --require-publishable
+```
+
+Finalization is intentionally stricter than `compare-benchmarks`.
+
+It first re-runs the materialized kit status and refuses to compare if any expected bundle is missing or invalid. Only a complete kit is allowed to load `comparison.yaml` and enter the same shared Benchmark 001 comparison path used by `compare-benchmarks`.
+
+Therefore the end-to-end operator flow becomes:
+
+```text
+benchmark-worklist
+→ benchmark-run-host on each logical host
+→ benchmark-status
+→ benchmark-finalize
+→ publishable / provisional report
+```
+
+`--require-publishable` still enforces the existing provenance, distinct-plan, repeated-run, sample-count and stability gates. Finalization does not weaken or duplicate those rules.
