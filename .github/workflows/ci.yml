@@ -50,6 +50,7 @@ jobs:
       - run: cargo run -p meshfit -- benchmark-worklist /tmp/meshfit-benchmark-001-materialized --host node-b > /tmp/meshfit-benchmark-worklist.yaml
       - run: grep -q 'node-b' /tmp/meshfit-benchmark-worklist.yaml
       - run: grep -q 'pending' /tmp/meshfit-benchmark-worklist.yaml
+      - run: grep -q -- '--host node-b' /tmp/meshfit-benchmark-worklist.yaml
       - run: MESHFIT_NODE_ID=node-b cargo run -p meshfit -- benchmark-worklist /tmp/meshfit-benchmark-001-materialized --current-host --pending-only > /tmp/meshfit-benchmark-current-host.yaml
       - run: grep -q 'node-b' /tmp/meshfit-benchmark-current-host.yaml
       - run: "! cargo run -p meshfit -- benchmark-worklist /tmp/meshfit-benchmark-001-materialized --host node-z"
