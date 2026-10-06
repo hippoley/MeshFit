@@ -8,11 +8,11 @@ use std::{
 use serde_json::{json, Value};
 
 use crate::{
+    artifact::inspect_model_artifact,
     benchmark::{BenchmarkBundle, BenchmarkConfig, BenchmarkRequestIR, RequestMeasurement},
     compiler::{ExecutablePlanIR, ExecutionScope},
     discovery::{discover_local, topology_identity_from_discovery, LocalDiscovery},
     evidence::BenchmarkProvenance,
-    artifact::inspect_model_artifact,
     identity::{ExecutionIdentity, ModelArtifactIdentity, RuntimeIdentity},
     runtime_discovery::discover_runtimes,
 };
@@ -86,14 +86,7 @@ pub fn prepare_local_benchmark_request(
             )
         })?;
 
-    build_benchmark_request_from_facts(
-        executable,
-        local,
-        model,
-        runtime,
-        concurrency,
-        config,
-    )
+    build_benchmark_request_from_facts(executable, local, model, runtime, concurrency, config)
 }
 
 pub fn validate_local_benchmark_request(
@@ -120,7 +113,9 @@ pub fn validate_local_benchmark_request(
     }
 
     if request.executable.identity_flags != request.identity.runtime.flags {
-        return Err("executable identity flags do not match ExecutionIdentity runtime flags".into());
+        return Err(
+            "executable identity flags do not match ExecutionIdentity runtime flags".into(),
+        );
     }
 
     if request.identity.runtime.version.trim().is_empty() {
@@ -131,8 +126,7 @@ pub fn validate_local_benchmark_request(
         return Err("executable model id does not match ExecutionIdentity model id".into());
     }
 
-    if request.identity.model.artifact_sha256.is_none()
-        && request.identity.model.revision.is_none()
+    if request.identity.model.artifact_sha256.is_none() && request.identity.model.revision.is_none()
     {
         return Err("model identity must include an artifact hash or immutable revision".into());
     }
@@ -252,12 +246,9 @@ pub fn run_local_benchmark(request: BenchmarkRequestIR) -> Result<BenchmarkBundl
         command.env(key, value);
     }
 
-    let mut child = command.spawn().map_err(|e| {
-        format!(
-            "launch {} failed: {e}",
-            request.executable.program
-        )
-    })?;
+    let mut child = command
+        .spawn()
+        .map_err(|e| format!("launch {} failed: {e}", request.executable.program))?;
 
     let result = run_against_child(&request, &mut child);
 
@@ -375,11 +366,7 @@ fn run_streaming_request(request: &BenchmarkRequestIR) -> Result<RequestMeasurem
     })
     .to_string();
 
-    let max_time_seconds = request
-        .config
-        .request_timeout_ms
-        .saturating_add(999)
-        / 1000;
+    let max_time_seconds = request.config.request_timeout_ms.saturating_add(999) / 1000;
 
     let max_time_seconds_text = max_time_seconds.to_string();
     let start = Instant::now();
@@ -446,7 +433,8 @@ fn run_streaming_request(request: &BenchmarkRequestIR) -> Result<RequestMeasurem
 
     let total_ms = start.elapsed().as_secs_f64() * 1000.0;
     let ttft_ms = ttft_ms.ok_or_else(|| {
-        "streaming response completed without a non-empty content delta; TTFT unavailable".to_string()
+        "streaming response completed without a non-empty content delta; TTFT unavailable"
+            .to_string()
     })?;
 
     Ok(RequestMeasurement {
@@ -459,14 +447,17 @@ fn run_streaming_request(request: &BenchmarkRequestIR) -> Result<RequestMeasurem
 }
 
 pub fn has_non_empty_content_delta(value: &Value) -> bool {
-    ["/choices/0/delta/content", "/choices/0/delta/reasoning_content"]
-        .iter()
-        .any(|path| {
-            value
-                .pointer(path)
-                .and_then(Value::as_str)
-                .is_some_and(|content| !content.is_empty())
-        })
+    [
+        "/choices/0/delta/content",
+        "/choices/0/delta/reasoning_content",
+    ]
+    .iter()
+    .any(|path| {
+        value
+            .pointer(path)
+            .and_then(Value::as_str)
+            .is_some_and(|content| !content.is_empty())
+    })
 }
 
 fn sanitize_id(raw: &str) -> String {
