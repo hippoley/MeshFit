@@ -121,11 +121,11 @@ impl BenchmarkComparisonReport {
             self.meshfit_improvement_ci95_upper_fraction,
         ) {
             (Some(lower), Some(upper)) => format!(
-                " · **run-level 95% interval:** [{:.1}%, {:.1}%]",
+                " · **conservative improvement interval (derived from candidate run-level 95% intervals):** [{:.1}%, {:.1}%]",
                 lower * 100.0,
                 upper * 100.0
             ),
-            _ => " · **run-level 95% interval:** unavailable (<2 independent runs)".to_string(),
+            _ => " · **conservative improvement interval:** unavailable (<2 independent runs per compared candidate)".to_string(),
         };
 
         let mut out = String::new();
@@ -861,7 +861,7 @@ mod tests {
 
         let markdown = report.to_markdown();
         assert!(markdown.contains(
-            "run-level 95% interval:** unavailable (<2 independent runs)"
+            "conservative improvement interval:** unavailable (<2 independent runs per compared candidate)"
         ));
     }
 
@@ -912,7 +912,8 @@ mod tests {
 
         let markdown = report.to_markdown();
         assert!(markdown.contains("MeshFit vs best baseline (heuristic): 20.0% better"));
-        assert!(markdown.contains("run-level 95% interval"));
+        assert!(markdown.contains("conservative improvement interval"));
+        assert!(markdown.contains("derived from candidate run-level 95% intervals"));
         assert!(markdown.contains("[10.0%, 30.0%]"));
         assert!(markdown.contains("| meshfit | topology-aware | 2 | 20 |"));
         assert!(markdown.contains("Observed oracle: **meshfit**"));
