@@ -2,6 +2,8 @@ use serde::{Deserialize, Serialize};
 
 use crate::benchmark::BenchmarkBundle;
 
+const MAX_RUN_OBJECTIVE_CV_FOR_PUBLICATION: f64 = 0.20;
+
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
 pub enum ComparisonObjective {
@@ -43,7 +45,13 @@ pub struct CandidateBenchmarkSummary {
     pub p95_ttft_ms: f64,
     pub mean_total_ms: f64,
     #[serde(default)]
+    pub ttft_stddev_ms: Option<f64>,
+    #[serde(default)]
+    pub ttft_cv: Option<f64>,
+    #[serde(default)]
     pub mean_decode_tokens_per_second: Option<f64>,
+    #[serde(default)]
+    pub decode_tokens_per_second_stddev: Option<f64>,
     #[serde(default)]
     pub mean_wave_throughput_tokens_per_second: Option<f64>,
     #[serde(default)]
@@ -55,6 +63,8 @@ pub struct CandidateBenchmarkSummary {
     #[serde(default)]
     pub estimated_cost_per_million_output_tokens_usd: Option<f64>,
     pub objective_value: f64,
+    #[serde(default)]
+    pub run_objective_cv: Option<f64>,
     pub regret_fraction: f64,
 }
 
@@ -104,9 +114,9 @@ impl BenchmarkComparisonReport {
             );
         }
         out.push_str(
-            "| Candidate | Strategy | Runs | Samples | p95 TTFT | Decode | Throughput | Cost / 1M output tok | Regret |\n",
+            "| Candidate | Strategy | Runs | Samples | p95 TTFT | Run CV | Decode | Throughput | Cost / 1M output tok | Regret |\n",
         );
-        out.push_str("|---|---|---:|---:|---:|---:|---:|---:|---:|\n");
+        out.push_str("|---|---|---:|---:|---:|---:|---:|---:|---:|---:|\n");
 
         for candidate in &self.candidates {
             let decode = candidate
@@ -121,13 +131,18 @@ impl BenchmarkComparisonReport {
                 .estimated_cost_per_million_output_tokens_usd
                 .map(|value| format!("USD {value:.3}"))
                 .unwrap_or_else(|| "n/a".into());
+            let run_cv = candidate
+                .run_objective_cv
+                .map(|value| format!("{:.1}%", value * 100.0))
+                .unwrap_or_else(|| "n/a".into());
             out.push_str(&format!(
-                "| {} | {} | {} | {} | {:.2} ms | {} | {} | {} | {:.1}% |\n",
+                "| {} | {} | {} | {} | {:.2} ms | {} | {} | {} | {} | {:.1}% |\n",
                 candidate.name,
                 candidate.strategy,
                 candidate.bundle_count,
                 candidate.sample_count,
                 candidate.p95_ttft_ms,
+                run_cv,
                 decode,
                 throughput,
                 cost,
@@ -173,7 +188,8 @@ pub fn compare_benchmarks(
     }
 
     validate_comparable_workloads(&request.candidates)?;
-    let (publishable, evidence_status) = evidence_qualification(&request.candidates);
+    let (publishable, evidence_status) =
+        evidence_qualification(&request.candidates, request.objective);
 
     let mut summaries = request
         .candidates
@@ -242,7 +258,10 @@ pub fn compare_benchmarks(
     })
 }
 
-fn evidence_qualification(candidates: &[BenchmarkCandidate]) -> (bool, String) {
+fn evidence_qualification(
+    candidates: &[BenchmarkCandidate],
+    objective: ComparisonObjective,
+) -> (bool, String) {
     let mut all_ids = std::collections::HashSet::new();
     let mut compared_plan_ids = std::collections::HashSet::new();
 
@@ -291,6 +310,32 @@ fn evidence_qualification(candidates: &[BenchmarkCandidate]) -> (bool, String) {
                 format!(
                     "candidate '{}' has {} measured samples; p95 publication requires at least 20",
                     candidate.name, sample_count
+                ),
+            );
+        }
+
+        let run_values = candidate
+            .bundles
+            .iter()
+            .filter_map(|bundle| bundle_objective_value(bundle, objective))
+            .collect::<Vec<_>>();
+        let Some(run_cv) = coefficient_of_variation(&run_values) else {
+            return (
+                false,
+                format!(
+                    "candidate '{}' does not have enough valid independent run-level objective values",
+                    candidate.name
+                ),
+            );
+        };
+        if run_cv > MAX_RUN_OBJECTIVE_CV_FOR_PUBLICATION {
+            return (
+                false,
+                format!(
+                    "candidate '{}' is unstable across independent runs: objective CV {:.1}% exceeds the {:.1}% publication limit",
+                    candidate.name,
+                    run_cv * 100.0,
+                    MAX_RUN_OBJECTIVE_CV_FOR_PUBLICATION * 100.0
                 ),
             );
         }
@@ -432,6 +477,15 @@ fn summarize_candidate(
         .collect::<Vec<_>>();
 
     let mean_decode = mean(&decode);
+    let ttft_stddev_ms = standard_deviation(&ttft);
+    let ttft_cv = coefficient_of_variation(&ttft);
+    let decode_tokens_per_second_stddev = standard_deviation(&decode);
+    let run_objective_values = candidate
+        .bundles
+        .iter()
+        .filter_map(|bundle| bundle_objective_value(bundle, objective))
+        .collect::<Vec<_>>();
+    let run_objective_cv = coefficient_of_variation(&run_objective_values);
     let wave_throughput = candidate
         .bundles
         .iter()
@@ -497,15 +551,77 @@ fn summarize_candidate(
         p50_ttft_ms,
         p95_ttft_ms,
         mean_total_ms,
+        ttft_stddev_ms,
+        ttft_cv,
         mean_decode_tokens_per_second: mean_decode,
+        decode_tokens_per_second_stddev,
         mean_wave_throughput_tokens_per_second: mean_wave_throughput,
         peak_vram_gb,
         peak_ram_gb,
         hourly_cost_usd: candidate.hourly_cost_usd,
         estimated_cost_per_million_output_tokens_usd: estimated_cost,
         objective_value,
+        run_objective_cv,
         regret_fraction: 0.0,
     })
+}
+
+fn bundle_objective_value(
+    bundle: &BenchmarkBundle,
+    objective: ComparisonObjective,
+) -> Option<f64> {
+    match objective {
+        ComparisonObjective::P95TtftMs => {
+            let values = bundle
+                .measurements
+                .iter()
+                .map(|measurement| measurement.ttft_ms)
+                .collect::<Vec<_>>();
+            percentile(&values, 0.95).ok()
+        }
+        ComparisonObjective::MeanDecodeTokensPerSecond => {
+            let values = bundle
+                .measurements
+                .iter()
+                .filter_map(|measurement| measurement.decode_tokens_per_second())
+                .collect::<Vec<_>>();
+            mean(&values)
+        }
+        ComparisonObjective::MeanTotalMs => {
+            let values = bundle
+                .measurements
+                .iter()
+                .map(|measurement| measurement.total_ms)
+                .collect::<Vec<_>>();
+            mean(&values)
+        }
+    }
+}
+
+fn standard_deviation(values: &[f64]) -> Option<f64> {
+    if values.len() < 2 {
+        return None;
+    }
+
+    let mean = mean(values)?;
+    let variance = values
+        .iter()
+        .map(|value| {
+            let delta = value - mean;
+            delta * delta
+        })
+        .sum::<f64>()
+        / (values.len() - 1) as f64;
+    Some(variance.sqrt())
+}
+
+fn coefficient_of_variation(values: &[f64]) -> Option<f64> {
+    let mean = mean(values)?;
+    if mean == 0.0 {
+        return None;
+    }
+
+    Some(standard_deviation(values)? / mean.abs())
 }
 
 fn percentile(values: &[f64], quantile: f64) -> Result<f64, String> {
@@ -558,7 +674,8 @@ mod tests {
             hourly_cost_usd: None,
             bundles: vec![],
         };
-        let (publishable, status) = evidence_qualification(&[candidate]);
+        let (publishable, status) =
+            evidence_qualification(&[candidate], ComparisonObjective::P95TtftMs);
         assert!(!publishable);
         assert!(status.contains("contains no benchmark bundles"));
     }
@@ -585,13 +702,17 @@ mod tests {
                 p50_ttft_ms: 90.0,
                 p95_ttft_ms: 100.0,
                 mean_total_ms: 500.0,
+                ttft_stddev_ms: Some(4.0),
+                ttft_cv: Some(0.04),
                 mean_decode_tokens_per_second: Some(40.0),
+                decode_tokens_per_second_stddev: Some(2.0),
                 mean_wave_throughput_tokens_per_second: Some(120.0),
                 peak_vram_gb: Some(20.0),
                 peak_ram_gb: Some(10.0),
                 hourly_cost_usd: Some(1.0),
                 estimated_cost_per_million_output_tokens_usd: Some(6.944),
                 objective_value: 100.0,
+                run_objective_cv: Some(0.05),
                 regret_fraction: 0.0,
             }],
         };
@@ -607,6 +728,20 @@ mod tests {
         let values = vec![10.0, 20.0, 30.0, 40.0, 50.0];
         assert_eq!(percentile(&values, 0.50).unwrap(), 30.0);
         assert_eq!(percentile(&values, 0.95).unwrap(), 50.0);
+    }
+
+    #[test]
+    fn coefficient_of_variation_tracks_repeatability() {
+        let stable = vec![100.0, 102.0, 98.0];
+        let unstable = vec![100.0, 150.0, 60.0];
+
+        assert!(coefficient_of_variation(&stable).unwrap() < 0.03);
+        assert!(coefficient_of_variation(&unstable).unwrap() > 0.20);
+    }
+
+    #[test]
+    fn publication_stability_threshold_is_explicit() {
+        assert_eq!(MAX_RUN_OBJECTIVE_CV_FOR_PUBLICATION, 0.20);
     }
 
     #[test]
