@@ -1434,6 +1434,28 @@ fn load_benchmark_execution_kit(kit_dir: &Path) -> Result<BenchmarkExecutionKit,
     serde_yaml::from_str(&raw).map_err(|e| format!("parse {}: {e}", kit_path.display()))
 }
 
+fn executable_identity_matches(
+    source_plan_id: &str,
+    model_source: &str,
+    expected_plan_id: &str,
+    expected_model_path: &str,
+) -> bool {
+    source_plan_id == expected_plan_id && model_source == expected_model_path
+}
+
+fn executable_cache_matches(
+    executable: &ExecutablePlanIR,
+    expected_plan_id: &str,
+    expected_model_path: &str,
+) -> bool {
+    executable_identity_matches(
+        &executable.source_plan_id,
+        &executable.model_source,
+        expected_plan_id,
+        expected_model_path,
+    )
+}
+
 fn ensure_candidate_executable(
     kit_dir: &Path,
     kit: &BenchmarkExecutionKit,
@@ -1445,9 +1467,7 @@ fn ensure_candidate_executable(
         let raw = fs::read_to_string(executable_path)
             .map_err(|e| format!("read {}: {e}", executable_path.display()))?;
         if let Ok(executable) = serde_yaml::from_str::<ExecutablePlanIR>(&raw) {
-            if executable.source_plan_id == candidate.plan_id
-                && executable.model_source == model_path
-            {
+            if executable_cache_matches(&executable, &candidate.plan_id, model_path) {
                 return Ok(());
             }
         }
@@ -1461,9 +1481,7 @@ fn ensure_candidate_executable(
         let raw = fs::read_to_string(executable_path)
             .map_err(|e| format!("read {}: {e}", executable_path.display()))?;
         if let Ok(executable) = serde_yaml::from_str::<ExecutablePlanIR>(&raw) {
-            if executable.source_plan_id == candidate.plan_id
-                && executable.model_source == model_path
-            {
+            if executable_cache_matches(&executable, &candidate.plan_id, model_path) {
                 return Ok(());
             }
         }
@@ -2549,6 +2567,28 @@ mod tests {
         assert!(error.contains("parse existing bundle"));
 
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn executable_cache_requires_current_model_source() {
+        assert!(executable_identity_matches(
+            "plan-a",
+            "/data/models/qwen.gguf",
+            "plan-a",
+            "/data/models/qwen.gguf"
+        ));
+        assert!(!executable_identity_matches(
+            "plan-a",
+            "/old/models/qwen.gguf",
+            "plan-a",
+            "/data/models/qwen.gguf"
+        ));
+        assert!(!executable_identity_matches(
+            "plan-b",
+            "/data/models/qwen.gguf",
+            "plan-a",
+            "/data/models/qwen.gguf"
+        ));
     }
 
     #[test]
