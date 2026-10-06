@@ -342,11 +342,8 @@ mod tests {
 
     #[test]
     fn rejects_bundle_from_another_plan() {
-        let error = calibrate_plan_memory(
-            &plan(),
-            &[bundle("run-1", "other-plan", Some(22.0))],
-        )
-        .unwrap_err();
+        let error = calibrate_plan_memory(&plan(), &[bundle("run-1", "other-plan", Some(22.0))])
+            .unwrap_err();
 
         assert!(error.contains("instead of calibration plan"));
     }
