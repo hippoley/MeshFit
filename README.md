@@ -357,6 +357,12 @@ meshfit plan-snapshot cluster.yaml examples/placement-target.yaml
 # structural placement from a hand-authored scenario still works
 meshfit plan examples/v0.1-placement.yaml
 
+# run a real local plan and emit a provenance-bound benchmark bundle
+meshfit benchmark-local benchmark-request.yaml
+
+# aggregate repeated candidates and compute observed placement regret
+meshfit compare-benchmarks benchmark-001.yaml --markdown
+
 # exact-match evidence query with structured execution fingerprint
 meshfit predict examples/v0.2-evidence.yaml examples/v0.2-query.yaml
 ~~~
@@ -373,15 +379,19 @@ Current code includes:
 - NVIDIA local NVLink/PCIe topology snapshot
 - peer RTT/jitter probe and optional `iperf3` bandwidth measurement
 - typed fabric endpoints for host-level and accelerator-level graph edges
+- concurrent-wave benchmark runner with TTFT/TPOT/decode-rate and RAM/VRAM observation
+- repeated benchmark comparison with observed oracle, placement regret, and publication gate
 
 Still missing before the first real product proof:
 
-- real two-machine discovery + measured link
-- executable vLLM/llama.cpp plan compiler
-- automatic benchmark evidence bundle
-- calibrated performance prediction
+- real multi-machine discovery + measured links
+- real heterogeneous Benchmark 001 runs across MeshFit and baseline placements
+- real GPU validation of the VRAM sampler
+- calibrated performance prediction from captured evidence
 
-See [`docs/DIRECTION_AUDIT.md`](docs/DIRECTION_AUDIT.md) for the Reality Gates that keep the project on course.
+The current proof target is **Benchmark 001**: same real workload, simple baselines versus MeshFit, with the observed oracle and placement regret reported from retained benchmark bundles. Synthetic fixtures are never accepted as a publishable performance claim.
+
+See [`docs/BENCHMARK_001.md`](docs/BENCHMARK_001.md) for the frozen protocol and [`docs/DIRECTION_AUDIT.md`](docs/DIRECTION_AUDIT.md) for the Reality Gates that keep the project on course.
 
 ---
 
