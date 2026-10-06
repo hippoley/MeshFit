@@ -66,6 +66,7 @@ MeshFit's roadmap is ordered by the shortest path to a real closed loop.
 - [x] host-local model artifact override — SHA-256 identity verification across preflight/run paths; CI Reality Verified on run #641
 - [x] fail-fast host-level executor — run every candidate assigned to one logical host through the shared safe execution core; CI Reality Verified on run #655
 - [x] experiment-level finalization — complete-kit gate + shared comparison path + publishability enforcement; 80-step CI Reality Verified on run #674
+- [x] benchmark-host hardware attestation — logical host IDs are checked against snapshot hardware identity before execution; architecture/OS/accelerator profile/RAM are hard gates, CPU/driver drift is explicit warning
 - [x] port-scoped batch execution isolation — run-one locks one slot, candidate/host executors hold the listen-port lock across the full batch to prevent interleaved timing evidence; 109-step main CI Reality Verified on run #764
 - [ ] real repeated-run distributions on heterogeneous hardware
 - [ ] prediction intervals
