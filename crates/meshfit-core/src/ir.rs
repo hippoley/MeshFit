@@ -185,6 +185,63 @@ impl KvCacheModelIR {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+#[serde(tag = "mode", rename_all = "snake_case")]
+pub enum TpCommunicationModelIR {
+    BytesPerToken {
+        bytes_per_token: u64,
+        synchronizations_per_token: u32,
+    },
+    Transformer {
+        layers: u32,
+        hidden_size: u32,
+        bytes_per_element: u32,
+        collectives_per_layer: u32,
+    },
+}
+
+impl TpCommunicationModelIR {
+    pub fn base_bytes_per_token(&self) -> f64 {
+        match self {
+            Self::BytesPerToken { bytes_per_token, .. } => *bytes_per_token as f64,
+            Self::Transformer {
+                layers,
+                hidden_size,
+                bytes_per_element,
+                collectives_per_layer,
+            } => {
+                *layers as f64
+                    * *hidden_size as f64
+                    * *bytes_per_element as f64
+                    * *collectives_per_layer as f64
+            }
+        }
+    }
+
+    pub fn synchronizations_per_token(&self) -> u32 {
+        match self {
+            Self::BytesPerToken {
+                synchronizations_per_token,
+                ..
+            } => *synchronizations_per_token,
+            Self::Transformer {
+                layers,
+                collectives_per_layer,
+                ..
+            } => layers.saturating_mul(*collectives_per_layer),
+        }
+    }
+
+    pub fn bytes_per_token_for_tp_size(&self, tp_size: usize) -> f64 {
+        if tp_size <= 1 {
+            return 0.0;
+        }
+
+        let ring_factor = 2.0 * (tp_size as f64 - 1.0) / tp_size as f64;
+        self.base_bytes_per_token() * ring_factor
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct ModelIR {
     pub id: String,
     pub parameters_b: f64,
@@ -195,6 +252,8 @@ pub struct ModelIR {
     pub kv_cache_gb: f64,
     #[serde(default)]
     pub kv_cache_model: Option<KvCacheModelIR>,
+    #[serde(default)]
+    pub tp_communication_model: Option<TpCommunicationModelIR>,
     #[serde(default)]
     pub is_moe: bool,
     #[serde(default)]
@@ -249,6 +308,8 @@ pub struct WorkloadIR {
     #[serde(default)]
     pub max_active_sequences: Option<u32>,
     #[serde(default)]
+    pub max_tp_communication_ms_per_token: Option<f64>,
+    #[serde(default)]
     pub p95_latency_ms: Option<u64>,
     #[serde(default)]
     pub budget_per_day_usd: Option<f64>,
@@ -283,6 +344,18 @@ pub struct AcceleratorRefIR {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CommunicationEstimateIR {
+    pub bytes_per_token: f64,
+    pub effective_bandwidth_gbps: f64,
+    pub transfer_ms_per_token: f64,
+    pub synchronizations_per_token: u32,
+    pub synchronization_ms_per_token: f64,
+    pub total_ms_per_token: f64,
+    pub egress_cost_usd_per_million_tokens: f64,
+    pub confidence: String,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct PlanIR {
     pub id: String,
     pub placement: PlacementKind,
@@ -295,6 +368,8 @@ pub struct PlanIR {
     pub relative_compute: f64,
     pub hourly_cost_usd: f64,
     pub memory_headroom_gb: f64,
+    #[serde(default)]
+    pub communication: Option<CommunicationEstimateIR>,
     #[serde(default)]
     pub assumptions: Vec<String>,
 }
@@ -361,6 +436,7 @@ mod tests {
             context_tokens,
             concurrency,
             max_active_sequences,
+            max_tp_communication_ms_per_token: None,
             p95_latency_ms: None,
             budget_per_day_usd: None,
         }
@@ -374,6 +450,7 @@ mod tests {
             weight_memory_gb: 1.0,
             kv_cache_gb: 3.0,
             kv_cache_model,
+            tp_communication_model: None,
             is_moe: false,
             required_backends: vec![],
         }
@@ -409,6 +486,21 @@ mod tests {
     fn active_sequence_limit_overrides_request_concurrency() {
         let workload = workload(4096, 20, Some(3));
         assert_eq!(workload.active_sequences(), 3);
+    }
+
+    #[test]
+    fn tp_communication_transformer_profile_derives_bytes_and_syncs() {
+        let profile = TpCommunicationModelIR::Transformer {
+            layers: 2,
+            hidden_size: 8,
+            bytes_per_element: 2,
+            collectives_per_layer: 2,
+        };
+
+        assert_eq!(profile.base_bytes_per_token(), 64.0);
+        assert_eq!(profile.synchronizations_per_token(), 4);
+        assert_eq!(profile.bytes_per_token_for_tp_size(2), 64.0);
+        assert_eq!(profile.bytes_per_token_for_tp_size(4), 96.0);
     }
 
     #[test]
