@@ -2,7 +2,10 @@ model:
   id: qwen-72b-class-q4
   parameters_b: 72
   weight_memory_gb: 42
-  kv_cache_gb: 6
+  kv_cache_gb: 0
+  kv_cache_model:
+    mode: bytes_per_token
+    bytes_per_token: 327680
   is_moe: false
   required_backends: []
 
@@ -26,5 +29,6 @@ runtimes:
 workload:
   context_tokens: 32768
   concurrency: 20
+  max_active_sequences: 2
   p95_latency_ms: 2000
   budget_per_day_usd: 200
