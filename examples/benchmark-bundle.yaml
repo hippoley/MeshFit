@@ -77,9 +77,16 @@ measurements:
   - ttft_ms: 100
     total_ms: 1100
     output_tokens: 11
+  - ttft_ms: 120
+    total_ms: 1120
+    output_tokens: 11
+waves:
+  - request_count: 1
+    total_ms: 1100
+    output_tokens: 11
     peak_vram_gb: 20
     peak_ram_gb: 8
-  - ttft_ms: 120
+  - request_count: 1
     total_ms: 1120
     output_tokens: 11
     peak_vram_gb: 20.2
