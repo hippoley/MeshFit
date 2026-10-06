@@ -2993,11 +2993,11 @@ mod tests {
 
     #[test]
     fn benchmark_execution_lock_is_host_local_and_port_scoped() {
-        let target = benchmark_execution_lock_target();
+        let target = benchmark_execution_lock_target(19001);
         assert!(target.starts_with(env::temp_dir()));
         assert_eq!(
             target.file_name().and_then(|name| name.to_str()),
-            Some("meshfit-benchmark-port-18080")
+            Some("meshfit-benchmark-port-19001")
         );
     }
 
