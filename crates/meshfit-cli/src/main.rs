@@ -191,7 +191,6 @@ struct BenchmarkInvalidBundle {
     error: String,
 }
 
-
 #[derive(Debug, Serialize)]
 struct BenchmarkProofReceipt {
     schema: String,
@@ -1325,9 +1324,7 @@ fn build_benchmark_proof_receipt(kit_dir: &Path) -> Result<BenchmarkProofReceipt
             if bundle.request.executable.source_plan_id != candidate.plan_id {
                 return Err(format!(
                     "proof bundle '{}' source plan '{}' does not match candidate plan '{}'",
-                    bundle_rel,
-                    bundle.request.executable.source_plan_id,
-                    candidate.plan_id
+                    bundle_rel, bundle.request.executable.source_plan_id, candidate.plan_id
                 ));
             }
 
