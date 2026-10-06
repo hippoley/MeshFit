@@ -156,7 +156,11 @@ pub fn validate_local_benchmark_request(
         return Err("benchmark requires at least one measured request".into());
     }
 
-    if request.config.measured_requests % request.concurrency != 0 {
+    if !request
+        .config
+        .measured_requests
+        .is_multiple_of(request.concurrency)
+    {
         return Err(
             "measured_requests must be divisible by concurrency so every measured wave uses the declared concurrency"
                 .into(),
