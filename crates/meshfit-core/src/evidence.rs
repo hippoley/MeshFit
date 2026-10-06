@@ -122,7 +122,9 @@ impl EvidenceStore {
                 sample_count: 0,
                 confidence: 0.0,
                 evidence,
-                explanation: "no exact benchmark evidence matches execution identity/context/concurrency".into(),
+                explanation:
+                    "no exact benchmark evidence matches execution identity/context/concurrency"
+                        .into(),
             };
         }
 
