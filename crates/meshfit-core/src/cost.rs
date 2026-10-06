@@ -37,9 +37,8 @@ pub fn estimate_plan_cost(
         );
     }
 
-    let compute_cost_per_million_output_tokens_usd = plan.hourly_cost_usd
-        / (predicted_output_tokens_per_second * 3600.0)
-        * 1_000_000.0;
+    let compute_cost_per_million_output_tokens_usd =
+        plan.hourly_cost_usd / (predicted_output_tokens_per_second * 3600.0) * 1_000_000.0;
     let communication_egress_cost_per_million_tokens_usd = plan
         .communication
         .as_ref()
@@ -77,9 +76,7 @@ pub fn estimate_plan_cost(
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::{
-        AcceleratorBackend, AcceleratorRefIR, CommunicationEstimateIR, PlacementKind,
-    };
+    use crate::ir::{AcceleratorBackend, AcceleratorRefIR, CommunicationEstimateIR, PlacementKind};
 
     fn plan() -> PlanIR {
         PlanIR {
@@ -158,7 +155,10 @@ mod tests {
 
         let estimate = estimate_plan_cost(&plan, 100.0).unwrap();
 
-        assert_eq!(estimate.total_declared_marginal_cost_per_million_output_tokens_usd, 0.0);
+        assert_eq!(
+            estimate.total_declared_marginal_cost_per_million_output_tokens_usd,
+            0.0
+        );
         assert!(estimate
             .assumptions
             .iter()
