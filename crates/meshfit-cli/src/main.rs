@@ -1553,9 +1553,10 @@ fn render_benchmark_runbook(kit: &BenchmarkExecutionKit) -> String {
         }
         for run in 1..=kit.runs_per_candidate {
             out.push_str(&format!(
-                "    meshfit benchmark-run-one . {} {}\n\n",
+                "    meshfit benchmark-run-one . {} {} --host {}\n\n",
                 shell_quote(&candidate.name),
-                run
+                run,
+                shell_quote(&candidate.benchmark_host)
             ));
         }
     }
