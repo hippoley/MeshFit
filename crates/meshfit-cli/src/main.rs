@@ -198,6 +198,16 @@ struct BenchmarkRunOnePlan {
     bundle_exists: bool,
 }
 
+#[derive(Debug)]
+struct BenchmarkModelPathCheck {
+    path: String,
+    status: String,
+    overridden: bool,
+    verified: bool,
+    issue: Option<String>,
+    warnings: Vec<String>,
+}
+
 #[derive(Debug, Serialize)]
 struct BenchmarkPreflight {
     benchmark_id: String,
@@ -1210,7 +1220,7 @@ fn inspect_model_path_for_host(
     kit_dir: &Path,
     kit: &BenchmarkExecutionKit,
     override_path: Option<&str>,
-) -> Result<(String, String, bool, bool, Option<String>, Vec<String>), String> {
+) -> Result<BenchmarkModelPathCheck, String> {
     let overridden = override_path.is_some();
     let effective_path = override_path.unwrap_or(&kit.model_path).trim().to_string();
     if effective_path.is_empty() {
@@ -1220,17 +1230,17 @@ fn inspect_model_path_for_host(
     let path = Path::new(&effective_path);
     if overridden {
         if !path.is_file() {
-            return Ok((
-                effective_path.clone(),
-                "local_override_missing".to_string(),
-                true,
-                false,
-                Some(format!(
+            return Ok(BenchmarkModelPathCheck {
+                path: effective_path.clone(),
+                status: "local_override_missing".to_string(),
+                overridden: true,
+                verified: false,
+                issue: Some(format!(
                     "overridden local model artifact '{}' does not exist on this host",
                     effective_path
                 )),
-                Vec::new(),
-            ));
+                warnings: Vec::new(),
+            });
         }
 
         let effective_path = path
@@ -1246,17 +1256,17 @@ fn inspect_model_path_for_host(
         let expected: ModelArtifactIdentity = serde_yaml::from_str(&identity_raw)
             .map_err(|e| format!("parse {}: {e}", identity_path.display()))?;
         let Some(expected_sha) = expected.artifact_sha256.as_deref() else {
-            return Ok((
-                effective_path,
-                "local_override_unverifiable".to_string(),
-                true,
-                false,
-                Some(
+            return Ok(BenchmarkModelPathCheck {
+                path: effective_path,
+                status: "local_override_unverifiable".to_string(),
+                overridden: true,
+                verified: false,
+                issue: Some(
                     "model path override requires artifact_sha256 in the materialized model identity"
                         .to_string(),
                 ),
-                Vec::new(),
-            ));
+                warnings: Vec::new(),
+            });
         };
 
         let observed = inspect_model_artifact(
@@ -1267,66 +1277,66 @@ fn inspect_model_path_for_host(
             expected.revision.clone(),
         )?;
         if observed.artifact_sha256.as_deref() != Some(expected_sha) {
-            return Ok((
-                effective_path,
-                "local_override_hash_mismatch".to_string(),
-                true,
-                false,
-                Some(
+            return Ok(BenchmarkModelPathCheck {
+                path: effective_path,
+                status: "local_override_hash_mismatch".to_string(),
+                overridden: true,
+                verified: false,
+                issue: Some(
                     "overridden model artifact SHA-256 does not match the materialized model identity"
                         .to_string(),
                 ),
-                Vec::new(),
-            ));
+                warnings: Vec::new(),
+            });
         }
 
-        return Ok((
-            effective_path,
-            "local_override_verified".to_string(),
-            true,
-            true,
-            None,
-            Vec::new(),
-        ));
+        return Ok(BenchmarkModelPathCheck {
+            path: effective_path,
+            status: "local_override_verified".to_string(),
+            overridden: true,
+            verified: true,
+            issue: None,
+            warnings: Vec::new(),
+        });
     }
 
     let model_is_explicit_local =
         path.is_absolute() || effective_path.starts_with("./") || effective_path.starts_with("../");
     if path.is_file() {
-        return Ok((
-            effective_path,
-            "local_present".to_string(),
-            false,
-            false,
-            None,
-            Vec::new(),
-        ));
+        return Ok(BenchmarkModelPathCheck {
+            path: effective_path,
+            status: "local_present".to_string(),
+            overridden: false,
+            verified: false,
+            issue: None,
+            warnings: Vec::new(),
+        });
     }
     if model_is_explicit_local {
-        return Ok((
-            effective_path.clone(),
-            "local_missing".to_string(),
-            false,
-            false,
-            Some(format!(
+        return Ok(BenchmarkModelPathCheck {
+            path: effective_path.clone(),
+            status: "local_missing".to_string(),
+            overridden: false,
+            verified: false,
+            issue: Some(format!(
                 "local model artifact '{}' does not exist on this host",
                 effective_path
             )),
-            Vec::new(),
-        ));
+            warnings: Vec::new(),
+        });
     }
 
-    Ok((
-        effective_path.clone(),
-        "runtime_resolved_unverified".to_string(),
-        false,
-        false,
-        None,
-        vec![format!(
+    Ok(BenchmarkModelPathCheck {
+        path: effective_path.clone(),
+        status: "runtime_resolved_unverified".to_string(),
+        overridden: false,
+        verified: false,
+        issue: None,
+        warnings: vec![format!(
             "model path '{}' is not a local file; runtime resolution has not been verified",
             effective_path
         )],
-    ))
+    })
 }
 
 fn commit_executable_artifact(temp_path: &Path, executable_path: &Path) -> Result<(), String> {
@@ -1528,14 +1538,7 @@ fn inspect_benchmark_preflight(
         .iter()
         .any(|runtime| runtime.runtime == candidate.runtime);
 
-    let (
-        effective_model_path,
-        model_path_status,
-        model_path_overridden,
-        model_artifact_verified,
-        model_issue,
-        model_warnings,
-    ) = inspect_model_path_for_host(kit_dir, &kit, model_path_override)?;
+    let model_check = inspect_model_path_for_host(kit_dir, &kit, model_path_override)?;
 
     let comparison = kit
         .comparison_manifest
@@ -1560,11 +1563,11 @@ fn inspect_benchmark_preflight(
         candidate,
         &observed_host,
         runtime_found,
-        model_issue,
+        model_check.issue.clone(),
         existing_bundles.len(),
         allow_existing,
     );
-    let mut warnings = model_warnings;
+    let mut warnings = model_check.warnings.clone();
     warnings.extend(local.warnings);
     warnings.extend(runtime_discovery.warnings);
 
@@ -1577,10 +1580,10 @@ fn inspect_benchmark_preflight(
         host_match,
         runtime: candidate.runtime.clone(),
         runtime_found,
-        model_path: effective_model_path,
-        model_path_status,
-        model_path_overridden,
-        model_artifact_verified,
+        model_path: model_check.path,
+        model_path_status: model_check.status,
+        model_path_overridden: model_check.overridden,
+        model_artifact_verified: model_check.verified,
         existing_bundles,
         issues,
         warnings,
@@ -2378,15 +2381,15 @@ mod tests {
         fs::create_dir_all(&dir).unwrap();
         let (kit, override_path) = write_model_override_fixture(&dir, b"same-model", b"same-model");
 
-        let (path, status, overridden, verified, issue, warnings) =
+        let check =
             inspect_model_path_for_host(&dir, &kit, Some(override_path.to_str().unwrap())).unwrap();
 
-        assert_eq!(status, "local_override_verified");
-        assert!(Path::new(&path).is_absolute());
-        assert!(overridden);
-        assert!(verified);
-        assert!(issue.is_none());
-        assert!(warnings.is_empty());
+        assert_eq!(check.status, "local_override_verified");
+        assert!(Path::new(&check.path).is_absolute());
+        assert!(check.overridden);
+        assert!(check.verified);
+        assert!(check.issue.is_none());
+        assert!(check.warnings.is_empty());
 
         let _ = fs::remove_dir_all(dir);
     }
@@ -2398,13 +2401,13 @@ mod tests {
         let (kit, override_path) =
             write_model_override_fixture(&dir, b"expected-model", b"different-model");
 
-        let (_, status, overridden, verified, issue, _) =
+        let check =
             inspect_model_path_for_host(&dir, &kit, Some(override_path.to_str().unwrap())).unwrap();
 
-        assert_eq!(status, "local_override_hash_mismatch");
-        assert!(overridden);
-        assert!(!verified);
-        assert!(issue.unwrap().contains("SHA-256"));
+        assert_eq!(check.status, "local_override_hash_mismatch");
+        assert!(check.overridden);
+        assert!(!check.verified);
+        assert!(check.issue.unwrap().contains("SHA-256"));
 
         let _ = fs::remove_dir_all(dir);
     }
