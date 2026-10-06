@@ -87,6 +87,9 @@ meshfit compare-benchmarks benchmark-001.yaml
 
 # README-ready table and headline
 meshfit compare-benchmarks benchmark-001.yaml --markdown
+
+# release/CI gate: exit non-zero unless the evidence is publishable
+meshfit compare-benchmarks benchmark-001.yaml --require-publishable
 ```
 
 The comparison rejects mismatched model identity, context, concurrency, or any BenchmarkConfig field. A result is only marked publishable when each candidate has at least 2 independent bundles, at least 20 measured samples, unique benchmark IDs, runner provenance, and capture timestamps.
