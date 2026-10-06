@@ -835,8 +835,11 @@ fn run() -> Result<(), String> {
                 explicit_host
             };
             let pending_only = args.iter().any(|arg| arg == "--pending-only");
-            let worklist =
-                inspect_benchmark_worklist(Path::new(kit_dir), host_filter.as_deref(), pending_only)?;
+            let worklist = inspect_benchmark_worklist(
+                Path::new(kit_dir),
+                host_filter.as_deref(),
+                pending_only,
+            )?;
             let yaml = serde_yaml::to_string(&worklist).map_err(|e| e.to_string())?;
             print!("{yaml}");
         }
@@ -1464,7 +1467,9 @@ fn inspect_work_slot(
     if lock_path.exists() {
         return (
             "locked",
-            Some("run slot lock exists; the run may be active or the lock may be stale".to_string()),
+            Some(
+                "run slot lock exists; the run may be active or the lock may be stale".to_string(),
+            ),
         );
     }
 
