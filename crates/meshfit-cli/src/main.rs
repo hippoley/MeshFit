@@ -8,13 +8,13 @@ use serde::{Deserialize, Serialize};
 
 use meshfit_core::{
     calibrate_plan_memory, compare_benchmarks, compile_plan, discover_local, discover_runtimes,
-    inspect_model_artifact,
-    prepare_local_benchmark_request, probe_peer, run_local_benchmark, solve, BenchmarkBundle,
-    BenchmarkCandidate, BenchmarkComparisonReport, BenchmarkComparisonRequest, BenchmarkConfig,
-    BenchmarkRequestIR, ComparisonObjective, CompileRequest, EvidenceStore, ExecutablePlanIR,
-    HardwareIdentity, InfrastructureSnapshot, LinkKind, LocalDiscovery, ModelArtifactIdentity,
-    PeerProbeResult, PlacementKind, PlacementReport, PlacementTargetIR, PlanIR, Prediction,
-    PredictionQuery, ScenarioIR, SnapshotManifest,
+    inspect_model_artifact, prepare_local_benchmark_request, probe_peer, run_local_benchmark,
+    solve, BenchmarkBundle, BenchmarkCandidate, BenchmarkComparisonReport,
+    BenchmarkComparisonRequest, BenchmarkConfig, BenchmarkRequestIR, ComparisonObjective,
+    CompileRequest, EvidenceStore, ExecutablePlanIR, HardwareIdentity, InfrastructureSnapshot,
+    LinkKind, LocalDiscovery, ModelArtifactIdentity, PeerProbeResult, PlacementKind,
+    PlacementReport, PlacementTargetIR, PlanIR, Prediction, PredictionQuery, ScenarioIR,
+    SnapshotManifest,
 };
 
 const BENCHMARK_LISTEN_PORT: u16 = 18080;
@@ -1240,9 +1240,7 @@ fn run() -> Result<(), String> {
             })?;
             let bundle_paths = &args[3..];
             if bundle_paths.is_empty() {
-                return Err(
-                    "calibrate-memory requires at least one benchmark bundle".to_string(),
-                );
+                return Err("calibrate-memory requires at least one benchmark bundle".to_string());
             }
 
             let plan_raw =
@@ -1254,8 +1252,8 @@ fn run() -> Result<(), String> {
             for bundle_path in bundle_paths {
                 let raw = fs::read_to_string(bundle_path)
                     .map_err(|e| format!("read {bundle_path}: {e}"))?;
-                let bundle: BenchmarkBundle = serde_yaml::from_str(&raw)
-                    .map_err(|e| format!("parse {bundle_path}: {e}"))?;
+                let bundle: BenchmarkBundle =
+                    serde_yaml::from_str(&raw).map_err(|e| format!("parse {bundle_path}: {e}"))?;
                 bundles.push(bundle);
             }
 
