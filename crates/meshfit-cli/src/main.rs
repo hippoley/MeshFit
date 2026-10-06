@@ -11,9 +11,9 @@ use meshfit_core::{
     prepare_local_benchmark_request, probe_peer, run_local_benchmark, solve, BenchmarkBundle,
     BenchmarkCandidate, BenchmarkComparisonReport, BenchmarkComparisonRequest, BenchmarkConfig,
     BenchmarkRequestIR, ComparisonObjective, CompileRequest, EvidenceStore, ExecutablePlanIR,
-    HardwareIdentity, InfrastructureSnapshot, LinkKind, LocalDiscovery, ModelArtifactIdentity, PeerProbeResult,
-    PlacementKind, PlacementReport, PlacementTargetIR, PlanIR, Prediction, PredictionQuery,
-    ScenarioIR, SnapshotManifest,
+    HardwareIdentity, InfrastructureSnapshot, LinkKind, LocalDiscovery, ModelArtifactIdentity,
+    PeerProbeResult, PlacementKind, PlacementReport, PlacementTargetIR, PlanIR, Prediction,
+    PredictionQuery, ScenarioIR, SnapshotManifest,
 };
 
 const BENCHMARK_LISTEN_PORT: u16 = 18080;
@@ -358,14 +358,13 @@ fn benchmark_hardware_profile_attestation(
         })
         .collect::<Vec<_>>();
 
-    let sort_key = |item: &(&str, &str, meshfit_core::AcceleratorBackend, u64, Option<&str>)| {
-        (
-            item.0,
-            item.1,
-            format!("{:?}", item.2),
-            item.3,
-        )
-    };
+    let sort_key = |item: &(
+        &str,
+        &str,
+        meshfit_core::AcceleratorBackend,
+        u64,
+        Option<&str>,
+    )| { (item.0, item.1, format!("{:?}", item.2), item.3) };
     expected_devices.sort_by_key(sort_key);
     observed_devices.sort_by_key(sort_key);
 
