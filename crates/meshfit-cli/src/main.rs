@@ -102,14 +102,28 @@ struct BenchmarkExecutionCandidate {
     result_dir: String,
     executable_path: String,
     compile_ready: bool,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    compile_error_code: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     compile_error: Option<String>,
+    #[serde(default)]
+    executable_fallbacks: Vec<BenchmarkExecutableFallback>,
     #[serde(skip_serializing_if = "Option::is_none")]
     compile_command: Option<String>,
     run_commands: Vec<String>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
+struct BenchmarkExecutableFallback {
+    plan_id: String,
+    placement: PlacementKind,
+    runtime: String,
+    nodes: Vec<String>,
+    relative_compute: f64,
+    hourly_cost_usd: f64,
+}
+
 struct BenchmarkExecutionComparison {
     benchmark_id: String,
     meshfit_candidate: String,
@@ -828,8 +842,14 @@ fn run() -> Result<(), String> {
                 };
                 let compile_result = compile_plan(&compile_request);
 
-                let (compile_ready, compile_error, compile_command, run_commands) =
-                    match compile_result {
+                let (
+                    compile_ready,
+                    compile_error_code,
+                    compile_error,
+                    executable_fallbacks,
+                    compile_command,
+                    run_commands,
+                ) = match compile_result {
                         Ok(_) => {
                             let compile_command = format!(
                                 "mkdir -p artifacts/{name} {result_dir} && meshfit compile-snapshot {} {} {} {} --listen-port {} > {}",
@@ -853,15 +873,40 @@ fn run() -> Result<(), String> {
                                     )
                                 })
                                 .collect::<Vec<_>>();
-                            (true, None, Some(compile_command), run_commands)
+                            (
+                                true,
+                                None,
+                                None,
+                                Vec::new(),
+                                Some(compile_command),
+                                run_commands,
+                            )
                         }
                         Err(error) => {
+                            let code = error.code.clone();
                             let message = error.to_string();
+                            let executable_fallbacks = benchmark_executable_fallbacks(
+                                &report,
+                                name,
+                                &plan,
+                                model_path,
+                                &target.model.id,
+                                target.workload.context_tokens,
+                                listen_port,
+                            );
                             warnings.push(format!(
-                                "candidate '{name}' plan '{}' is not compile-ready: {message}",
-                                plan.id
+                                "candidate '{name}' plan '{}' is not compile-ready [{code}]: {message}; {} compiler-ready diagnostic fallback(s) found",
+                                plan.id,
+                                executable_fallbacks.len()
                             ));
-                            (false, Some(message), None, Vec::new())
+                            (
+                                false,
+                                Some(code),
+                                Some(message),
+                                executable_fallbacks,
+                                None,
+                                Vec::new(),
+                            )
                         }
                     };
 
@@ -880,7 +925,9 @@ fn run() -> Result<(), String> {
                     result_dir,
                     executable_path,
                     compile_ready,
+                    compile_error_code,
                     compile_error,
+                    executable_fallbacks,
                     compile_command,
                     run_commands,
                 });
@@ -2900,6 +2947,54 @@ fn select_benchmark_plans(
     Ok(selected)
 }
 
+fn benchmark_executable_fallbacks(
+    report: &PlacementReport,
+    candidate_name: &str,
+    selected_plan: &PlanIR,
+    model_path: &str,
+    model_id: &str,
+    context_tokens: u32,
+    listen_port: u16,
+) -> Vec<BenchmarkExecutableFallback> {
+    if candidate_name == "meshfit" {
+        return Vec::new();
+    }
+
+    let mut plans = report
+        .feasible
+        .iter()
+        .filter(|plan| plan.id != selected_plan.id)
+        .filter(|plan| candidate_name != "single-best-node" || plan.nodes.len() == 1)
+        .cloned()
+        .collect::<Vec<_>>();
+    plans.sort_by(|left, right| baseline_plan_order(right, left));
+
+    plans
+        .into_iter()
+        .filter(|plan| {
+            compile_plan(&CompileRequest {
+                plan: plan.clone(),
+                model_path: model_path.to_string(),
+                model_id: model_id.to_string(),
+                context_tokens,
+                listen_port,
+                gpu_layers: None,
+                extra_args: vec![],
+            })
+            .is_ok()
+        })
+        .take(3)
+        .map(|plan| BenchmarkExecutableFallback {
+            plan_id: plan.id,
+            placement: plan.placement,
+            runtime: plan.runtime,
+            nodes: plan.nodes,
+            relative_compute: plan.relative_compute,
+            hourly_cost_usd: plan.hourly_cost_usd,
+        })
+        .collect()
+}
+
 fn benchmark_plan_warnings(selected: &[(&str, &str, PlanIR)]) -> Vec<String> {
     let unique_ids = selected
         .iter()
@@ -3039,7 +3134,7 @@ fn print_prediction(prediction: &Prediction) {
 
 fn print_help() {
     println!(
-        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--listen-port N] [--require-ready] [--write-dir DIR]\n  meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--host NODE] [--model-path PATH] [--dry-run] [--overwrite]\n  meshfit benchmark-run-candidate <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  meshfit benchmark-run-host <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  env MESHFIT_MODEL_PATH may provide the host-local model path when --model-path is omitted\n  meshfit benchmark-worklist <kit-dir> [--host NODE | --current-host] [--pending-only]\n  meshfit benchmark-status <kit-dir> [--require-complete]\n  meshfit benchmark-finalize <kit-dir> [--markdown] [--require-publishable]\n  meshfit benchmark-preflight <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--allow-existing] [--require-ready]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
+        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers] [--listen-port N]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--listen-port N] [--require-ready] [--write-dir DIR]\n  meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--host NODE] [--model-path PATH] [--dry-run] [--overwrite]\n  meshfit benchmark-run-candidate <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  meshfit benchmark-run-host <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  env MESHFIT_MODEL_PATH may provide the host-local model path when --model-path is omitted\n  meshfit benchmark-worklist <kit-dir> [--host NODE | --current-host] [--pending-only]\n  meshfit benchmark-status <kit-dir> [--require-complete]\n  meshfit benchmark-finalize <kit-dir> [--markdown] [--require-publishable]\n  meshfit benchmark-preflight <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--allow-existing] [--require-ready]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
     );
 }
 
@@ -3185,7 +3280,9 @@ mod tests {
                 result_dir: "results/meshfit".into(),
                 executable_path: "artifacts/meshfit/executable.yaml".into(),
                 compile_ready: true,
+                compile_error_code: None,
                 compile_error: None,
+                executable_fallbacks: vec![],
                 compile_command: None,
                 run_commands: vec![],
             }],
