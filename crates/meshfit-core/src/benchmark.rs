@@ -468,6 +468,13 @@ mod tests {
                     output_tokens: Some(11),
                 },
             ],
+            waves: vec![WaveMeasurement {
+                request_count: 2,
+                total_ms: 1200.0,
+                output_tokens: Some(22),
+                peak_vram_gb: None,
+                peak_ram_gb: None,
+            }],
             provenance: BenchmarkProvenance {
                 source: "meshfit-benchmark".into(),
                 source_url: None,
