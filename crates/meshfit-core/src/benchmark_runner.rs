@@ -374,8 +374,7 @@ fn run_streaming_request(
     let max_time_seconds = request.config.request_timeout_ms.saturating_add(999) / 1000;
 
     let max_time_seconds_text = max_time_seconds.to_string();
-    let sampler = runtime_pid
-        .map(|pid| ResourceSampler::start(pid, Duration::from_millis(50)));
+    let sampler = runtime_pid.map(|pid| ResourceSampler::start(pid, Duration::from_millis(50)));
     let start = Instant::now();
     let mut curl = Command::new("curl")
         .args([
