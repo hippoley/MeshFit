@@ -23,12 +23,12 @@ node:
       backend: cuda
       memory_gb: 24
       free_memory_gb: 23
-      relative_compute: 0
+      relative_compute: 60
     - id: gpu1
       backend: cuda
       memory_gb: 24
       free_memory_gb: 23
-      relative_compute: 0
+      relative_compute: 60
   hourly_cost_usd: 0
 local_fabric:
   - from:
