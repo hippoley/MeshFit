@@ -128,7 +128,6 @@ struct BenchmarkInvalidBundle {
     error: String,
 }
 
-
 #[derive(Debug, Serialize)]
 struct BenchmarkPreflight {
     benchmark_id: String,
@@ -876,10 +875,7 @@ fn inspect_benchmark_preflight(
             )),
         )
     } else {
-        (
-            "runtime_resolved_unverified".to_string(),
-            None,
-        )
+        ("runtime_resolved_unverified".to_string(), None)
     };
 
     let comparison = kit
@@ -1529,8 +1525,8 @@ mod tests {
         )
         .unwrap();
 
-        let error =
-            inspect_benchmark_preflight(&dir, "not-a-candidate", Some("node-a"), false).unwrap_err();
+        let error = inspect_benchmark_preflight(&dir, "not-a-candidate", Some("node-a"), false)
+            .unwrap_err();
         assert!(error.contains("not present in kit.yaml"));
 
         let _ = fs::remove_dir_all(dir);
