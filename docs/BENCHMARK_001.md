@@ -68,7 +68,30 @@ This emits:
 
 If these resolve to overlapping plan IDs, the output carries a warning. That cluster/workload cannot support a publishable three-strategy Benchmark 001 without choosing a different discriminating setup.
 
-Then compile and execute each selected plan with the same model artifact and BenchmarkConfig, retaining every raw bundle. `benchmark-auto` now defaults to at least 10 measured requests per run (rounded up to a whole concurrency wave), so two independent runs can satisfy the 20-sample publication floor. Override with `--measured-requests N` when needed.
+You can also generate an auditable execution kit:
+
+```bash
+meshfit benchmark-kit \
+  cluster.yaml \
+  target.yaml \
+  <meshfit-plan-id> \
+  <model-path> \
+  model-identity.yaml > benchmark-kit.yaml
+```
+
+The kit fixes:
+
+- two independent runs per candidate;
+- at least 10 measured requests per run, rounded to a full concurrency wave;
+- `results/<strategy>/run-01.yaml` and `run-02.yaml`;
+- executable artifact paths;
+- compile commands;
+- benchmark commands;
+- the final comparison-manifest skeleton.
+
+Every candidate is compiler-preflighted before a command is emitted. Unsupported plans are marked `compile_ready: false` with the compiler error instead of receiving a command that is known to fail. The kit also validates that the model identity matches the target model and carries an artifact hash or revision.
+
+Then compile and execute each selected plan with the same model artifact and BenchmarkConfig, retaining every raw bundle. `benchmark-auto` defaults to at least 10 measured requests per run, so two independent runs can satisfy the 20-sample publication floor. Override with `--measured-requests N` when needed.
 
 Finally create a comparison manifest:
 
