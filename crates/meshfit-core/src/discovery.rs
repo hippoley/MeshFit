@@ -1,6 +1,7 @@
-use std::{env, fs, process::Command};
+use std::{env, fs, io::ErrorKind, process::Command};
 
 use serde::{Deserialize, Serialize};
+use serde_json::Value;
 
 use crate::{
     identity::{DeviceIdentity, HardwareIdentity, LinkIdentity, TopologyIdentity},
@@ -41,13 +42,40 @@ pub fn discover_local() -> LocalDiscovery {
     let cpu_model = discover_cpu_model();
     let mut warnings = Vec::new();
 
-    let discovered = match query_nvidia_smi() {
+    let mut discovered = match query_nvidia_smi() {
         Ok(output) => parse_nvidia_smi_csv(&output),
         Err(reason) => {
             warnings.push(reason);
             Vec::new()
         }
     };
+
+    match query_amd_smi_static() {
+        Ok(Some(static_output)) => {
+            let monitor_output = match query_amd_smi_monitor() {
+                Ok(output) => output,
+                Err(reason) => {
+                    warnings.push(reason);
+                    None
+                }
+            };
+            match parse_amd_smi_json(&static_output, monitor_output.as_deref()) {
+                Ok(mut devices) => discovered.append(&mut devices),
+                Err(reason) => warnings.push(reason),
+            }
+        }
+        Ok(None) => {}
+        Err(reason) => warnings.push(reason),
+    }
+
+    match query_intel_xpu_discovery() {
+        Ok(Some(output)) => match parse_intel_xpu_smi_json(&output) {
+            Ok(mut devices) => discovered.append(&mut devices),
+            Err(reason) => warnings.push(reason),
+        },
+        Ok(None) => {}
+        Err(reason) => warnings.push(reason),
+    }
 
     let local_fabric = match query_nvidia_topology() {
         Ok(output) => parse_nvidia_topo_matrix(&output, &node_id),
@@ -125,6 +153,37 @@ fn query_nvidia_smi() -> Result<String, String> {
     String::from_utf8(output.stdout).map_err(|e| format!("nvidia-smi output is not UTF-8: {e}"))
 }
 
+fn query_optional_command(binary: &str, args: &[&str]) -> Result<Option<String>, String> {
+    let output = match Command::new(binary).args(args).output() {
+        Ok(output) => output,
+        Err(error) if error.kind() == ErrorKind::NotFound => return Ok(None),
+        Err(error) => return Err(format!("{binary} unavailable: {error}")),
+    };
+
+    if !output.status.success() {
+        return Err(format!("{binary} failed with status {}", output.status));
+    }
+
+    String::from_utf8(output.stdout)
+        .map(Some)
+        .map_err(|error| format!("{binary} output is not UTF-8: {error}"))
+}
+
+fn query_amd_smi_static() -> Result<Option<String>, String> {
+    query_optional_command(
+        "amd-smi",
+        &["static", "--asic", "--driver", "--vram", "--json"],
+    )
+}
+
+fn query_amd_smi_monitor() -> Result<Option<String>, String> {
+    query_optional_command("amd-smi", &["monitor", "--vram-usage", "--json"])
+}
+
+fn query_intel_xpu_discovery() -> Result<Option<String>, String> {
+    query_optional_command("xpu-smi", &["discovery", "-j"])
+}
+
 fn query_nvidia_topology() -> Result<String, String> {
     let output = Command::new("nvidia-smi")
         .args(["topo", "-m"])
@@ -165,6 +224,211 @@ pub fn parse_nvidia_smi_csv(raw: &str) -> Vec<DiscoveredAccelerator> {
             })
         })
         .collect()
+}
+
+fn json_records<'a>(value: &'a Value, list_key: &str) -> Vec<&'a Value> {
+    if let Some(items) = value.as_array() {
+        return items.iter().collect();
+    }
+    value
+        .get(list_key)
+        .and_then(Value::as_array)
+        .map(|items| items.iter().collect())
+        .unwrap_or_default()
+}
+
+fn json_gpu_index(value: &Value) -> Option<u64> {
+    value
+        .get("gpu")
+        .or_else(|| value.get("device_id"))
+        .and_then(|value| {
+            value
+                .as_u64()
+                .or_else(|| value.as_str()?.parse::<u64>().ok())
+        })
+}
+
+fn find_json_key<'a>(value: &'a Value, keys: &[&str]) -> Option<&'a Value> {
+    match value {
+        Value::Object(map) => {
+            for key in keys {
+                if let Some(found) = map.get(*key) {
+                    return Some(found);
+                }
+            }
+            map.values().find_map(|child| find_json_key(child, keys))
+        }
+        Value::Array(items) => items.iter().find_map(|child| find_json_key(child, keys)),
+        _ => None,
+    }
+}
+
+fn json_string(value: &Value, keys: &[&str]) -> Option<String> {
+    let value = find_json_key(value, keys)?;
+    match value {
+        Value::String(value) if !value.trim().is_empty() => Some(value.trim().to_string()),
+        Value::Number(value) => Some(value.to_string()),
+        _ => None,
+    }
+}
+
+fn json_number(value: &Value) -> Option<f64> {
+    match value {
+        Value::Number(value) => value.as_f64(),
+        Value::String(value) => value.trim().parse::<f64>().ok(),
+        Value::Object(map) => map.get("value").and_then(json_number),
+        _ => None,
+    }
+}
+
+fn json_unit(value: &Value) -> Option<&str> {
+    value
+        .as_object()?
+        .get("unit")?
+        .as_str()
+        .map(str::trim)
+}
+
+fn value_to_mib(value: &Value, default_unit: &str) -> Option<u64> {
+    let number = json_number(value)?;
+    if !number.is_finite() || number < 0.0 {
+        return None;
+    }
+
+    let unit = json_unit(value).unwrap_or(default_unit).to_ascii_lowercase();
+    let bytes = match unit.as_str() {
+        "b" | "byte" | "bytes" => number,
+        "kb" => number * 1_000.0,
+        "kib" => number * 1024.0,
+        "mb" => number * 1_000_000.0,
+        "mib" => number * 1024.0 * 1024.0,
+        "gb" => number * 1_000_000_000.0,
+        "gib" => number * 1024.0 * 1024.0 * 1024.0,
+        _ => return None,
+    };
+
+    Some((bytes / (1024.0 * 1024.0)).round() as u64)
+}
+
+fn json_memory_mib(value: &Value, keys: &[&str], default_unit: &str) -> Option<u64> {
+    let value = find_json_key(value, keys)?;
+    value_to_mib(value, default_unit)
+}
+
+pub fn parse_amd_smi_json(
+    static_raw: &str,
+    monitor_raw: Option<&str>,
+) -> Result<Vec<DiscoveredAccelerator>, String> {
+    let static_json: Value =
+        serde_json::from_str(static_raw).map_err(|e| format!("parse amd-smi static JSON: {e}"))?;
+    let monitor_json = monitor_raw
+        .map(|raw| {
+            serde_json::from_str::<Value>(raw)
+                .map_err(|e| format!("parse amd-smi monitor JSON: {e}"))
+        })
+        .transpose()?;
+
+    let monitor_records = monitor_json
+        .as_ref()
+        .map(|value| json_records(value, "gpu_data"))
+        .unwrap_or_default();
+
+    let mut devices = Vec::new();
+    for (position, record) in json_records(&static_json, "gpu_data").into_iter().enumerate() {
+        let gpu_index = json_gpu_index(record).unwrap_or(position as u64);
+        let monitor = monitor_records
+            .iter()
+            .copied()
+            .find(|candidate| json_gpu_index(candidate) == Some(gpu_index));
+
+        let model = json_string(record, &["market_name", "device_name", "asic_name"])
+            .unwrap_or_else(|| format!("AMD GPU {gpu_index}"));
+        let driver_version = json_string(record, &["driver_version"]);
+        let memory_mib = json_memory_mib(
+            record,
+            &["vram_size", "vram_total", "vram_total_mb"],
+            "MB",
+        )
+        .or_else(|| {
+            monitor.and_then(|value| {
+                json_memory_mib(value, &["vram_total", "vram_size"], "MB")
+            })
+        });
+
+        let Some(memory_mib) = memory_mib.filter(|memory| *memory > 0) else {
+            continue;
+        };
+
+        let used_memory_mib = monitor.and_then(|value| {
+            json_memory_mib(value, &["vram_used", "vram_used_mb"], "MB")
+        });
+        let free_memory_mib =
+            used_memory_mib.map(|used| memory_mib.saturating_sub(used));
+
+        devices.push(DiscoveredAccelerator {
+            identity: DeviceIdentity {
+                vendor: "amd".into(),
+                model,
+                backend: AcceleratorBackend::Rocm,
+                memory_mib,
+                driver_version,
+            },
+            free_memory_mib,
+        });
+    }
+
+    Ok(devices)
+}
+
+pub fn parse_intel_xpu_smi_json(raw: &str) -> Result<Vec<DiscoveredAccelerator>, String> {
+    let root: Value =
+        serde_json::from_str(raw).map_err(|e| format!("parse xpu-smi discovery JSON: {e}"))?;
+    let mut devices = Vec::new();
+
+    for record in json_records(&root, "device_list") {
+        if let Some(device_type) = record.get("device_type").and_then(Value::as_str) {
+            if !device_type.eq_ignore_ascii_case("gpu") {
+                continue;
+            }
+        }
+
+        let Some(memory_mib) = record
+            .get("memory_physical_size_byte")
+            .and_then(|value| value_to_mib(value, "B"))
+            .filter(|memory| *memory > 0)
+        else {
+            continue;
+        };
+
+        let free_memory_mib = record
+            .get("memory_free_size_byte")
+            .and_then(|value| value_to_mib(value, "B"));
+        let device_id = json_gpu_index(record).unwrap_or(devices.len() as u64);
+        let model = record
+            .get("device_name")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_string)
+            .unwrap_or_else(|| format!("Intel GPU {device_id}"));
+        let driver_version = record
+            .get("driver_version")
+            .and_then(Value::as_str)
+            .filter(|value| !value.trim().is_empty())
+            .map(str::to_string);
+
+        devices.push(DiscoveredAccelerator {
+            identity: DeviceIdentity {
+                vendor: "intel".into(),
+                model,
+                backend: AcceleratorBackend::Xpu,
+                memory_mib,
+                driver_version,
+            },
+            free_memory_mib,
+        });
+    }
+
+    Ok(devices)
 }
 
 pub fn topology_identity_from_discovery(discovery: &LocalDiscovery) -> TopologyIdentity {
@@ -347,6 +611,76 @@ mod tests {
         assert_eq!(devices[0].identity.memory_mib, 81559);
         assert_eq!(devices[0].free_memory_mib, Some(80123));
         assert_eq!(devices[0].identity.backend, AcceleratorBackend::Cuda);
+    }
+
+    #[test]
+    fn parses_amd_smi_json_with_decimal_memory_units() {
+        let static_raw = r#"{
+            "gpu_data": [{
+                "gpu": 0,
+                "asic": {"market_name": "AMD Instinct MI300X"},
+                "driver": {"driver_version": "7.0.2"},
+                "vram": {"vram_size": {"value": 196300, "unit": "MB"}}
+            }]
+        }"#;
+        let monitor_raw = r#"{
+            "gpu_data": [{
+                "gpu": 0,
+                "vram_usage": {
+                    "vram_used": {"value": 300, "unit": "MB"},
+                    "vram_total": {"value": 196300, "unit": "MB"}
+                }
+            }]
+        }"#;
+
+        let devices = parse_amd_smi_json(static_raw, Some(monitor_raw)).unwrap();
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].identity.vendor, "amd");
+        assert_eq!(devices[0].identity.model, "AMD Instinct MI300X");
+        assert_eq!(devices[0].identity.backend, AcceleratorBackend::Rocm);
+        assert_eq!(devices[0].identity.driver_version.as_deref(), Some("7.0.2"));
+        assert_eq!(devices[0].identity.memory_mib, 187206);
+        assert_eq!(devices[0].free_memory_mib, Some(186920));
+    }
+
+    #[test]
+    fn parses_intel_xpu_discovery_json_from_byte_memory_fields() {
+        let raw = r#"{
+            "device_list": [{
+                "device_id": 0,
+                "device_type": "GPU",
+                "device_name": "Intel(R) Data Center GPU Max 1550",
+                "driver_version": "1.2.3",
+                "memory_physical_size_byte": 25769803776,
+                "memory_free_size_byte": 21474836480
+            }]
+        }"#;
+
+        let devices = parse_intel_xpu_smi_json(raw).unwrap();
+        assert_eq!(devices.len(), 1);
+        assert_eq!(devices[0].identity.vendor, "intel");
+        assert_eq!(
+            devices[0].identity.model,
+            "Intel(R) Data Center GPU Max 1550"
+        );
+        assert_eq!(devices[0].identity.backend, AcceleratorBackend::Xpu);
+        assert_eq!(devices[0].identity.memory_mib, 24576);
+        assert_eq!(devices[0].free_memory_mib, Some(20480));
+    }
+
+    #[test]
+    fn vendor_json_parsers_skip_devices_without_usable_memory() {
+        let amd = parse_amd_smi_json(
+            r#"{"gpu_data":[{"gpu":0,"asic":{"market_name":"AMD GPU"}}]}"#,
+            None,
+        )
+        .unwrap();
+        let intel =
+            parse_intel_xpu_smi_json(r#"{"device_list":[{"device_id":0,"device_type":"GPU"}]}"#)
+                .unwrap();
+
+        assert!(amd.is_empty());
+        assert!(intel.is_empty());
     }
 
     #[test]
