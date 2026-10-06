@@ -3242,6 +3242,105 @@ mod tests {
             .any(|issue| issue.contains("RAM capacity mismatch")));
     }
 
+    fn executability_test_plan(
+        id: &str,
+        nodes: &[&str],
+        relative_compute: f64,
+    ) -> PlanIR {
+        PlanIR {
+            id: id.into(),
+            placement: if nodes.len() > 1 {
+                PlacementKind::TensorParallel
+            } else {
+                PlacementKind::SingleHost
+            },
+            runtime: "vllm".into(),
+            nodes: nodes.iter().map(|node| (*node).to_string()).collect(),
+            accelerators: nodes
+                .iter()
+                .map(|node| meshfit_core::AcceleratorRefIR {
+                    node: (*node).to_string(),
+                    accelerator: "gpu0".into(),
+                    backend: meshfit_core::AcceleratorBackend::Cuda,
+                })
+                .collect(),
+            required_memory_gb: 40.0,
+            accelerator_memory_gb: 80.0,
+            relative_compute,
+            hourly_cost_usd: 0.0,
+            memory_headroom_gb: 40.0,
+            communication: None,
+            assumptions: vec![],
+        }
+    }
+
+    #[test]
+    fn max_compute_blocker_reports_next_compiler_ready_plan_without_substitution() {
+        let selected = executability_test_plan("cross-node-max", &["node-a", "node-b"], 100.0);
+        let local_fast = executability_test_plan("local-fast", &["node-b"], 80.0);
+        let local_slow = executability_test_plan("local-slow", &["node-a"], 60.0);
+        let report = PlacementReport {
+            model: "demo".into(),
+            feasible: vec![local_slow, selected.clone(), local_fast],
+            pareto: vec![],
+            rejected: vec![],
+            excluded_nodes: vec![],
+        };
+
+        let fallbacks = benchmark_executable_fallbacks(
+            &report,
+            "max-aggregate-compute",
+            &selected,
+            "demo-model",
+            "demo",
+            4096,
+            18080,
+        );
+
+        assert_eq!(fallbacks.len(), 2);
+        assert_eq!(fallbacks[0].plan_id, "local-fast");
+        assert_eq!(fallbacks[1].plan_id, "local-slow");
+        assert_eq!(selected.id, "cross-node-max");
+        assert!(compile_plan(&CompileRequest {
+            plan: selected,
+            model_path: "demo-model".into(),
+            model_id: "demo".into(),
+            context_tokens: 4096,
+            listen_port: 18080,
+            gpu_layers: None,
+            extra_args: vec![],
+        })
+        .unwrap_err()
+        .code
+        .contains("requires_orchestrator"));
+    }
+
+    #[test]
+    fn explicit_meshfit_plan_never_gets_silent_fallbacks() {
+        let selected = executability_test_plan("cross-node-meshfit", &["node-a", "node-b"], 100.0);
+        let report = PlacementReport {
+            model: "demo".into(),
+            feasible: vec![
+                selected.clone(),
+                executability_test_plan("local-fast", &["node-b"], 80.0),
+            ],
+            pareto: vec![],
+            rejected: vec![],
+            excluded_nodes: vec![],
+        };
+
+        assert!(benchmark_executable_fallbacks(
+            &report,
+            "meshfit",
+            &selected,
+            "demo-model",
+            "demo",
+            4096,
+            18080,
+        )
+        .is_empty());
+    }
+
     #[test]
     fn benchmark_auto_defaults_to_at_least_ten_samples() {
         assert_eq!(default_measured_requests(1), 10);
