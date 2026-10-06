@@ -2834,7 +2834,30 @@ fn render_benchmark_runbook(kit: &BenchmarkExecutionKit) -> String {
                 candidate.name, candidate.plan_id, candidate.runtime, candidate.compile_ready
             ));
             if let Some(error) = &candidate.compile_error {
-                out.push_str(&format!("  - compiler preflight error: {error}\n"));
+                let code = candidate
+                    .compile_error_code
+                    .as_deref()
+                    .unwrap_or("unknown_compiler_blocker");
+                out.push_str(&format!("  - compiler blocker: `{code}` — {error}\n"));
+                if candidate.executable_fallbacks.is_empty() {
+                    out.push_str(
+                        "  - compiler-ready fallbacks: none; change the plan/runtime or add the missing execution adapter\n",
+                    );
+                } else {
+                    out.push_str(
+                        "  - compiler-ready diagnostic fallbacks (not substituted into the benchmark):\n",
+                    );
+                    for fallback in &candidate.executable_fallbacks {
+                        out.push_str(&format!(
+                            "    - `{}` — {:?}, runtime `{}`, nodes `{}`, relative compute {:.3}\n",
+                            fallback.plan_id,
+                            fallback.placement,
+                            fallback.runtime,
+                            fallback.nodes.join("+"),
+                            fallback.relative_compute
+                        ));
+                    }
+                }
             }
         }
         out.push_str("\n```bash\n");
