@@ -356,7 +356,16 @@ fn sample_stddev(values: &[f64]) -> Option<f64> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::{AcceleratorBackend, AcceleratorRefIR, CommunicationEstimateIR, PlacementKind};
+    use crate::{
+        benchmark::{BenchmarkConfig, BenchmarkRequestIR, RequestMeasurement, WaveMeasurement},
+        compiler::{ExecutablePlanIR, ExecutionScope, ServiceContract},
+        evidence::BenchmarkProvenance,
+        identity::{
+            ExecutionIdentity, HardwareIdentity, ModelArtifactIdentity, RuntimeIdentity,
+            TopologyIdentity,
+        },
+        ir::{AcceleratorBackend, AcceleratorRefIR, CommunicationEstimateIR, PlacementKind},
+    };
 
     fn plan() -> PlanIR {
         PlanIR {
@@ -377,6 +386,137 @@ mod tests {
             communication: None,
             assumptions: vec![],
         }
+    }
+
+    fn bundle(id: &str, output_tokens: Option<u32>, total_ms: f64) -> BenchmarkBundle {
+        BenchmarkBundle {
+            benchmark_id: id.into(),
+            request: BenchmarkRequestIR {
+                executable: ExecutablePlanIR {
+                    source_plan_id: "plan-a".into(),
+                    model_id: "demo".into(),
+                    model_source: "/models/demo".into(),
+                    placement: PlacementKind::SingleHost,
+                    context_tokens: 4096,
+                    runtime: "vllm".into(),
+                    scope: ExecutionScope::LocalProcess,
+                    program: "vllm".into(),
+                    args: vec![],
+                    identity_flags: vec![],
+                    env: vec![],
+                    working_node: "node-a".into(),
+                    service: ServiceContract {
+                        scheme: "http".into(),
+                        host: "127.0.0.1".into(),
+                        port: 18080,
+                        health_path: "/health".into(),
+                        chat_completions_path: "/v1/chat/completions".into(),
+                    },
+                    assumptions: vec![],
+                },
+                identity: ExecutionIdentity {
+                    hardware: HardwareIdentity {
+                        architecture: "x86_64".into(),
+                        operating_system: "linux".into(),
+                        cpu_model: None,
+                        ram_mib: Some(65_536),
+                        devices: vec![],
+                    },
+                    model: ModelArtifactIdentity {
+                        model_id: "demo".into(),
+                        format: "safetensors".into(),
+                        quantization: "q4".into(),
+                        artifact_sha256: Some("sha".into()),
+                        revision: None,
+                    },
+                    runtime: RuntimeIdentity {
+                        runtime: "vllm".into(),
+                        version: "test".into(),
+                        build_commit: None,
+                        flags: vec![],
+                    },
+                    topology: TopologyIdentity { links: vec![] },
+                    placement: PlacementKind::SingleHost,
+                },
+                context_tokens: 4096,
+                concurrency: 1,
+                config: BenchmarkConfig {
+                    prompt: "hello".into(),
+                    max_tokens: 64,
+                    warmup_requests: 1,
+                    measured_requests: 1,
+                    request_timeout_ms: 120_000,
+                    startup_timeout_ms: 300_000,
+                },
+            },
+            measurements: vec![RequestMeasurement {
+                ttft_ms: 100.0,
+                total_ms,
+                output_tokens,
+            }],
+            waves: vec![WaveMeasurement {
+                request_count: 1,
+                total_ms,
+                output_tokens,
+                peak_vram_gb: Some(20.0),
+                peak_ram_gb: Some(8.0),
+            }],
+            provenance: BenchmarkProvenance {
+                source: "test".into(),
+                source_url: None,
+                commit: Some("abc".into()),
+                captured_at: None,
+            },
+        }
+    }
+
+    #[test]
+    fn calibrates_cost_underprediction_from_observed_wave_throughput() {
+        let summary = calibrate_plan_cost(
+            &plan(),
+            12.0,
+            &[bundle("run-1", Some(10), 1000.0), bundle("run-2", Some(20), 2000.0)],
+        )
+        .unwrap();
+
+        assert_eq!(summary.sample_count, 2);
+        assert_eq!(summary.observed_mean_output_tokens_per_second, 10.0);
+        assert!(summary.predicted_total_cost_per_million_output_tokens_usd < 100.0);
+        assert_eq!(summary.observed_mean_total_cost_per_million_output_tokens_usd, 100.0);
+        assert!(summary.mean_signed_error_usd_per_million_output_tokens < 0.0);
+        assert!(summary.conservative_observed_to_predicted_ratio > 1.0);
+        assert!(summary.worst_underprediction_fraction > 0.0);
+        assert!(summary.communication_egress_is_modeled);
+    }
+
+    #[test]
+    fn cost_calibration_refuses_missing_wave_usage() {
+        let error = calibrate_plan_cost(&plan(), 12.0, &[bundle("run-1", None, 1000.0)])
+            .unwrap_err();
+
+        assert!(error.contains("cannot invent observed throughput"));
+    }
+
+    #[test]
+    fn cost_calibration_rejects_execution_identity_drift() {
+        let first = bundle("run-1", Some(10), 1000.0);
+        let mut second = bundle("run-2", Some(10), 1000.0);
+        second.request.identity.runtime.version = "different".into();
+
+        let error = calibrate_plan_cost(&plan(), 12.0, &[first, second]).unwrap_err();
+
+        assert!(error.contains("execution fingerprint differs"));
+    }
+
+    #[test]
+    fn cost_calibration_rejects_benchmark_config_drift() {
+        let first = bundle("run-1", Some(10), 1000.0);
+        let mut second = bundle("run-2", Some(10), 1000.0);
+        second.request.config.max_tokens = 128;
+
+        let error = calibrate_plan_cost(&plan(), 12.0, &[first, second]).unwrap_err();
+
+        assert!(error.contains("BenchmarkConfig differs"));
     }
 
     #[test]
