@@ -929,13 +929,13 @@ fn run() -> Result<(), String> {
                 .get(3)
                 .ok_or_else(|| "missing candidate name".to_string())?;
             let declared_host = option_value(&args[4..], "--host")?;
-            let model_path_override = option_value(&args[4..], "--model-path")?;
+            let model_path_override = benchmark_model_path_override(&args[4..])?;
             let allow_existing = args.iter().any(|arg| arg == "--allow-existing");
             let preflight = inspect_benchmark_preflight(
                 Path::new(kit_dir),
                 candidate,
                 declared_host,
-                model_path_override,
+                model_path_override.as_deref(),
                 allow_existing,
             )?;
 
@@ -2697,6 +2697,28 @@ fn print_help() {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn executable_cache_identity_requires_plan_and_model_source() {
+        assert!(executable_identity_matches(
+            "plan-a",
+            "/models/qwen.gguf",
+            "plan-a",
+            "/models/qwen.gguf"
+        ));
+        assert!(!executable_identity_matches(
+            "plan-a",
+            "/old/qwen.gguf",
+            "plan-a",
+            "/models/qwen.gguf"
+        ));
+        assert!(!executable_identity_matches(
+            "plan-b",
+            "/models/qwen.gguf",
+            "plan-a",
+            "/models/qwen.gguf"
+        ));
+    }
 
     #[test]
     fn benchmark_auto_defaults_to_at_least_ten_samples() {
