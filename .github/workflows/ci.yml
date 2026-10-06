@@ -71,6 +71,14 @@ jobs:
       - run: 'grep -q "preflight_ready: false" /tmp/meshfit-benchmark-run-candidate.yaml'
       - run: 'grep -q "pending_runs:" /tmp/meshfit-benchmark-run-candidate.yaml'
       - run: grep -q 'model_artifact_verified' /tmp/meshfit-benchmark-run-candidate.yaml
+      - run: cargo run -p meshfit -- benchmark-run-host /tmp/meshfit-benchmark-001-materialized --host node-b --model-path examples/model-artifact-demo.bin --dry-run > /tmp/meshfit-benchmark-run-host.yaml
+      - run: grep -q 'host' /tmp/meshfit-benchmark-run-host.yaml
+      - run: grep -q 'model_artifact_verified' /tmp/meshfit-benchmark-run-host.yaml
+      - run: MESHFIT_NODE_ID=node-b cargo run -p meshfit -- benchmark-run-host /tmp/meshfit-benchmark-001-materialized --current-host --model-path examples/model-artifact-demo.bin --dry-run > /tmp/meshfit-benchmark-run-current-host.yaml
+      - run: grep -q 'node-b' /tmp/meshfit-benchmark-run-current-host.yaml
+      - run: "! cargo run -p meshfit -- benchmark-run-host /tmp/meshfit-benchmark-001-materialized --host node-z --dry-run"
+      - run: "! cargo run -p meshfit -- benchmark-run-host /tmp/meshfit-benchmark-001-materialized --host node-b --resume --overwrite"
+      - run: '! cargo run -p meshfit -- benchmark-run-host /tmp/meshfit-benchmark-001-materialized --host node-b --model-path examples/model-artifact-demo.bin'
       - run: '! cargo run -p meshfit -- benchmark-run-candidate /tmp/meshfit-benchmark-001-materialized meshfit --host node-b'
       - run: '! cargo run -p meshfit -- benchmark-run-candidate /tmp/meshfit-benchmark-001-materialized meshfit --host node-b --resume --overwrite'
       - run: cargo run -p meshfit -- benchmark-status /tmp/meshfit-benchmark-001-materialized > /tmp/meshfit-benchmark-status.yaml
