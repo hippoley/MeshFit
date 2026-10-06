@@ -5,7 +5,7 @@ use serde::{Deserialize, Serialize};
 use crate::{
     discovery::LocalDiscovery,
     identity::HardwareIdentity,
-    ir::{FabricEdgeIR, InfrastructureIR, LinkKind},
+    ir::{InfrastructureIR, LinkKind},
     probe::PeerProbeResult,
 };
 
