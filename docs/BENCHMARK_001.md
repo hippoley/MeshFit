@@ -466,6 +466,28 @@ Dry-run reports preflight state, the effective model path and verification state
 `benchmark-run-one` and `benchmark-run-candidate` share one internal execution function so locking, compilation, source-plan validation, benchmark execution, bundle validation, and evidence-safe commit semantics cannot drift apart.
 
 
+## Bounded host evidence transfer
+
+When benchmark hosts do not share the coordinator's writable experiment directory, move evidence through MeshFit's bounded host package instead of copying result files ad hoc.
+
+On each completed host:
+
+```bash
+meshfit benchmark-export-host benchmark-001 --current-host > host-evidence.yaml
+```
+
+The exporter includes only the result slots assigned to that logical host by the local `kit.yaml`. Every bundle must already exist, parse, validate, and match its candidate plan. The versioned `meshfit.benchmark-host-evidence/v1` package records the candidate, plan ID, run number, exact kit-relative slot, SHA-256, and YAML bundle content.
+
+After transferring that small YAML package to the coordinator:
+
+```bash
+meshfit benchmark-import-host benchmark-001 host-evidence.yaml
+```
+
+The importer treats the coordinator's local kit as the whitelist. It requires the same benchmark ID and host assignment, an exact complete set of expected slots, matching candidate/plan/run/path metadata, matching SHA-256, a valid BenchmarkBundle, and the expected source plan ID before any write occurs. Re-importing byte-identical evidence is an idempotent no-op; an occupied slot with different content is rejected rather than overwritten.
+
+This mechanism bounds transport; it does not create new trust. Hardware attestation, model identity, runtime provenance, repeated-run, stability, publication, and performance-claim gates remain unchanged.
+
 ## Experiment finalization
 
 After every assigned host has completed its work, finalize the materialized experiment directory directly:
