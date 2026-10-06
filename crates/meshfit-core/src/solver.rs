@@ -11,11 +11,16 @@ const CROSS_NODE_MIN_BANDWIDTH_GBPS: f64 = 50.0;
 pub fn solve(scenario: &ScenarioIR) -> PlacementReport {
     let mut feasible = Vec::new();
     let mut rejected = Vec::new();
+    let required = scenario.model.required_memory_gb_for(&scenario.workload);
+    let kv_cache_gb = scenario.model.kv_cache_gb_for(&scenario.workload);
 
     for runtime in &scenario.runtimes {
         enumerate_single_node(
             &scenario.infrastructure,
             &scenario.model,
+            &scenario.workload,
+            required,
+            kv_cache_gb,
             runtime,
             &mut feasible,
             &mut rejected,
@@ -23,6 +28,9 @@ pub fn solve(scenario: &ScenarioIR) -> PlacementReport {
         enumerate_two_node_tp(
             &scenario.infrastructure,
             &scenario.model,
+            &scenario.workload,
+            required,
+            kv_cache_gb,
             runtime,
             &mut feasible,
             &mut rejected,
@@ -50,11 +58,13 @@ fn accelerator_allowed(accelerator: &AcceleratorIR, model: &ModelIR, runtime: &R
 fn enumerate_single_node(
     infra: &InfrastructureIR,
     model: &ModelIR,
+    workload: &crate::ir::WorkloadIR,
+    required: f64,
+    kv_cache_gb: f64,
     runtime: &RuntimeIR,
     feasible: &mut Vec<PlanIR>,
     rejected: &mut Vec<RejectionIR>,
 ) {
-    let required = model.required_memory_gb();
 
     for node in &infra.nodes {
         let compatible: Vec<&AcceleratorIR> = node
@@ -103,10 +113,10 @@ fn enumerate_single_node(
                     relative_compute: accelerator.relative_compute,
                     hourly_cost_usd: node.hourly_cost_usd,
                     memory_headroom_gb: usable - required,
-                    assumptions: vec![
+                    assumptions: memory_assumptions(model, workload, kv_cache_gb, vec![
                         "single-device feasibility uses the selected accelerator only".into(),
                         "v0.1 makes no latency or throughput claim".into(),
-                    ],
+                    ]),
                 });
             } else if runtime.supports_cpu_offload {
                 let capacity = usable + node.ram_gb * 0.75;
@@ -132,13 +142,13 @@ fn enumerate_single_node(
                         relative_compute: accelerator.relative_compute * 0.55,
                         hourly_cost_usd: node.hourly_cost_usd,
                         memory_headroom_gb: capacity - required,
-                        assumptions: vec![
+                        assumptions: memory_assumptions(model, workload, kv_cache_gb, vec![
                             "CPU offload feasibility uses one explicitly selected accelerator"
                                 .into(),
                             "75% of system RAM is treated as structurally available for offload"
                                 .into(),
                             "v0.1 does not predict offload throughput".into(),
-                        ],
+                        ]),
                     });
                 }
             }
@@ -150,6 +160,9 @@ fn enumerate_single_node(
                 node.id.as_str(),
                 &compatible,
                 model,
+                workload,
+                required,
+                kv_cache_gb,
                 runtime,
                 feasible,
                 rejected,
@@ -176,6 +189,9 @@ fn enumerate_local_tp(
     node_id: &str,
     compatible: &[&AcceleratorIR],
     model: &ModelIR,
+    workload: &crate::ir::WorkloadIR,
+    required: f64,
+    kv_cache_gb: f64,
     runtime: &RuntimeIR,
     feasible: &mut Vec<PlanIR>,
     rejected: &mut Vec<RejectionIR>,
@@ -204,12 +220,12 @@ fn enumerate_local_tp(
         for accelerator in accelerators {
             selected.push(accelerator);
             memory += accelerator.usable_memory_gb();
-            if memory >= model.required_memory_gb() {
+            if memory >= required {
                 break;
             }
         }
 
-        if selected.len() < 2 || memory < model.required_memory_gb() {
+        if selected.len() < 2 || memory < required {
             continue;
         }
 
@@ -265,19 +281,19 @@ fn enumerate_local_tp(
                     backend,
                 })
                 .collect(),
-            required_memory_gb: model.required_memory_gb(),
+            required_memory_gb: required,
             accelerator_memory_gb: memory,
             relative_compute,
             hourly_cost_usd: infra
                 .node(node_id)
                 .map(|node| node.hourly_cost_usd)
                 .unwrap_or_default(),
-            memory_headroom_gb: memory - model.required_memory_gb(),
-            assumptions: vec![
+            memory_headroom_gb: memory - required,
+            assumptions: memory_assumptions(model, workload, kv_cache_gb, vec![
                 format!("local TP uses explicit {:?} accelerators", backend),
                 "all selected accelerator pairs have a discovered local fabric relation".into(),
                 "local fabric performance is not yet predicted in v0.1".into(),
-            ],
+            ]),
         });
     }
 }
@@ -285,6 +301,9 @@ fn enumerate_local_tp(
 fn enumerate_two_node_tp(
     infra: &InfrastructureIR,
     model: &ModelIR,
+    workload: &crate::ir::WorkloadIR,
+    required: f64,
+    kv_cache_gb: f64,
     runtime: &RuntimeIR,
     feasible: &mut Vec<PlanIR>,
     rejected: &mut Vec<RejectionIR>,
@@ -347,14 +366,14 @@ fn enumerate_two_node_tp(
             };
 
             let memory = accelerator_a.usable_memory_gb() + accelerator_b.usable_memory_gb();
-            if memory < model.required_memory_gb() {
+            if memory < required {
                 rejected.push(RejectionIR {
                     candidate,
                     code: "insufficient_pair_memory".into(),
                     reason: format!(
                         "selected pair exposes {:.1}GB but model requires {:.1}GB",
                         memory,
-                        model.required_memory_gb()
+                        required
                     ),
                 });
                 continue;
@@ -385,15 +404,15 @@ fn enumerate_two_node_tp(
                         backend: accelerator_b.backend,
                     },
                 ],
-                required_memory_gb: model.required_memory_gb(),
+                required_memory_gb: required,
                 accelerator_memory_gb: memory,
                 relative_compute: accelerator_a.relative_compute + accelerator_b.relative_compute,
                 hourly_cost_usd: a.hourly_cost_usd + b.hourly_cost_usd,
-                memory_headroom_gb: memory - model.required_memory_gb(),
-                assumptions: vec![format!(
+                memory_headroom_gb: memory - required,
+                assumptions: memory_assumptions(model, workload, kv_cache_gb, vec![format!(
                     "cross-node TP uses explicit devices over measured {:.1}Gbps / {:.1}ms fabric",
                     bandwidth_gbps, latency_ms
-                )],
+                )]),
             });
         }
     }
@@ -425,6 +444,35 @@ fn best_cross_node_pair<'a>(
         (a1.usable_memory_gb() + b1.usable_memory_gb())
             .total_cmp(&(a2.usable_memory_gb() + b2.usable_memory_gb()))
     })
+}
+
+fn memory_assumptions(
+    model: &ModelIR,
+    workload: &crate::ir::WorkloadIR,
+    kv_cache_gb: f64,
+    mut extra: Vec<String>,
+) -> Vec<String> {
+    let mut assumptions = vec![format!(
+        "memory = {:.1}GB weights + {:.1}GB KV = {:.1}GB total",
+        model.weight_memory_gb,
+        kv_cache_gb,
+        model.weight_memory_gb + kv_cache_gb
+    )];
+
+    if model.kv_cache_model.is_some() {
+        assumptions.push(format!(
+            "KV cache is workload-aware at {} context tokens and {} active sequences",
+            workload.context_tokens,
+            workload.active_sequences()
+        ));
+    } else {
+        assumptions.push(
+            "KV cache uses legacy fixed kv_cache_gb fallback and is not workload-scaled".into(),
+        );
+    }
+
+    assumptions.append(&mut extra);
+    assumptions
 }
 
 fn pareto_frontier(plans: &[PlanIR]) -> Vec<PlanIR> {
