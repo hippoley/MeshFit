@@ -74,6 +74,12 @@ jobs:
       - run: cargo run -p meshfit -- benchmark-run-host /tmp/meshfit-benchmark-001-materialized --host node-b --model-path examples/model-artifact-demo.bin --dry-run > /tmp/meshfit-benchmark-run-host.yaml
       - run: grep -q 'host' /tmp/meshfit-benchmark-run-host.yaml
       - run: grep -q 'model_artifact_verified' /tmp/meshfit-benchmark-run-host.yaml
+      - run: MESHFIT_MODEL_PATH=examples/model-artifact-demo.bin cargo run -p meshfit -- benchmark-preflight /tmp/meshfit-benchmark-001-materialized meshfit --host node-b > /tmp/meshfit-model-env-preflight.yaml
+      - run: grep -q 'local_override_verified' /tmp/meshfit-model-env-preflight.yaml
+      - run: MESHFIT_MODEL_PATH=examples/model-artifact-demo.bin cargo run -p meshfit -- benchmark-run-candidate /tmp/meshfit-benchmark-001-materialized meshfit --host node-b --dry-run > /tmp/meshfit-model-env-candidate.yaml
+      - run: grep -q 'model_artifact_verified' /tmp/meshfit-model-env-candidate.yaml
+      - run: MESHFIT_MODEL_PATH=examples/model-artifact-demo.bin cargo run -p meshfit -- benchmark-run-host /tmp/meshfit-benchmark-001-materialized --host node-b --dry-run > /tmp/meshfit-model-env-host.yaml
+      - run: grep -q 'model_artifact_verified' /tmp/meshfit-model-env-host.yaml
       - run: MESHFIT_NODE_ID=node-b cargo run -p meshfit -- benchmark-run-host /tmp/meshfit-benchmark-001-materialized --current-host --model-path examples/model-artifact-demo.bin --dry-run > /tmp/meshfit-benchmark-run-current-host.yaml
       - run: grep -q 'node-b' /tmp/meshfit-benchmark-run-current-host.yaml
       - run: "! cargo run -p meshfit -- benchmark-run-host /tmp/meshfit-benchmark-001-materialized --host node-z --dry-run"
