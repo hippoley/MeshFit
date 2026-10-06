@@ -236,3 +236,28 @@ The stability metric follows the selected comparison objective:
 Results above the 20% CV limit remain available as provisional diagnostics but must not be labeled PUBLISHABLE or used as a MeshFit performance claim.
 
 Comparison output also reports TTFT standard deviation/CV, decode-rate standard deviation, and run-level objective CV.
+
+
+## Best-baseline headline
+
+Benchmark 001 reports one directly understandable comparison in addition to oracle regret:
+
+```text
+MeshFit vs best baseline = relative improvement under the selected objective
+```
+
+For lower-is-better objectives such as p95 TTFT:
+
+```text
+improvement = (baseline - MeshFit) / baseline
+```
+
+For higher-is-better objectives such as decode tokens/s:
+
+```text
+improvement = (MeshFit - baseline) / baseline
+```
+
+Positive values mean MeshFit is better; negative values mean it is worse.
+
+The report includes the selected best baseline name and objective value. A publishable comparison may surface this delta as a headline. A non-publishable comparison must label it provisional and explicitly prohibit using it as a MeshFit performance claim.
