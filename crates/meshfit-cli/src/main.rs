@@ -672,7 +672,6 @@ fn print_help() {
     );
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
