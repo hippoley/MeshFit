@@ -348,12 +348,15 @@ pub struct ScenarioIR {
     pub workload: WorkloadIR,
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
 
-    fn workload(context_tokens: u32, concurrency: u32, max_active_sequences: Option<u32>) -> WorkloadIR {
+    fn workload(
+        context_tokens: u32,
+        concurrency: u32,
+        max_active_sequences: Option<u32>,
+    ) -> WorkloadIR {
         WorkloadIR {
             context_tokens,
             concurrency,
