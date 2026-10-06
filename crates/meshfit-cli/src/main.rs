@@ -18,6 +18,10 @@ use meshfit_core::{
 
 const BENCHMARK_LISTEN_PORT: u16 = 18080;
 
+fn default_benchmark_listen_port() -> u16 {
+    BENCHMARK_LISTEN_PORT
+}
+
 #[derive(Debug, Deserialize)]
 struct BenchmarkComparisonManifest {
     benchmark_id: String,
@@ -64,6 +68,8 @@ struct BenchmarkExecutionKit {
     concurrency: u32,
     measured_requests_per_run: u32,
     runs_per_candidate: u32,
+    #[serde(default = "default_benchmark_listen_port")]
+    listen_port: u16,
     candidates: Vec<BenchmarkExecutionCandidate>,
     comparison_manifest: BenchmarkExecutionComparison,
     warnings: Vec<String>,
@@ -193,6 +199,7 @@ struct BenchmarkRunOnePlan {
     model_path: String,
     model_path_overridden: bool,
     model_artifact_verified: bool,
+    listen_port: u16,
     run_number: usize,
     executable_path: String,
     bundle_path: String,
@@ -210,6 +217,7 @@ struct BenchmarkRunCandidatePlan {
     model_path: String,
     model_path_overridden: bool,
     model_artifact_verified: bool,
+    listen_port: u16,
     total_runs: usize,
     existing_valid_runs: Vec<usize>,
     pending_runs: Vec<usize>,
@@ -224,6 +232,7 @@ struct BenchmarkRunHostPlan {
     ready: bool,
     issues: Vec<String>,
     model_path_override: Option<String>,
+    listen_port: u16,
     resume: bool,
     overwrite: bool,
     candidates: Vec<BenchmarkRunCandidatePlan>,
@@ -253,6 +262,8 @@ struct BenchmarkPreflight {
     model_path_status: String,
     model_path_overridden: bool,
     model_artifact_verified: bool,
+    listen_port: u16,
+    listen_port_available: bool,
     existing_bundles: Vec<String>,
     issues: Vec<String>,
     warnings: Vec<String>,
@@ -588,7 +599,7 @@ fn run() -> Result<(), String> {
                     model_path: model_path.clone(),
                     model_id: target.model.id.clone(),
                     context_tokens: target.workload.context_tokens,
-                    listen_port: BENCHMARK_LISTEN_PORT,
+                    listen_port: kit.listen_port,
                     gpu_layers: None,
                     extra_args: vec![],
                 };
@@ -1056,7 +1067,7 @@ fn run() -> Result<(), String> {
                 model_path: model_path.clone(),
                 model_id: target.model.id.clone(),
                 context_tokens: target.workload.context_tokens,
-                listen_port: BENCHMARK_LISTEN_PORT,
+                listen_port: kit.listen_port,
                 gpu_layers,
                 extra_args: vec![],
             };
@@ -1259,7 +1270,7 @@ fn inspect_benchmark_run_one_plan(
     )?;
     let executable_path = kit_dir.join(&candidate.executable_path);
     let bundle_path = kit_dir.join(&comparison.bundles[run_number - 1]);
-    let compile_required = !executable_matches_model_path(&executable_path, &preflight.model_path)?;
+    let compile_required = !executable_matches_contract(&executable_path, &preflight.model_path, kit.listen_port)?;
 
     Ok(BenchmarkRunOnePlan {
         benchmark_id: kit.benchmark_id,
@@ -1596,7 +1607,11 @@ fn load_benchmark_execution_kit(kit_dir: &Path) -> Result<BenchmarkExecutionKit,
     serde_yaml::from_str(&raw).map_err(|e| format!("parse {}: {e}", kit_path.display()))
 }
 
-fn executable_matches_model_path(executable_path: &Path, model_path: &str) -> Result<bool, String> {
+fn executable_matches_contract(
+    executable_path: &Path,
+    model_path: &str,
+    listen_port: u16,
+) -> Result<bool, String> {
     if !executable_path.is_file() {
         return Ok(false);
     }
@@ -1604,7 +1619,7 @@ fn executable_matches_model_path(executable_path: &Path, model_path: &str) -> Re
         .map_err(|e| format!("read {}: {e}", executable_path.display()))?;
     let executable: ExecutablePlanIR = serde_yaml::from_str(&raw)
         .map_err(|e| format!("parse {}: {e}", executable_path.display()))?;
-    Ok(executable.model_source == model_path)
+    Ok(executable.model_source == model_path && executable.service.port == listen_port)
 }
 
 fn inspect_model_path_for_host(
@@ -1789,7 +1804,7 @@ fn ensure_candidate_executable(
     executable_path: &Path,
     model_path: &str,
 ) -> Result<(), String> {
-    if executable_matches_model_path(executable_path, model_path)? {
+    if executable_matches_contract(executable_path, model_path, kit.listen_port)? {
         return Ok(());
     }
 
@@ -1797,7 +1812,7 @@ fn ensure_candidate_executable(
         fs::create_dir_all(parent).map_err(|e| format!("create {}: {e}", parent.display()))?;
     }
     let _compile_lock = acquire_benchmark_compile_lock(executable_path)?;
-    if executable_matches_model_path(executable_path, model_path)? {
+    if executable_matches_contract(executable_path, model_path, kit.listen_port)? {
         return Ok(());
     }
 
@@ -1834,7 +1849,7 @@ fn ensure_candidate_executable(
         model_path: model_path.to_string(),
         model_id: target.model.id.clone(),
         context_tokens: target.workload.context_tokens,
-        listen_port: BENCHMARK_LISTEN_PORT,
+        listen_port: kit.listen_port,
         gpu_layers: None,
         extra_args: vec![],
     };
@@ -2641,6 +2656,7 @@ mod tests {
             concurrency: 1,
             measured_requests_per_run: 10,
             runs_per_candidate: 1,
+            listen_port: BENCHMARK_LISTEN_PORT,
             candidates: vec![BenchmarkExecutionCandidate {
                 name: "meshfit".into(),
                 plan_id: "plan-test".into(),
