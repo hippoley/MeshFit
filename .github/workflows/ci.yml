@@ -41,6 +41,11 @@ jobs:
       - run: test -f /tmp/meshfit-benchmark-001-materialized/inputs/model-identity.yaml
       - run: test -d /tmp/meshfit-benchmark-001-materialized/results/meshfit
       - run: test -d /tmp/meshfit-benchmark-001-materialized/artifacts/meshfit
+      - run: cargo run -p meshfit -- benchmark-status /tmp/meshfit-benchmark-001-materialized > /tmp/meshfit-benchmark-status.yaml
+      - run: '! cargo run -p meshfit -- benchmark-status /tmp/meshfit-benchmark-001-materialized --require-complete'
+      - run: printf 'not-valid-yaml: [' > /tmp/meshfit-benchmark-001-materialized/results/meshfit/run-01.yaml
+      - run: cargo run -p meshfit -- benchmark-status /tmp/meshfit-benchmark-001-materialized > /tmp/meshfit-benchmark-status-invalid.yaml
+      - run: grep -q 'parse failed' /tmp/meshfit-benchmark-status-invalid.yaml
       - run: '! cargo run -p meshfit -- benchmark-kit /tmp/meshfit-snapshot-manifest.yaml examples/placement-target.yaml node-b:gpu0:vllm:SingleHost Qwen/Qwen3-32B /tmp/meshfit-model-identity.yaml --require-ready'
       - run: cargo run -p meshfit -- compare-benchmarks examples/benchmark-comparison.yaml --markdown > /tmp/meshfit-benchmark-comparison.md
       - run: '! cargo run -p meshfit -- compare-benchmarks examples/benchmark-comparison.yaml --require-publishable'
