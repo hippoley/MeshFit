@@ -1285,15 +1285,11 @@ fn render_benchmark_runbook(kit: &BenchmarkExecutionKit) -> String {
             out.push_str(&format!("Compiler preflight error: {error}\n\n"));
             continue;
         }
-        if let Some(command) = &candidate.compile_command {
-            out.push_str("    ");
-            out.push_str(command);
-            out.push_str("\n\n");
-        }
-        for command in &candidate.run_commands {
-            out.push_str("    ");
-            out.push_str(command);
-            out.push_str("\n\n");
+        for run in 1..=kit.runs_per_candidate {
+            out.push_str(&format!(
+                "    meshfit benchmark-run-one . {} {}\n\n",
+                candidate.name, run
+            ));
         }
     }
 
