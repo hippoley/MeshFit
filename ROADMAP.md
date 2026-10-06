@@ -32,7 +32,7 @@ MeshFit's roadmap is ordered by the shortest path to a real closed loop.
 - [x] CPU / RAM — implementation complete on Linux, real host validation pending
 - [x] NVIDIA GPU / free VRAM / driver — implementation complete, real GPU validation pending
 - [ ] Apple unified memory
-- [ ] AMD / Intel baseline discovery
+- [x] AMD / Intel baseline discovery — `amd-smi` / `xpu-smi` inventory parsers and unit conversion CI-verified on run #787; real AMD/Intel hardware validation pending
 - [x] PCIe / NVLink topology — parser implemented via `nvidia-smi topo -m`, real GPU validation pending
 - [x] runtime versions — vLLM / llama.cpp PATH discovery implemented
 - [x] RTT probe — implementation complete, real peer validation pending
