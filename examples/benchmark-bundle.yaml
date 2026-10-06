@@ -1,7 +1,7 @@
 benchmark_id: demo-bench
 request:
   executable:
-    source_plan_id: node-b:vllm:SingleHost
+    source_plan_id: node-b:gpu0:vllm:SingleHost
     model_id: qwen-demo
     model_source: Qwen/Qwen3-32B
     placement: single_host
