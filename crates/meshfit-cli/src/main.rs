@@ -2146,6 +2146,19 @@ mod tests {
     }
 
     #[test]
+    fn resume_rejects_corrupt_existing_bundle() {
+        let dir = status_test_dir("resume-corrupt");
+        fs::create_dir_all(&dir).unwrap();
+        let bundle = dir.join("run-01.yaml");
+        fs::write(&bundle, "not-valid-yaml: [").unwrap();
+
+        let error = validate_existing_candidate_bundle(&bundle, "plan-test").unwrap_err();
+        assert!(error.contains("parse existing bundle"));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn benchmark_preflight_rejects_unknown_candidate() {
         let dir = status_test_dir("preflight-missing-candidate");
         fs::create_dir_all(&dir).unwrap();
