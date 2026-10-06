@@ -705,7 +705,7 @@ fn student_t_critical_95(degrees_of_freedom: usize) -> f64 {
     } else if degrees_of_freedom <= T.len() {
         T[degrees_of_freedom - 1]
     } else {
-        1.96
+        2.042
     }
 }
 
@@ -903,6 +903,13 @@ mod tests {
     #[test]
     fn publication_stability_threshold_is_explicit() {
         assert_eq!(MAX_RUN_OBJECTIVE_CV_FOR_PUBLICATION, 0.20);
+    }
+
+    #[test]
+    fn student_t_fallback_remains_conservative_beyond_table() {
+        assert_eq!(student_t_critical_95(30), 2.042);
+        assert_eq!(student_t_critical_95(31), 2.042);
+        assert_eq!(student_t_critical_95(100), 2.042);
     }
 
     #[test]
