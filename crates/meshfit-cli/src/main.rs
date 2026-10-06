@@ -7,8 +7,8 @@ use meshfit_core::{
     prepare_local_benchmark_request, probe_peer, run_local_benchmark, solve, BenchmarkBundle,
     BenchmarkCandidate, BenchmarkComparisonRequest, BenchmarkConfig, BenchmarkRequestIR,
     ComparisonObjective, CompileRequest, EvidenceStore, ExecutablePlanIR, InfrastructureSnapshot,
-    LinkKind, LocalDiscovery, ModelArtifactIdentity, PeerProbeResult, PlacementKind, PlacementReport, PlanIR,
-    PlacementTargetIR, Prediction, PredictionQuery, ScenarioIR, SnapshotManifest,
+    LinkKind, LocalDiscovery, ModelArtifactIdentity, PeerProbeResult, PlacementKind, PlacementReport,
+    PlacementTargetIR, PlanIR, Prediction, PredictionQuery, ScenarioIR, SnapshotManifest,
 };
 
 #[derive(Debug, Deserialize)]
