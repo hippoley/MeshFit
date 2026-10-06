@@ -82,6 +82,10 @@ pub struct BenchmarkComparisonReport {
     pub objective: ComparisonObjective,
     pub publishable: bool,
     pub evidence_status: String,
+    #[serde(default)]
+    pub performance_claim_publishable: bool,
+    #[serde(default)]
+    pub performance_claim_status: String,
     pub oracle_candidate: String,
     pub meshfit_candidate: String,
     pub oracle_objective_value: f64,
@@ -136,15 +140,25 @@ impl BenchmarkComparisonReport {
             out.push_str(
                 "**Evidence status:** PUBLISHABLE · independent repeated runs verified\n\n",
             );
-            out.push_str(&format!(
-                "**MeshFit vs best baseline ({}): {}**{} · **placement regret:** {:.1}% · **baseline regret:** {:.1}% · **regret reduction:** {}\n\n",
-                self.best_baseline_candidate,
-                improvement_label,
-                improvement_interval,
-                self.meshfit_regret_fraction * 100.0,
-                self.best_baseline_regret_fraction * 100.0,
-                regret_reduction
-            ));
+            if self.performance_claim_publishable {
+                out.push_str(&format!(
+                    "**MeshFit vs best baseline ({}): {}**{} · **placement regret:** {:.1}% · **baseline regret:** {:.1}% · **regret reduction:** {}\n\n",
+                    self.best_baseline_candidate,
+                    improvement_label,
+                    improvement_interval,
+                    self.meshfit_regret_fraction * 100.0,
+                    self.best_baseline_regret_fraction * 100.0,
+                    regret_reduction
+                ));
+            } else {
+                out.push_str(&format!(
+                    "**Performance claim:** NOT ESTABLISHED · {}\n\nPoint estimate only. MeshFit vs best baseline ({}): {}{}. Do not publish this delta as a demonstrated MeshFit advantage.\n\n",
+                    self.performance_claim_status,
+                    self.best_baseline_candidate,
+                    improvement_label,
+                    improvement_interval
+                ));
+            }
         } else {
             out.push_str(&format!(
                 "**Evidence status:** NOT PUBLISHABLE · {}\n\n",
@@ -300,6 +314,20 @@ pub fn compare_benchmarks(
         request.objective,
     );
 
+    let performance_claim_publishable = publishable
+        && improvement_interval
+            .map(|(lower, _)| lower > 0.0)
+            .unwrap_or(false);
+    let performance_claim_status = if !publishable {
+        "benchmark evidence is not publishable".to_string()
+    } else if improvement_interval.is_none() {
+        "run-level uncertainty interval is unavailable".to_string()
+    } else if performance_claim_publishable {
+        "conservative improvement interval remains above zero".to_string()
+    } else {
+        "conservative improvement interval includes zero or worse outcomes".to_string()
+    };
+
     let regret_reduction = if best_baseline_regret > 0.0 {
         Some((best_baseline_regret - meshfit_regret_fraction) / best_baseline_regret)
     } else {
@@ -311,6 +339,8 @@ pub fn compare_benchmarks(
         objective: request.objective,
         publishable,
         evidence_status,
+        performance_claim_publishable,
+        performance_claim_status,
         oracle_candidate: summaries[oracle_idx].name.clone(),
         meshfit_candidate: request.meshfit_candidate.clone(),
         oracle_objective_value: oracle_value,
@@ -859,6 +889,8 @@ mod tests {
             objective: ComparisonObjective::P95TtftMs,
             publishable: false,
             evidence_status: "insufficient independent runs".into(),
+            performance_claim_publishable: false,
+            performance_claim_status: "benchmark evidence is not publishable".into(),
             oracle_candidate: "meshfit".into(),
             meshfit_candidate: "meshfit".into(),
             oracle_objective_value: 100.0,
@@ -888,6 +920,9 @@ mod tests {
             objective: ComparisonObjective::P95TtftMs,
             publishable: true,
             evidence_status: "independent repeated benchmark bundles verified".into(),
+            performance_claim_publishable: true,
+            performance_claim_status:
+                "conservative improvement interval remains above zero".into(),
             oracle_candidate: "meshfit".into(),
             meshfit_candidate: "meshfit".into(),
             oracle_objective_value: 100.0,
@@ -934,6 +969,37 @@ mod tests {
         assert!(markdown.contains("[10.0%, 30.0%]"));
         assert!(markdown.contains("| meshfit | topology-aware | 2 | 20 |"));
         assert!(markdown.contains("Observed oracle: **meshfit**"));
+    }
+
+    #[test]
+    fn markdown_separates_publishable_evidence_from_unproven_advantage() {
+        let report = BenchmarkComparisonReport {
+            benchmark_id: "benchmark-001".into(),
+            objective: ComparisonObjective::P95TtftMs,
+            publishable: true,
+            evidence_status: "independent repeated benchmark bundles verified".into(),
+            performance_claim_publishable: false,
+            performance_claim_status:
+                "conservative improvement interval includes zero or worse outcomes".into(),
+            oracle_candidate: "meshfit".into(),
+            meshfit_candidate: "meshfit".into(),
+            oracle_objective_value: 100.0,
+            meshfit_objective_value: 100.0,
+            meshfit_regret_fraction: 0.0,
+            best_baseline_candidate: "heuristic".into(),
+            best_baseline_objective_value: 110.0,
+            best_baseline_regret_fraction: 0.10,
+            meshfit_improvement_vs_best_baseline_fraction: 0.09,
+            meshfit_improvement_ci95_lower_fraction: Some(-0.05),
+            meshfit_improvement_ci95_upper_fraction: Some(0.20),
+            regret_reduction_vs_best_baseline_fraction: Some(1.0),
+            candidates: vec![],
+        };
+
+        let markdown = report.to_markdown();
+        assert!(markdown.contains("**Evidence status:** PUBLISHABLE"));
+        assert!(markdown.contains("**Performance claim:** NOT ESTABLISHED"));
+        assert!(markdown.contains("Do not publish this delta as a demonstrated MeshFit advantage"));
     }
 
     #[test]
