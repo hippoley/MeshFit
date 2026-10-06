@@ -452,3 +452,30 @@ benchmark-worklist
 ```
 
 `--require-publishable` still enforces the existing provenance, distinct-plan, repeated-run, sample-count and stability gates. Finalization does not weaken or duplicate those rules.
+
+
+## Run-level uncertainty interval
+
+A single relative-improvement point estimate is not enough for a defensible headline.
+
+MeshFit therefore derives uncertainty from **independent benchmark bundles**, not from individual requests inside one run. For the selected objective, each bundle contributes exactly one run-level objective value.
+
+Candidate uncertainty uses a log-space Student-t interval:
+
+```text
+run objective values
+→ log(values)
+→ mean ± t(0.975, df) × sample_stddev / sqrt(number_of_runs)
+→ exponentiate
+```
+
+Log space keeps positive performance metrics positive and makes the interval relative-scale aware. With only two independent runs, the Student-t critical value is intentionally very large, so the interval stays wide instead of pretending that two runs provide precise evidence.
+
+The direct MeshFit-vs-best-baseline headline then reports a conservative improvement interval derived from the candidate intervals:
+
+- lower-is-better: worst case uses MeshFit upper bound against baseline lower bound;
+- higher-is-better: worst case uses MeshFit lower bound against baseline upper bound.
+
+This interval is an approximate run-level uncertainty interval around repeated-run performance. It is **not** a substitute for more independent hardware runs, and it does not change the existing publishability gates for provenance, distinct plans, sample count, run stability, or complete experiment evidence.
+
+For degrees of freedom above the embedded Student-t table, MeshFit keeps the df=30 critical value (2.042) rather than dropping to 1.96, deliberately preserving a slightly conservative interval.
