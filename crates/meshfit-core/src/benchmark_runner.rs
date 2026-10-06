@@ -1,6 +1,7 @@
 use std::{
     io::{BufRead, BufReader},
     process::{Child, Command, Stdio},
+    sync::{Arc, Barrier},
     thread,
     time::{Duration, Instant, SystemTime, UNIX_EPOCH},
 };
@@ -90,6 +91,8 @@ pub fn prepare_local_benchmark_request(
     build_benchmark_request_from_facts(executable, local, model, runtime, concurrency, config)
 }
 
+const MAX_LOCAL_CONCURRENCY: u32 = 256;
+
 pub fn validate_local_benchmark_request(
     request: &BenchmarkRequestIR,
     local_node_id: &str,
@@ -136,15 +139,26 @@ pub fn validate_local_benchmark_request(
         return Err("executable placement does not match ExecutionIdentity placement".into());
     }
 
-    if request.concurrency != 1 {
-        return Err(
-            "v0.3 local benchmark runner only supports concurrency=1; concurrent load generation is not implemented"
-                .into(),
-        );
+    if request.concurrency == 0 {
+        return Err("benchmark concurrency must be greater than zero".into());
+    }
+
+    if request.concurrency > MAX_LOCAL_CONCURRENCY {
+        return Err(format!(
+            "benchmark concurrency {} exceeds local safety limit {}",
+            request.concurrency, MAX_LOCAL_CONCURRENCY
+        ));
     }
 
     if request.config.measured_requests == 0 {
         return Err("benchmark requires at least one measured request".into());
+    }
+
+    if request.config.measured_requests % request.concurrency != 0 {
+        return Err(
+            "measured_requests must be divisible by concurrency so every measured wave uses the declared concurrency"
+                .into(),
+        );
     }
 
     if request.config.max_tokens == 0 {
@@ -266,13 +280,19 @@ fn run_against_child(
     wait_for_health(request, child)?;
 
     for _ in 0..request.config.warmup_requests {
-        let _ = run_streaming_request(request, None)?;
+        let _ = run_streaming_request(request)?;
     }
 
     let runtime_pid = child.id();
+    let wave_count = request.config.measured_requests / request.concurrency;
     let mut measurements = Vec::new();
-    for _ in 0..request.config.measured_requests {
-        measurements.push(run_streaming_request(request, Some(runtime_pid))?);
+
+    for _ in 0..wave_count {
+        measurements.extend(run_concurrent_wave(
+            request,
+            runtime_pid,
+            request.concurrency as usize,
+        )?);
     }
 
     let unix_seconds = SystemTime::now()
@@ -350,10 +370,55 @@ fn wait_for_health(request: &BenchmarkRequestIR, child: &mut Child) -> Result<()
     }
 }
 
-fn run_streaming_request(
+fn run_concurrent_wave(
     request: &BenchmarkRequestIR,
-    runtime_pid: Option<u32>,
-) -> Result<RequestMeasurement, String> {
+    runtime_pid: u32,
+    concurrency: usize,
+) -> Result<Vec<RequestMeasurement>, String> {
+    let barrier = Arc::new(Barrier::new(concurrency + 1));
+    let mut handles = Vec::with_capacity(concurrency);
+
+    for _ in 0..concurrency {
+        let barrier = Arc::clone(&barrier);
+        let request = request.clone();
+        handles.push(thread::spawn(move || {
+            barrier.wait();
+            run_streaming_request(&request)
+        }));
+    }
+
+    let sampler = ResourceSampler::start(runtime_pid, Duration::from_millis(50));
+    barrier.wait();
+
+    let mut measurements = Vec::with_capacity(concurrency);
+    let mut errors = Vec::new();
+
+    for handle in handles {
+        match handle.join() {
+            Ok(Ok(measurement)) => measurements.push(measurement),
+            Ok(Err(error)) => errors.push(error),
+            Err(_) => errors.push("benchmark request thread panicked".to_string()),
+        }
+    }
+
+    let peaks = sampler.finish();
+
+    if !errors.is_empty() {
+        return Err(format!(
+            "concurrent benchmark wave failed: {}",
+            errors.join("; ")
+        ));
+    }
+
+    for measurement in &mut measurements {
+        measurement.peak_vram_gb = peaks.peak_vram_gb;
+        measurement.peak_ram_gb = peaks.peak_ram_gb;
+    }
+
+    Ok(measurements)
+}
+
+fn run_streaming_request(request: &BenchmarkRequestIR) -> Result<RequestMeasurement, String> {
     let url = format!(
         "{}://{}:{}{}",
         request.executable.service.scheme,
@@ -381,7 +446,6 @@ fn run_streaming_request(
     let max_time_seconds = request.config.request_timeout_ms.saturating_add(999) / 1000;
 
     let max_time_seconds_text = max_time_seconds.to_string();
-    let sampler = runtime_pid.map(|pid| ResourceSampler::start(pid, Duration::from_millis(50)));
     let start = Instant::now();
     let mut curl = Command::new("curl")
         .args([
@@ -445,7 +509,6 @@ fn run_streaming_request(
     }
 
     let total_ms = start.elapsed().as_secs_f64() * 1000.0;
-    let peaks = sampler.map(ResourceSampler::finish).unwrap_or_default();
     let ttft_ms = ttft_ms.ok_or_else(|| {
         "streaming response completed without a non-empty content delta; TTFT unavailable"
             .to_string()
@@ -455,8 +518,8 @@ fn run_streaming_request(
         ttft_ms,
         total_ms,
         output_tokens,
-        peak_vram_gb: peaks.peak_vram_gb,
-        peak_ram_gb: peaks.peak_ram_gb,
+        peak_vram_gb: None,
+        peak_ram_gb: None,
     })
 }
 
@@ -600,11 +663,12 @@ mod tests {
     }
 
     #[test]
-    fn rejects_unimplemented_concurrency() {
+    fn rejects_partial_concurrency_wave() {
         let mut changed = request();
         changed.concurrency = 2;
+        changed.config.measured_requests = 3;
         let error = validate_local_benchmark_request(&changed, "node-a").unwrap_err();
-        assert!(error.contains("concurrency=1"));
+        assert!(error.contains("divisible by concurrency"));
     }
 
     #[test]
