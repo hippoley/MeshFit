@@ -291,11 +291,8 @@ fn run_against_child(
     let mut waves = Vec::new();
 
     for _ in 0..wave_count {
-        let (wave_measurements, wave) = run_concurrent_wave(
-            request,
-            runtime_pid,
-            request.concurrency as usize,
-        )?;
+        let (wave_measurements, wave) =
+            run_concurrent_wave(request, runtime_pid, request.concurrency as usize)?;
         measurements.extend(wave_measurements);
         waves.push(wave);
     }
