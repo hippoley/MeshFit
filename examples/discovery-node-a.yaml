@@ -5,14 +5,14 @@ hardware_identity:
   ram_mib: 262144
   devices:
     - vendor: nvidia
-      model: NVIDIA RTX 4090
+      model: NVIDIA RTX 6000 Ada
       backend: cuda
-      memory_mib: 24576
+      memory_mib: 49152
       driver_version: '580.65'
     - vendor: nvidia
-      model: NVIDIA RTX 4090
+      model: NVIDIA RTX 6000 Ada
       backend: cuda
-      memory_mib: 24576
+      memory_mib: 49152
       driver_version: '580.65'
 node:
   id: node-a
@@ -21,13 +21,13 @@ node:
   accelerators:
     - id: gpu0
       backend: cuda
-      memory_gb: 24
-      free_memory_gb: 23
+      memory_gb: 48
+      free_memory_gb: 46
       relative_compute: 60
     - id: gpu1
       backend: cuda
-      memory_gb: 24
-      free_memory_gb: 23
+      memory_gb: 48
+      free_memory_gb: 46
       relative_compute: 60
   hourly_cost_usd: 0
 local_fabric:
