@@ -66,6 +66,8 @@ pub struct CandidateBenchmarkSummary {
     #[serde(default)]
     pub run_objective_mean: Option<f64>,
     #[serde(default)]
+    pub run_objective_geometric_mean: Option<f64>,
+    #[serde(default)]
     pub run_objective_ci95_lower: Option<f64>,
     #[serde(default)]
     pub run_objective_ci95_upper: Option<f64>,
@@ -554,6 +556,7 @@ fn summarize_candidate(
         .collect::<Vec<_>>();
     let run_objective_cv = coefficient_of_variation(&run_objective_values);
     let run_objective_mean = mean(&run_objective_values);
+    let run_objective_geometric_mean = geometric_mean(&run_objective_values);
     let run_objective_interval = log_student_t_interval_95(&run_objective_values);
     let wave_throughput = candidate
         .bundles
@@ -631,6 +634,7 @@ fn summarize_candidate(
         estimated_cost_per_million_output_tokens_usd: estimated_cost,
         objective_value,
         run_objective_mean,
+        run_objective_geometric_mean,
         run_objective_ci95_lower: run_objective_interval.map(|(lower, _)| lower),
         run_objective_ci95_upper: run_objective_interval.map(|(_, upper)| upper),
         run_objective_cv,
@@ -665,6 +669,20 @@ fn bundle_objective_value(bundle: &BenchmarkBundle, objective: ComparisonObjecti
             mean(&values)
         }
     }
+}
+
+fn geometric_mean(values: &[f64]) -> Option<f64> {
+    if values.is_empty()
+        || values
+            .iter()
+            .any(|value| *value <= 0.0 || !value.is_finite())
+    {
+        return None;
+    }
+
+    Some(
+        (values.iter().map(|value| value.ln()).sum::<f64>() / values.len() as f64).exp(),
+    )
 }
 
 fn standard_deviation(values: &[f64]) -> Option<f64> {
@@ -903,6 +921,7 @@ mod tests {
                 estimated_cost_per_million_output_tokens_usd: Some(6.944),
                 objective_value: 100.0,
                 run_objective_mean: Some(100.0),
+                run_objective_geometric_mean: Some(99.5),
                 run_objective_ci95_lower: Some(90.0),
                 run_objective_ci95_upper: Some(110.0),
                 run_objective_cv: Some(0.05),
@@ -924,6 +943,17 @@ mod tests {
         let values = vec![10.0, 20.0, 30.0, 40.0, 50.0];
         assert_eq!(percentile(&values, 0.50).unwrap(), 30.0);
         assert_eq!(percentile(&values, 0.95).unwrap(), 50.0);
+    }
+
+    #[test]
+    fn geometric_mean_matches_log_space_center() {
+        let values = vec![100.0, 400.0];
+        let geometric = geometric_mean(&values).unwrap();
+        let (lower, upper) = log_student_t_interval_95(&values).unwrap();
+
+        assert!((geometric - 200.0).abs() < 1e-12);
+        assert!((geometric.ln() - ((lower.ln() + upper.ln()) / 2.0)).abs() < 1e-12);
+        assert_ne!(geometric, mean(&values).unwrap());
     }
 
     #[test]
