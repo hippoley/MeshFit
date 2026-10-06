@@ -627,7 +627,7 @@ fn run() -> Result<(), String> {
         }
         "benchmark-run-one" => {
             let kit_dir = args.get(2).ok_or_else(|| {
-                "usage: meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--dry-run] [--overwrite]"
+                "usage: meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--host NODE] [--dry-run] [--overwrite]"
                     .to_string()
             })?;
             let candidate_name = args.get(3).ok_or_else(|| "missing candidate".to_string())?;
@@ -636,6 +636,7 @@ fn run() -> Result<(), String> {
                 .ok_or_else(|| "missing run-number".to_string())?
                 .parse::<usize>()
                 .map_err(|e| format!("invalid run-number: {e}"))?;
+            let declared_host = option_value(&args[5..], "--host")?;
             let dry_run = args.iter().any(|arg| arg == "--dry-run");
             let overwrite = args.iter().any(|arg| arg == "--overwrite");
             let kit_dir = Path::new(kit_dir);
@@ -666,7 +667,8 @@ fn run() -> Result<(), String> {
                 ));
             }
 
-            let preflight = inspect_benchmark_preflight(kit_dir, candidate_name, None, true)?;
+            let preflight =
+                inspect_benchmark_preflight(kit_dir, candidate_name, declared_host, true)?;
             let executable_path = kit_dir.join(&candidate.executable_path);
             let bundle_rel = &comparison.bundles[run_number - 1];
             let bundle_path = kit_dir.join(bundle_rel);
@@ -1758,7 +1760,7 @@ fn print_prediction(prediction: &Prediction) {
 
 fn print_help() {
     println!(
-        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--require-ready] [--write-dir DIR]\n  meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--dry-run] [--overwrite]\n  meshfit benchmark-status <kit-dir> [--require-complete]\n  meshfit benchmark-preflight <kit-dir> <candidate> [--host NODE] [--allow-existing] [--require-ready]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
+        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--require-ready] [--write-dir DIR]\n  meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--host NODE] [--dry-run] [--overwrite]\n  meshfit benchmark-status <kit-dir> [--require-complete]\n  meshfit benchmark-preflight <kit-dir> <candidate> [--host NODE] [--allow-existing] [--require-ready]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
     );
 }
 
