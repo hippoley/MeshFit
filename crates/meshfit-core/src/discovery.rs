@@ -43,13 +43,17 @@ pub fn discover_local() -> LocalDiscovery {
     let cpu_model = discover_cpu_model();
     let mut warnings = Vec::new();
 
-    let mut discovered = match query_nvidia_smi() {
-        Ok(output) => parse_nvidia_smi_csv(&output),
+    let mut nvidia_devices = match query_nvidia_smi() {
+        Ok(Some(output)) => parse_nvidia_smi_csv(&output),
+        Ok(None) => Vec::new(),
         Err(reason) => {
             warnings.push(reason);
             Vec::new()
         }
     };
+    let has_nvidia_devices = !nvidia_devices.is_empty();
+    let mut discovered = Vec::new();
+    discovered.append(&mut nvidia_devices);
 
     match query_amd_smi_static() {
         Ok(Some(static_output)) => {
@@ -84,12 +88,16 @@ pub fn discover_local() -> LocalDiscovery {
         Err(reason) => warnings.push(reason),
     }
 
-    let local_fabric = match query_nvidia_topology() {
-        Ok(output) => parse_nvidia_topo_matrix(&output, &node_id),
-        Err(reason) => {
-            warnings.push(reason);
-            Vec::new()
+    let local_fabric = if has_nvidia_devices {
+        match query_nvidia_topology() {
+            Ok(output) => parse_nvidia_topo_matrix(&output, &node_id),
+            Err(reason) => {
+                warnings.push(reason);
+                Vec::new()
+            }
         }
+    } else {
+        Vec::new()
     };
 
     let devices = discovered.iter().map(|gpu| gpu.identity.clone()).collect();
@@ -143,20 +151,14 @@ pub fn resolve_node_id(
         .to_string()
 }
 
-fn query_nvidia_smi() -> Result<String, String> {
-    let output = Command::new("nvidia-smi")
-        .args([
+fn query_nvidia_smi() -> Result<Option<String>, String> {
+    query_optional_command(
+        "nvidia-smi",
+        &[
             "--query-gpu=index,name,memory.total,memory.free,driver_version",
             "--format=csv,noheader,nounits",
-        ])
-        .output()
-        .map_err(|e| format!("nvidia-smi unavailable: {e}"))?;
-
-    if !output.status.success() {
-        return Err(format!("nvidia-smi failed with status {}", output.status));
-    }
-
-    String::from_utf8(output.stdout).map_err(|e| format!("nvidia-smi output is not UTF-8: {e}"))
+        ],
+    )
 }
 
 fn query_optional_command(binary: &str, args: &[&str]) -> Result<Option<String>, String> {
