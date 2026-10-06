@@ -2,35 +2,40 @@ use std::collections::{HashMap, HashSet};
 
 use crate::ir::{
     AcceleratorBackend, AcceleratorIR, AcceleratorRefIR, ExclusionIR, InfrastructureIR, ModelIR,
-    PlacementKind, PlacementReport, PlanIR, RejectionIR, RuntimeIR, ScenarioIR,
+    PlacementKind, PlacementReport, PlanIR, RejectionIR, RuntimeIR, ScenarioIR, WorkloadIR,
 };
 
 const CROSS_NODE_MAX_LATENCY_MS: f64 = 2.0;
 const CROSS_NODE_MIN_BANDWIDTH_GBPS: f64 = 50.0;
 
+struct PlacementContext<'a> {
+    model: &'a ModelIR,
+    workload: &'a WorkloadIR,
+    required_memory_gb: f64,
+    kv_cache_gb: f64,
+}
+
 pub fn solve(scenario: &ScenarioIR) -> PlacementReport {
     let mut feasible = Vec::new();
     let mut rejected = Vec::new();
-    let required = scenario.model.required_memory_gb_for(&scenario.workload);
-    let kv_cache_gb = scenario.model.kv_cache_gb_for(&scenario.workload);
+    let context = PlacementContext {
+        model: &scenario.model,
+        workload: &scenario.workload,
+        required_memory_gb: scenario.model.required_memory_gb_for(&scenario.workload),
+        kv_cache_gb: scenario.model.kv_cache_gb_for(&scenario.workload),
+    };
 
     for runtime in &scenario.runtimes {
         enumerate_single_node(
             &scenario.infrastructure,
-            &scenario.model,
-            &scenario.workload,
-            required,
-            kv_cache_gb,
+            &context,
             runtime,
             &mut feasible,
             &mut rejected,
         );
         enumerate_two_node_tp(
             &scenario.infrastructure,
-            &scenario.model,
-            &scenario.workload,
-            required,
-            kv_cache_gb,
+            &context,
             runtime,
             &mut feasible,
             &mut rejected,
@@ -57,14 +62,13 @@ fn accelerator_allowed(accelerator: &AcceleratorIR, model: &ModelIR, runtime: &R
 
 fn enumerate_single_node(
     infra: &InfrastructureIR,
-    model: &ModelIR,
-    workload: &crate::ir::WorkloadIR,
-    required: f64,
-    kv_cache_gb: f64,
+    context: &PlacementContext<'_>,
     runtime: &RuntimeIR,
     feasible: &mut Vec<PlanIR>,
     rejected: &mut Vec<RejectionIR>,
 ) {
+    let model = context.model;
+    let required = context.required_memory_gb;
     for node in &infra.nodes {
         let compatible: Vec<&AcceleratorIR> = node
             .accelerators
@@ -113,9 +117,7 @@ fn enumerate_single_node(
                     hourly_cost_usd: node.hourly_cost_usd,
                     memory_headroom_gb: usable - required,
                     assumptions: memory_assumptions(
-                        model,
-                        workload,
-                        kv_cache_gb,
+                        context,
                         vec![
                             "single-device feasibility uses the selected accelerator only".into(),
                             "v0.1 makes no latency or throughput claim".into(),
@@ -147,9 +149,7 @@ fn enumerate_single_node(
                         hourly_cost_usd: node.hourly_cost_usd,
                         memory_headroom_gb: capacity - required,
                         assumptions: memory_assumptions(
-                            model,
-                            workload,
-                            kv_cache_gb,
+                            context,
                             vec![
                                 "CPU offload feasibility uses one explicitly selected accelerator"
                                     .into(),
@@ -168,10 +168,7 @@ fn enumerate_single_node(
                 infra,
                 node.id.as_str(),
                 &compatible,
-                model,
-                workload,
-                required,
-                kv_cache_gb,
+                context,
                 runtime,
                 feasible,
                 rejected,
@@ -197,14 +194,12 @@ fn enumerate_local_tp(
     infra: &InfrastructureIR,
     node_id: &str,
     compatible: &[&AcceleratorIR],
-    model: &ModelIR,
-    workload: &crate::ir::WorkloadIR,
-    required: f64,
-    kv_cache_gb: f64,
+    context: &PlacementContext<'_>,
     runtime: &RuntimeIR,
     feasible: &mut Vec<PlanIR>,
     rejected: &mut Vec<RejectionIR>,
 ) {
+    let required = context.required_memory_gb;
     let mut by_backend: HashMap<AcceleratorBackend, Vec<&AcceleratorIR>> = HashMap::new();
     for accelerator in compatible {
         by_backend
@@ -299,9 +294,7 @@ fn enumerate_local_tp(
                 .unwrap_or_default(),
             memory_headroom_gb: memory - required,
             assumptions: memory_assumptions(
-                model,
-                workload,
-                kv_cache_gb,
+                context,
                 vec![
                     format!("local TP uses explicit {:?} accelerators", backend),
                     "all selected accelerator pairs have a discovered local fabric relation".into(),
@@ -314,14 +307,13 @@ fn enumerate_local_tp(
 
 fn enumerate_two_node_tp(
     infra: &InfrastructureIR,
-    model: &ModelIR,
-    workload: &crate::ir::WorkloadIR,
-    required: f64,
-    kv_cache_gb: f64,
+    context: &PlacementContext<'_>,
     runtime: &RuntimeIR,
     feasible: &mut Vec<PlanIR>,
     rejected: &mut Vec<RejectionIR>,
 ) {
+    let model = context.model;
+    let required = context.required_memory_gb;
     if !runtime.supports_tp {
         return;
     }
@@ -423,9 +415,7 @@ fn enumerate_two_node_tp(
                 hourly_cost_usd: a.hourly_cost_usd + b.hourly_cost_usd,
                 memory_headroom_gb: memory - required,
                 assumptions: memory_assumptions(
-                    model,
-                    workload,
-                    kv_cache_gb,
+                    context,
                     vec![format!(
                         "cross-node TP uses explicit devices over measured {:.1}Gbps / {:.1}ms fabric",
                         bandwidth_gbps, latency_ms
@@ -465,16 +455,17 @@ fn best_cross_node_pair<'a>(
 }
 
 fn memory_assumptions(
-    model: &ModelIR,
-    workload: &crate::ir::WorkloadIR,
-    kv_cache_gb: f64,
+    context: &PlacementContext<'_>,
     mut extra: Vec<String>,
 ) -> Vec<String> {
+    let model = context.model;
+    let workload = context.workload;
+    let kv_cache_gb = context.kv_cache_gb;
     let mut assumptions = vec![format!(
         "memory = {:.1}GB weights + {:.1}GB KV = {:.1}GB total",
         model.weight_memory_gb,
         kv_cache_gb,
-        model.weight_memory_gb + kv_cache_gb
+        context.required_memory_gb
     )];
 
     if model.kv_cache_model.is_some() {
