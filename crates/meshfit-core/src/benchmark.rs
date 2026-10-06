@@ -154,7 +154,8 @@ impl BenchmarkBundle {
             .request
             .config
             .measured_requests
-            .is_multiple_of(self.request.concurrency) {
+            .is_multiple_of(self.request.concurrency)
+        {
             return Err(
                 "measured_requests must be divisible by concurrency so every measured wave uses the declared concurrency"
                     .into(),
@@ -291,7 +292,8 @@ impl BenchmarkBundle {
         }
 
         Ok(records)
-    }}
+    }
+}
 
 #[cfg(test)]
 mod tests {
