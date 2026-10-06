@@ -128,6 +128,7 @@ struct BenchmarkInvalidBundle {
     error: String,
 }
 
+#[derive(Debug)]
 struct BenchmarkRunSlotLock {
     path: PathBuf,
 }
