@@ -65,7 +65,6 @@ fn enumerate_single_node(
     feasible: &mut Vec<PlanIR>,
     rejected: &mut Vec<RejectionIR>,
 ) {
-
     for node in &infra.nodes {
         let compatible: Vec<&AcceleratorIR> = node
             .accelerators
@@ -113,10 +112,15 @@ fn enumerate_single_node(
                     relative_compute: accelerator.relative_compute,
                     hourly_cost_usd: node.hourly_cost_usd,
                     memory_headroom_gb: usable - required,
-                    assumptions: memory_assumptions(model, workload, kv_cache_gb, vec![
-                        "single-device feasibility uses the selected accelerator only".into(),
-                        "v0.1 makes no latency or throughput claim".into(),
-                    ]),
+                    assumptions: memory_assumptions(
+                        model,
+                        workload,
+                        kv_cache_gb,
+                        vec![
+                            "single-device feasibility uses the selected accelerator only".into(),
+                            "v0.1 makes no latency or throughput claim".into(),
+                        ],
+                    ),
                 });
             } else if runtime.supports_cpu_offload {
                 let capacity = usable + node.ram_gb * 0.75;
@@ -142,13 +146,18 @@ fn enumerate_single_node(
                         relative_compute: accelerator.relative_compute * 0.55,
                         hourly_cost_usd: node.hourly_cost_usd,
                         memory_headroom_gb: capacity - required,
-                        assumptions: memory_assumptions(model, workload, kv_cache_gb, vec![
-                            "CPU offload feasibility uses one explicitly selected accelerator"
-                                .into(),
-                            "75% of system RAM is treated as structurally available for offload"
-                                .into(),
-                            "v0.1 does not predict offload throughput".into(),
-                        ]),
+                        assumptions: memory_assumptions(
+                            model,
+                            workload,
+                            kv_cache_gb,
+                            vec![
+                                "CPU offload feasibility uses one explicitly selected accelerator"
+                                    .into(),
+                                "75% of system RAM is treated as structurally available for offload"
+                                    .into(),
+                                "v0.1 does not predict offload throughput".into(),
+                            ],
+                        ),
                     });
                 }
             }
@@ -289,11 +298,16 @@ fn enumerate_local_tp(
                 .map(|node| node.hourly_cost_usd)
                 .unwrap_or_default(),
             memory_headroom_gb: memory - required,
-            assumptions: memory_assumptions(model, workload, kv_cache_gb, vec![
-                format!("local TP uses explicit {:?} accelerators", backend),
-                "all selected accelerator pairs have a discovered local fabric relation".into(),
-                "local fabric performance is not yet predicted in v0.1".into(),
-            ]),
+            assumptions: memory_assumptions(
+                model,
+                workload,
+                kv_cache_gb,
+                vec![
+                    format!("local TP uses explicit {:?} accelerators", backend),
+                    "all selected accelerator pairs have a discovered local fabric relation".into(),
+                    "local fabric performance is not yet predicted in v0.1".into(),
+                ],
+            ),
         });
     }
 }
@@ -372,8 +386,7 @@ fn enumerate_two_node_tp(
                     code: "insufficient_pair_memory".into(),
                     reason: format!(
                         "selected pair exposes {:.1}GB but model requires {:.1}GB",
-                        memory,
-                        required
+                        memory, required
                     ),
                 });
                 continue;
@@ -409,10 +422,15 @@ fn enumerate_two_node_tp(
                 relative_compute: accelerator_a.relative_compute + accelerator_b.relative_compute,
                 hourly_cost_usd: a.hourly_cost_usd + b.hourly_cost_usd,
                 memory_headroom_gb: memory - required,
-                assumptions: memory_assumptions(model, workload, kv_cache_gb, vec![format!(
-                    "cross-node TP uses explicit devices over measured {:.1}Gbps / {:.1}ms fabric",
-                    bandwidth_gbps, latency_ms
-                )]),
+                assumptions: memory_assumptions(
+                    model,
+                    workload,
+                    kv_cache_gb,
+                    vec![format!(
+                        "cross-node TP uses explicit devices over measured {:.1}Gbps / {:.1}ms fabric",
+                        bandwidth_gbps, latency_ms
+                    )],
+                ),
             });
         }
     }
