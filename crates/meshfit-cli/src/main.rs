@@ -11,9 +11,9 @@ use meshfit_core::{
     prepare_local_benchmark_request, probe_peer, run_local_benchmark, solve, BenchmarkBundle,
     BenchmarkCandidate, BenchmarkComparisonReport, BenchmarkComparisonRequest, BenchmarkConfig,
     BenchmarkRequestIR, ComparisonObjective, CompileRequest, EvidenceStore, ExecutablePlanIR,
-    InfrastructureSnapshot, LinkKind, LocalDiscovery, ModelArtifactIdentity, PeerProbeResult,
-    PlacementKind, PlacementReport, PlacementTargetIR, PlanIR, Prediction, PredictionQuery,
-    ScenarioIR, SnapshotManifest,
+    HardwareIdentity, InfrastructureSnapshot, LinkKind, LocalDiscovery, ModelArtifactIdentity,
+    PeerProbeResult, PlacementKind, PlacementReport, PlacementTargetIR, PlanIR, Prediction,
+    PredictionQuery, ScenarioIR, SnapshotManifest,
 };
 
 const BENCHMARK_LISTEN_PORT: u16 = 18080;
@@ -273,6 +273,8 @@ struct BenchmarkPreflight {
     expected_host: String,
     observed_host: String,
     host_match: bool,
+    hardware_profile_match: bool,
+    hardware_profile_issues: Vec<String>,
     runtime: String,
     runtime_found: bool,
     model_path: String,
@@ -284,6 +286,200 @@ struct BenchmarkPreflight {
     existing_bundles: Vec<String>,
     issues: Vec<String>,
     warnings: Vec<String>,
+}
+
+#[derive(Debug)]
+struct BenchmarkHostAttestation {
+    matches: bool,
+    issues: Vec<String>,
+    warnings: Vec<String>,
+}
+
+fn benchmark_hardware_profile_attestation(
+    expected: &HardwareIdentity,
+    observed: &HardwareIdentity,
+) -> BenchmarkHostAttestation {
+    let mut issues = Vec::new();
+    let mut warnings = Vec::new();
+
+    if expected.architecture != observed.architecture {
+        issues.push(format!(
+            "hardware architecture mismatch: snapshot='{}' observed='{}'",
+            expected.architecture, observed.architecture
+        ));
+    }
+    if expected.operating_system != observed.operating_system {
+        issues.push(format!(
+            "hardware operating-system mismatch: snapshot='{}' observed='{}'",
+            expected.operating_system, observed.operating_system
+        ));
+    }
+
+    match (expected.ram_mib, observed.ram_mib) {
+        (Some(expected_mib), Some(observed_mib)) => {
+            let tolerance_mib = (expected_mib / 50).max(512);
+            if observed_mib.saturating_add(tolerance_mib) < expected_mib {
+                issues.push(format!(
+                    "hardware RAM capacity mismatch: snapshot={} MiB observed={} MiB ({} MiB tolerance)",
+                    expected_mib, observed_mib, tolerance_mib
+                ));
+            }
+        }
+        (Some(expected_mib), None) => issues.push(format!(
+            "hardware RAM capacity unavailable locally; snapshot requires approximately {expected_mib} MiB"
+        )),
+        _ => {}
+    }
+
+    let mut expected_devices = expected
+        .devices
+        .iter()
+        .map(|device| {
+            (
+                device.vendor.as_str(),
+                device.model.as_str(),
+                device.backend,
+                device.memory_mib,
+                device.driver_version.as_deref(),
+            )
+        })
+        .collect::<Vec<_>>();
+    let mut observed_devices = observed
+        .devices
+        .iter()
+        .map(|device| {
+            (
+                device.vendor.as_str(),
+                device.model.as_str(),
+                device.backend,
+                device.memory_mib,
+                device.driver_version.as_deref(),
+            )
+        })
+        .collect::<Vec<_>>();
+
+    let compare_devices = |left: &(
+        &str,
+        &str,
+        meshfit_core::AcceleratorBackend,
+        u64,
+        Option<&str>,
+    ),
+                           right: &(
+        &str,
+        &str,
+        meshfit_core::AcceleratorBackend,
+        u64,
+        Option<&str>,
+    )| {
+        (left.0, left.1, format!("{:?}", left.2), left.3).cmp(&(
+            right.0,
+            right.1,
+            format!("{:?}", right.2),
+            right.3,
+        ))
+    };
+    expected_devices.sort_by(compare_devices);
+    observed_devices.sort_by(compare_devices);
+
+    if expected_devices.len() != observed_devices.len() {
+        issues.push(format!(
+            "accelerator count mismatch: snapshot={} observed={}",
+            expected_devices.len(),
+            observed_devices.len()
+        ));
+    }
+
+    for (index, (expected_device, observed_device)) in expected_devices
+        .iter()
+        .zip(observed_devices.iter())
+        .enumerate()
+    {
+        if expected_device.0 != observed_device.0
+            || expected_device.1 != observed_device.1
+            || expected_device.2 != observed_device.2
+            || expected_device.3 != observed_device.3
+        {
+            issues.push(format!(
+                "accelerator[{index}] mismatch: snapshot='{} {} {:?} {} MiB' observed='{} {} {:?} {} MiB'",
+                expected_device.0,
+                expected_device.1,
+                expected_device.2,
+                expected_device.3,
+                observed_device.0,
+                observed_device.1,
+                observed_device.2,
+                observed_device.3
+            ));
+        } else if expected_device.4 != observed_device.4 {
+            warnings.push(format!(
+                "accelerator[{index}] driver changed since snapshot: snapshot={:?} observed={:?}",
+                expected_device.4, observed_device.4
+            ));
+        }
+    }
+
+    if let (Some(expected_cpu), Some(observed_cpu)) =
+        (expected.cpu_model.as_deref(), observed.cpu_model.as_deref())
+    {
+        if expected_cpu != observed_cpu {
+            warnings.push(format!(
+                "CPU model changed since snapshot: snapshot='{expected_cpu}' observed='{observed_cpu}'"
+            ));
+        }
+    }
+
+    BenchmarkHostAttestation {
+        matches: issues.is_empty(),
+        issues,
+        warnings,
+    }
+}
+
+fn inspect_benchmark_host_attestation(
+    kit_dir: &Path,
+    kit: &BenchmarkExecutionKit,
+    expected_host: &str,
+    local: &LocalDiscovery,
+) -> BenchmarkHostAttestation {
+    let snapshot_path = kit_dir.join(&kit.snapshot);
+    let raw = match fs::read_to_string(&snapshot_path) {
+        Ok(raw) => raw,
+        Err(error) => {
+            return BenchmarkHostAttestation {
+                matches: false,
+                issues: vec![format!(
+                    "cannot attest benchmark hardware because snapshot '{}' could not be read: {error}",
+                    snapshot_path.display()
+                )],
+                warnings: Vec::new(),
+            };
+        }
+    };
+    let snapshot: InfrastructureSnapshot = match serde_yaml::from_str(&raw) {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            return BenchmarkHostAttestation {
+                matches: false,
+                issues: vec![format!(
+                    "cannot attest benchmark hardware because snapshot '{}' is invalid: {error}",
+                    snapshot_path.display()
+                )],
+                warnings: Vec::new(),
+            };
+        }
+    };
+    let Some(expected) = snapshot.hardware_identities.get(expected_host) else {
+        return BenchmarkHostAttestation {
+            matches: false,
+            issues: vec![format!(
+                "snapshot has no hardware identity for benchmark host '{expected_host}'"
+            )],
+            warnings: Vec::new(),
+        };
+    };
+
+    benchmark_hardware_profile_attestation(expected, &local.hardware_identity)
 }
 
 fn benchmark_model_path_override(args: &[String]) -> Result<Option<String>, String> {
@@ -1064,7 +1260,7 @@ fn run() -> Result<(), String> {
         "compile-snapshot" => {
             let snapshot_path = args
                 .get(2)
-                .ok_or_else(|| "usage: meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers] [--listen-port N] [--listen-port N]".to_string())?;
+                .ok_or_else(|| "usage: meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers] [--listen-port N]".to_string())?;
             let target_path = args
                 .get(3)
                 .ok_or_else(|| "missing target.yaml".to_string())?;
@@ -2090,6 +2286,8 @@ fn inspect_benchmark_preflight(
         .map(str::to_string)
         .unwrap_or_else(|| local.node.id.clone());
     let host_match = observed_host == candidate.benchmark_host;
+    let hardware_attestation =
+        inspect_benchmark_host_attestation(kit_dir, &kit, &candidate.benchmark_host, &local);
     let runtime_discovery = discover_runtimes();
     let runtime_found = runtime_discovery
         .runtimes
@@ -2132,7 +2330,9 @@ fn inspect_benchmark_preflight(
             kit.listen_port
         ));
     }
+    issues.extend(hardware_attestation.issues.clone());
     let mut warnings = model_check.warnings.clone();
+    warnings.extend(hardware_attestation.warnings.clone());
     warnings.extend(local.warnings);
     warnings.extend(runtime_discovery.warnings);
 
@@ -2143,6 +2343,8 @@ fn inspect_benchmark_preflight(
         expected_host: candidate.benchmark_host.clone(),
         observed_host,
         host_match,
+        hardware_profile_match: hardware_attestation.matches,
+        hardware_profile_issues: hardware_attestation.issues,
         runtime: candidate.runtime.clone(),
         runtime_found,
         model_path: model_check.path,
@@ -2573,7 +2775,7 @@ fn render_benchmark_runbook(kit: &BenchmarkExecutionKit) -> String {
 
     out.push_str("## Real-host execution\n\n");
     out.push_str(
-        "Use one host-level command per machine. `MESHFIT_NODE_ID` must match the logical host in the snapshot. If the immutable model lives at a different local path, set `MESHFIT_MODEL_PATH`; MeshFit verifies its SHA-256 before execution.\n\n",
+        "Use one host-level command per machine. `MESHFIT_NODE_ID` selects the logical host, but it is not trusted as physical proof: preflight also compares this machine's discovered hardware profile with the snapshot identity for that host. If the immutable model lives at a different local path, set `MESHFIT_MODEL_PATH`; MeshFit verifies its SHA-256 before execution.\n\n",
     );
 
     for (host, candidates) in &by_host {
@@ -2879,6 +3081,70 @@ mod tests {
             "/models/qwen.gguf",
             19011
         ));
+    }
+
+    fn attestation_identity(
+        model: &str,
+        memory_mib: u64,
+        driver: &str,
+        ram_mib: u64,
+    ) -> HardwareIdentity {
+        HardwareIdentity {
+            architecture: "x86_64".into(),
+            operating_system: "linux".into(),
+            cpu_model: Some("AMD EPYC".into()),
+            ram_mib: Some(ram_mib),
+            devices: vec![meshfit_core::DeviceIdentity {
+                vendor: "nvidia".into(),
+                model: model.into(),
+                backend: meshfit_core::AcceleratorBackend::Cuda,
+                memory_mib,
+                driver_version: Some(driver.into()),
+            }],
+        }
+    }
+
+    #[test]
+    fn hardware_attestation_allows_driver_drift_but_reports_it() {
+        let expected = attestation_identity("NVIDIA H100 80GB HBM3", 81_559, "580.65", 262_144);
+        let observed = attestation_identity("NVIDIA H100 80GB HBM3", 81_559, "590.01", 260_000);
+
+        let attestation = benchmark_hardware_profile_attestation(&expected, &observed);
+
+        assert!(attestation.matches);
+        assert!(attestation.issues.is_empty());
+        assert!(attestation
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("driver changed")));
+    }
+
+    #[test]
+    fn hardware_attestation_rejects_wrong_accelerator_profile() {
+        let expected = attestation_identity("NVIDIA H100 80GB HBM3", 81_559, "580.65", 262_144);
+        let observed = attestation_identity("NVIDIA RTX 4090", 24_564, "580.65", 262_144);
+
+        let attestation = benchmark_hardware_profile_attestation(&expected, &observed);
+
+        assert!(!attestation.matches);
+        assert!(attestation
+            .issues
+            .iter()
+            .any(|issue| issue.contains("accelerator[0] mismatch")));
+    }
+
+    #[test]
+    fn hardware_attestation_rejects_material_ram_shortfall() {
+        let expected = attestation_identity("NVIDIA H100 80GB HBM3", 81_559, "580.65", 262_144);
+        let observed = attestation_identity("NVIDIA H100 80GB HBM3", 81_559, "580.65", 200_000);
+
+        let attestation = benchmark_hardware_profile_attestation(&expected, &observed);
+
+        assert!(!attestation.matches);
+        assert!(attestation
+            .issues
+            .iter()
+            .any(|issue| issue.contains("RAM capacity mismatch")));
     }
 
     #[test]
