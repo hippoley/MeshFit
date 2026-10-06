@@ -354,3 +354,30 @@ new bundle validated
 If the final commit rename fails, MeshFit attempts to restore the previous bundle from backup. A stale backup blocks later replacement until it is resolved instead of being silently overwritten.
 
 This protects real benchmark evidence from a remove-then-rename failure window.
+
+
+## Candidate-level repeated-run executor
+
+Run every independent slot for one candidate through the same validated execution core:
+
+```bash
+meshfit benchmark-run-candidate benchmark-001 meshfit --host node-b
+```
+
+Inspect the plan without starting the runtime:
+
+```bash
+meshfit benchmark-run-candidate benchmark-001 meshfit --host node-b --dry-run
+```
+
+The command pre-scans every expected bundle before GPU execution:
+
+- default mode refuses any pre-existing target bundle before the first new run starts;
+- `--resume` skips only bundles that parse, validate, and match the expected candidate plan ID;
+- corrupt or mismatched existing evidence is a hard failure;
+- `--overwrite` reruns every slot through the evidence-safe backup/restore commit path;
+- `--resume` and `--overwrite` are mutually exclusive.
+
+Dry-run reports preflight state and pending/existing-valid run numbers even when the host is not runtime-ready. Real execution requires preflight readiness and, after all pending slots finish, re-validates candidate completeness through `benchmark-status`.
+
+`benchmark-run-one` and `benchmark-run-candidate` share one internal execution function so locking, compilation, source-plan validation, benchmark execution, bundle validation, and evidence-safe commit semantics cannot drift apart.
