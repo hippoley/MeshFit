@@ -680,9 +680,7 @@ fn geometric_mean(values: &[f64]) -> Option<f64> {
         return None;
     }
 
-    Some(
-        (values.iter().map(|value| value.ln()).sum::<f64>() / values.len() as f64).exp(),
-    )
+    Some((values.iter().map(|value| value.ln()).sum::<f64>() / values.len() as f64).exp())
 }
 
 fn standard_deviation(values: &[f64]) -> Option<f64> {
