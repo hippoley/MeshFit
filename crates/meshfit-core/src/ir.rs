@@ -347,3 +347,75 @@ pub struct ScenarioIR {
     pub runtimes: Vec<RuntimeIR>,
     pub workload: WorkloadIR,
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn workload(context_tokens: u32, concurrency: u32, max_active_sequences: Option<u32>) -> WorkloadIR {
+        WorkloadIR {
+            context_tokens,
+            concurrency,
+            max_active_sequences,
+            p95_latency_ms: None,
+            budget_per_day_usd: None,
+        }
+    }
+
+    fn model(kv_cache_model: Option<KvCacheModelIR>) -> ModelIR {
+        ModelIR {
+            id: "kv-test".into(),
+            parameters_b: 1.0,
+            active_parameters_b: None,
+            weight_memory_gb: 1.0,
+            kv_cache_gb: 3.0,
+            kv_cache_model,
+            is_moe: false,
+            required_backends: vec![],
+        }
+    }
+
+    #[test]
+    fn workload_aware_kv_scales_with_context_and_active_sequences() {
+        let model = model(Some(KvCacheModelIR::BytesPerToken {
+            bytes_per_token: 100_000,
+        }));
+
+        let base = model.kv_cache_gb_for(&workload(1_000, 1, None));
+        let doubled_context = model.kv_cache_gb_for(&workload(2_000, 1, None));
+        let four_active = model.kv_cache_gb_for(&workload(1_000, 20, Some(4)));
+
+        assert!((doubled_context - base * 2.0).abs() < 1e-12);
+        assert!((four_active - base * 4.0).abs() < 1e-12);
+    }
+
+    #[test]
+    fn transformer_kv_formula_counts_k_and_v() {
+        let kv = KvCacheModelIR::Transformer {
+            layers: 2,
+            kv_heads: 4,
+            head_dim: 8,
+            bytes_per_element: 2,
+        };
+
+        assert_eq!(kv.bytes_per_token(), 256.0);
+    }
+
+    #[test]
+    fn active_sequence_limit_overrides_request_concurrency() {
+        let workload = workload(4096, 20, Some(3));
+        assert_eq!(workload.active_sequences(), 3);
+    }
+
+    #[test]
+    fn legacy_kv_fallback_remains_fixed() {
+        let model = model(None);
+
+        assert_eq!(
+            model.kv_cache_gb_for(&workload(4_096, 1, None)),
+            model.kv_cache_gb_for(&workload(32_768, 20, None))
+        );
+        assert_eq!(model.kv_cache_gb_for(&workload(4_096, 1, None)), 3.0);
+    }
+}
