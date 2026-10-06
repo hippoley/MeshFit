@@ -32,6 +32,15 @@ jobs:
       - run: cargo run -p meshfit -- evidence-from-benchmark examples/benchmark-bundle.yaml > /tmp/meshfit-benchmark-evidence.yaml
       - run: cargo run -p meshfit -- benchmark-candidates /tmp/meshfit-snapshot-manifest.yaml examples/placement-target.yaml node-b:gpu0:vllm:SingleHost > /tmp/meshfit-benchmark-candidates.yaml
       - run: cargo run -p meshfit -- benchmark-kit /tmp/meshfit-snapshot-manifest.yaml examples/placement-target.yaml node-b:gpu0:vllm:SingleHost Qwen/Qwen3-32B /tmp/meshfit-model-identity.yaml > /tmp/meshfit-benchmark-kit.yaml
+      - run: cargo run -p meshfit -- benchmark-kit /tmp/meshfit-snapshot-manifest.yaml examples/placement-target.yaml node-b:gpu0:vllm:SingleHost Qwen/Qwen3-32B /tmp/meshfit-model-identity.yaml --write-dir /tmp/meshfit-benchmark-001-materialized
+      - run: test -f /tmp/meshfit-benchmark-001-materialized/kit.yaml
+      - run: test -f /tmp/meshfit-benchmark-001-materialized/comparison.yaml
+      - run: test -f /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
+      - run: test -f /tmp/meshfit-benchmark-001-materialized/inputs/snapshot.yaml
+      - run: test -f /tmp/meshfit-benchmark-001-materialized/inputs/target.yaml
+      - run: test -f /tmp/meshfit-benchmark-001-materialized/inputs/model-identity.yaml
+      - run: test -d /tmp/meshfit-benchmark-001-materialized/results/meshfit
+      - run: test -d /tmp/meshfit-benchmark-001-materialized/artifacts/meshfit
       - run: '! cargo run -p meshfit -- benchmark-kit /tmp/meshfit-snapshot-manifest.yaml examples/placement-target.yaml node-b:gpu0:vllm:SingleHost Qwen/Qwen3-32B /tmp/meshfit-model-identity.yaml --require-ready'
       - run: cargo run -p meshfit -- compare-benchmarks examples/benchmark-comparison.yaml --markdown > /tmp/meshfit-benchmark-comparison.md
       - run: '! cargo run -p meshfit -- compare-benchmarks examples/benchmark-comparison.yaml --require-publishable'
