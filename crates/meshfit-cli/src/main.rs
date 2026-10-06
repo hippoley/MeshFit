@@ -210,6 +210,17 @@ struct BenchmarkRunCandidatePlan {
 }
 
 #[derive(Debug, Serialize)]
+struct BenchmarkRunHostPlan {
+    benchmark_id: String,
+    host: String,
+    ready: bool,
+    issues: Vec<String>,
+    resume: bool,
+    overwrite: bool,
+    candidates: Vec<BenchmarkRunCandidatePlan>,
+}
+
+#[derive(Debug, Serialize)]
 struct BenchmarkPreflight {
     benchmark_id: String,
     candidate: String,
@@ -778,6 +789,37 @@ fn run() -> Result<(), String> {
                     "{}: {}/{} valid runs",
                     candidate_name, candidate_status.valid_runs, candidate_status.expected_runs
                 );
+            }
+        }
+        "benchmark-run-host" => {
+            let kit_dir = args.get(2).ok_or_else(|| {
+                "usage: meshfit benchmark-run-host <kit-dir> (--host NODE | --current-host) [--dry-run] [--resume|--overwrite]"
+                    .to_string()
+            })?;
+            let explicit_host = option_value(&args[3..], "--host")?.map(str::to_string);
+            let current_host = args.iter().any(|arg| arg == "--current-host");
+            if explicit_host.is_some() == current_host {
+                return Err(
+                    "exactly one of --host NODE or --current-host is required".to_string(),
+                );
+            }
+            let host = explicit_host.unwrap_or_else(|| discover_local().node.id);
+            let dry_run = args.iter().any(|arg| arg == "--dry-run");
+            let resume = args.iter().any(|arg| arg == "--resume");
+            let overwrite = args.iter().any(|arg| arg == "--overwrite");
+            if resume && overwrite {
+                return Err("--resume and --overwrite are mutually exclusive".to_string());
+            }
+
+            let kit_dir = Path::new(kit_dir);
+            let plan = plan_benchmark_host_runs(kit_dir, &host, resume, overwrite)?;
+            if dry_run {
+                let yaml = serde_yaml::to_string(&plan).map_err(|e| e.to_string())?;
+                print!("{yaml}");
+            } else {
+                let (valid_slots, total_slots) =
+                    execute_benchmark_host_plan(kit_dir, &plan)?;
+                println!("{}: {}/{} valid slots", plan.host, valid_slots, total_slots);
             }
         }
         "benchmark-worklist" => {
