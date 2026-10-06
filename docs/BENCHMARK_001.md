@@ -77,6 +77,15 @@ meshfit benchmark-kit \
   <meshfit-plan-id> \
   <model-path> \
   model-identity.yaml > benchmark-kit.yaml
+
+# hard gate: fail unless all three candidates are distinct and compiler-ready
+meshfit benchmark-kit \
+  cluster.yaml \
+  target.yaml \
+  <meshfit-plan-id> \
+  <model-path> \
+  model-identity.yaml \
+  --require-ready > benchmark-kit.yaml
 ```
 
 The kit fixes:
@@ -89,7 +98,7 @@ The kit fixes:
 - benchmark commands;
 - the final comparison-manifest skeleton.
 
-Every candidate is compiler-preflighted before a command is emitted. Unsupported plans are marked `compile_ready: false` with the compiler error instead of receiving a command that is known to fail. The kit also validates that the model identity matches the target model and carries an artifact hash or revision.
+The kit exposes a top-level `ready` boolean. Every candidate is compiler-preflighted before a command is emitted. Unsupported plans are marked `compile_ready: false` with the compiler error instead of receiving a command that is known to fail. The kit also validates that the model identity matches the target model and carries an artifact hash or revision.
 
 Then compile and execute each selected plan with the same model artifact and BenchmarkConfig, retaining every raw bundle. `benchmark-auto` defaults to at least 10 measured requests per run, so two independent runs can satisfy the 20-sample publication floor. Override with `--measured-requests N` when needed.
 
