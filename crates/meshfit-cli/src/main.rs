@@ -1,12 +1,11 @@
 use std::{env, fs, path::Path, process};
 
 use meshfit_core::{
-    compile_plan, discover_local, discover_runtimes, inspect_model_artifact, probe_peer, solve,
-    prepare_local_benchmark_request, run_local_benchmark, BenchmarkBundle, BenchmarkConfig,
-    BenchmarkRequestIR, CompileRequest, EvidenceStore, ExecutablePlanIR, InfrastructureSnapshot,
-    LinkKind, LocalDiscovery, ModelArtifactIdentity, PeerProbeResult,
-    PlacementReport, PlacementTargetIR, Prediction, PredictionQuery, ScenarioIR,
-    SnapshotManifest,
+    compile_plan, discover_local, discover_runtimes, inspect_model_artifact,
+    prepare_local_benchmark_request, probe_peer, run_local_benchmark, solve, BenchmarkBundle,
+    BenchmarkConfig, BenchmarkRequestIR, CompileRequest, EvidenceStore, ExecutablePlanIR,
+    InfrastructureSnapshot, LinkKind, LocalDiscovery, ModelArtifactIdentity, PeerProbeResult,
+    PlacementReport, PlacementTargetIR, Prediction, PredictionQuery, ScenarioIR, SnapshotManifest,
 };
 
 fn main() {
@@ -45,12 +44,8 @@ fn run() -> Result<(), String> {
             let path = args
                 .get(2)
                 .ok_or_else(|| "usage: meshfit inspect-model <path> <model-id> <format> <quantization> [revision]".to_string())?;
-            let model_id = args
-                .get(3)
-                .ok_or_else(|| "missing model-id".to_string())?;
-            let format = args
-                .get(4)
-                .ok_or_else(|| "missing format".to_string())?;
+            let model_id = args.get(3).ok_or_else(|| "missing model-id".to_string())?;
+            let format = args.get(4).ok_or_else(|| "missing format".to_string())?;
             let quantization = args
                 .get(5)
                 .ok_or_else(|| "missing quantization".to_string())?;
@@ -88,8 +83,8 @@ fn run() -> Result<(), String> {
                 discoveries.push(discovery);
             }
 
-            let mut snapshot = InfrastructureSnapshot::from_discoveries(discoveries)
-                .map_err(|e| e.to_string())?;
+            let mut snapshot =
+                InfrastructureSnapshot::from_discoveries(discoveries).map_err(|e| e.to_string())?;
 
             for probe_spec in &manifest.probes {
                 let path = base_dir.join(&probe_spec.probe_file);
@@ -118,14 +113,14 @@ fn run() -> Result<(), String> {
                 .get(3)
                 .ok_or_else(|| "usage: meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]".to_string())?;
 
-            let local_raw = fs::read_to_string(local_path)
-                .map_err(|e| format!("read {local_path}: {e}"))?;
-            let peer_raw = fs::read_to_string(peer_path)
-                .map_err(|e| format!("read {peer_path}: {e}"))?;
-            let local: LocalDiscovery = serde_yaml::from_str(&local_raw)
-                .map_err(|e| format!("parse {local_path}: {e}"))?;
-            let peer: LocalDiscovery = serde_yaml::from_str(&peer_raw)
-                .map_err(|e| format!("parse {peer_path}: {e}"))?;
+            let local_raw =
+                fs::read_to_string(local_path).map_err(|e| format!("read {local_path}: {e}"))?;
+            let peer_raw =
+                fs::read_to_string(peer_path).map_err(|e| format!("read {peer_path}: {e}"))?;
+            let local: LocalDiscovery =
+                serde_yaml::from_str(&local_raw).map_err(|e| format!("parse {local_path}: {e}"))?;
+            let peer: LocalDiscovery =
+                serde_yaml::from_str(&peer_raw).map_err(|e| format!("parse {peer_path}: {e}"))?;
 
             let local_id = local.node.id.clone();
             let peer_id = peer.node.id.clone();
@@ -146,9 +141,10 @@ fn run() -> Result<(), String> {
             print!("{yaml}");
         }
         "benchmark-auto" => {
-            let executable_path = args
-                .get(2)
-                .ok_or_else(|| "usage: meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [prompt]".to_string())?;
+            let executable_path = args.get(2).ok_or_else(|| {
+                "usage: meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [prompt]"
+                    .to_string()
+            })?;
             let model_identity_path = args
                 .get(3)
                 .ok_or_else(|| "missing model-identity.yaml".to_string())?;
@@ -190,20 +186,20 @@ fn run() -> Result<(), String> {
                 .ok_or_else(|| "usage: meshfit benchmark-local <request.yaml>".to_string())?;
             let raw = fs::read_to_string(request_path)
                 .map_err(|e| format!("read {request_path}: {e}"))?;
-            let request: BenchmarkRequestIR = serde_yaml::from_str(&raw)
-                .map_err(|e| format!("parse {request_path}: {e}"))?;
+            let request: BenchmarkRequestIR =
+                serde_yaml::from_str(&raw).map_err(|e| format!("parse {request_path}: {e}"))?;
             let bundle = run_local_benchmark(request)?;
             let yaml = serde_yaml::to_string(&bundle).map_err(|e| e.to_string())?;
             print!("{yaml}");
         }
         "evidence-from-benchmark" => {
-            let bundle_path = args
-                .get(2)
-                .ok_or_else(|| "usage: meshfit evidence-from-benchmark <bundle.yaml>".to_string())?;
-            let raw = fs::read_to_string(bundle_path)
-                .map_err(|e| format!("read {bundle_path}: {e}"))?;
-            let bundle: BenchmarkBundle = serde_yaml::from_str(&raw)
-                .map_err(|e| format!("parse {bundle_path}: {e}"))?;
+            let bundle_path = args.get(2).ok_or_else(|| {
+                "usage: meshfit evidence-from-benchmark <bundle.yaml>".to_string()
+            })?;
+            let raw =
+                fs::read_to_string(bundle_path).map_err(|e| format!("read {bundle_path}: {e}"))?;
+            let bundle: BenchmarkBundle =
+                serde_yaml::from_str(&raw).map_err(|e| format!("parse {bundle_path}: {e}"))?;
             let records = bundle.to_benchmark_records()?;
             let store = EvidenceStore { records };
             let yaml = serde_yaml::to_string(&store).map_err(|e| e.to_string())?;
@@ -215,8 +211,8 @@ fn run() -> Result<(), String> {
                 .ok_or_else(|| "usage: meshfit compile <request.yaml>".to_string())?;
             let raw = fs::read_to_string(request_path)
                 .map_err(|e| format!("read {request_path}: {e}"))?;
-            let request: CompileRequest = serde_yaml::from_str(&raw)
-                .map_err(|e| format!("parse {request_path}: {e}"))?;
+            let request: CompileRequest =
+                serde_yaml::from_str(&raw).map_err(|e| format!("parse {request_path}: {e}"))?;
             let executable = compile_plan(&request).map_err(|e| e.to_string())?;
             let yaml = serde_yaml::to_string(&executable).map_err(|e| e.to_string())?;
             print!("{yaml}");
@@ -228,35 +224,40 @@ fn run() -> Result<(), String> {
             let target_path = args
                 .get(3)
                 .ok_or_else(|| "missing target.yaml".to_string())?;
-            let plan_id = args
-                .get(4)
-                .ok_or_else(|| "missing plan-id".to_string())?;
+            let plan_id = args.get(4).ok_or_else(|| "missing plan-id".to_string())?;
             let model_path = args
                 .get(5)
                 .ok_or_else(|| "missing model-path".to_string())?;
-            let gpu_layers = args.get(6).map(|value| {
-                value
-                    .parse::<u32>()
-                    .map_err(|e| format!("invalid gpu-layers '{value}': {e}"))
-            }).transpose()?;
+            let gpu_layers = args
+                .get(6)
+                .map(|value| {
+                    value
+                        .parse::<u32>()
+                        .map_err(|e| format!("invalid gpu-layers '{value}': {e}"))
+                })
+                .transpose()?;
 
             let snapshot_raw = fs::read_to_string(snapshot_path)
                 .map_err(|e| format!("read {snapshot_path}: {e}"))?;
-            let target_raw = fs::read_to_string(target_path)
-                .map_err(|e| format!("read {target_path}: {e}"))?;
+            let target_raw =
+                fs::read_to_string(target_path).map_err(|e| format!("read {target_path}: {e}"))?;
             let snapshot: InfrastructureSnapshot = serde_yaml::from_str(&snapshot_raw)
                 .map_err(|e| format!("parse {snapshot_path}: {e}"))?;
             let target: PlacementTargetIR = serde_yaml::from_str(&target_raw)
                 .map_err(|e| format!("parse {target_path}: {e}"))?;
 
-            let scenario = target.clone().into_scenario(snapshot.infrastructure.clone());
+            let scenario = target
+                .clone()
+                .into_scenario(snapshot.infrastructure.clone());
             let report = solve(&scenario);
             let plan = report
                 .feasible
                 .iter()
                 .find(|plan| &plan.id == plan_id)
                 .cloned()
-                .ok_or_else(|| format!("plan-id '{plan_id}' is not feasible in the current snapshot"))?;
+                .ok_or_else(|| {
+                    format!("plan-id '{plan_id}' is not feasible in the current snapshot")
+                })?;
 
             let request = CompileRequest {
                 plan,
@@ -273,12 +274,12 @@ fn run() -> Result<(), String> {
             print!("{yaml}");
         }
         "plan-snapshot" => {
-            let snapshot_path = args
-                .get(2)
-                .ok_or_else(|| "usage: meshfit plan-snapshot <snapshot.yaml> <target.yaml>".to_string())?;
-            let target_path = args
-                .get(3)
-                .ok_or_else(|| "usage: meshfit plan-snapshot <snapshot.yaml> <target.yaml>".to_string())?;
+            let snapshot_path = args.get(2).ok_or_else(|| {
+                "usage: meshfit plan-snapshot <snapshot.yaml> <target.yaml>".to_string()
+            })?;
+            let target_path = args.get(3).ok_or_else(|| {
+                "usage: meshfit plan-snapshot <snapshot.yaml> <target.yaml>".to_string()
+            })?;
 
             let snapshot_raw = fs::read_to_string(snapshot_path)
                 .map_err(|e| format!("read {snapshot_path}: {e}"))?;
@@ -304,20 +305,20 @@ fn run() -> Result<(), String> {
             print_report(&report);
         }
         "predict" => {
-            let evidence_path = args.get(2).ok_or_else(|| {
-                "usage: meshfit predict <evidence.yaml> <query.yaml>".to_string()
-            })?;
-            let query_path = args.get(3).ok_or_else(|| {
-                "usage: meshfit predict <evidence.yaml> <query.yaml>".to_string()
-            })?;
+            let evidence_path = args
+                .get(2)
+                .ok_or_else(|| "usage: meshfit predict <evidence.yaml> <query.yaml>".to_string())?;
+            let query_path = args
+                .get(3)
+                .ok_or_else(|| "usage: meshfit predict <evidence.yaml> <query.yaml>".to_string())?;
             let evidence_raw = fs::read_to_string(evidence_path)
                 .map_err(|e| format!("read {evidence_path}: {e}"))?;
             let query_raw =
                 fs::read_to_string(query_path).map_err(|e| format!("read {query_path}: {e}"))?;
             let evidence: EvidenceStore = serde_yaml::from_str(&evidence_raw)
                 .map_err(|e| format!("parse {evidence_path}: {e}"))?;
-            let query: PredictionQuery = serde_yaml::from_str(&query_raw)
-                .map_err(|e| format!("parse {query_path}: {e}"))?;
+            let query: PredictionQuery =
+                serde_yaml::from_str(&query_raw).map_err(|e| format!("parse {query_path}: {e}"))?;
             let prediction = evidence.predict_exact(&query);
             print_prediction(&prediction);
         }
