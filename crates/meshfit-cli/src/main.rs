@@ -1016,8 +1016,11 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 
-fn acquire_benchmark_run_slot(bundle_path: &Path) -> Result<BenchmarkRunSlotLock, String> {
-    let lock_path = bundle_path.with_extension("yaml.lock");
+fn acquire_benchmark_file_lock(
+    target_path: &Path,
+    kind: &str,
+) -> Result<BenchmarkRunSlotLock, String> {
+    let lock_path = PathBuf::from(format!("{}.lock", target_path.display()));
     match std::fs::OpenOptions::new()
         .write(true)
         .create_new(true)
@@ -1025,12 +1028,25 @@ fn acquire_benchmark_run_slot(bundle_path: &Path) -> Result<BenchmarkRunSlotLock
     {
         Ok(_) => Ok(BenchmarkRunSlotLock { path: lock_path }),
         Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Err(format!(
-            "run slot '{}' is already locked by another benchmark process; if no process is active, remove '{}'",
-            bundle_path.display(),
+            "{kind} '{}' is already locked by another benchmark process; if no process is active, remove '{}'",
+            target_path.display(),
             lock_path.display()
         )),
-        Err(error) => Err(format!("create run lock '{}': {error}", lock_path.display())),
+        Err(error) => Err(format!(
+            "create {kind} lock '{}': {error}",
+            lock_path.display()
+        )),
     }
+}
+
+fn acquire_benchmark_run_slot(bundle_path: &Path) -> Result<BenchmarkRunSlotLock, String> {
+    acquire_benchmark_file_lock(bundle_path, "run slot")
+}
+
+fn acquire_benchmark_compile_lock(
+    executable_path: &Path,
+) -> Result<BenchmarkRunSlotLock, String> {
+    acquire_benchmark_file_lock(executable_path, "executable")
 }
 
 fn load_benchmark_execution_kit(kit_dir: &Path) -> Result<BenchmarkExecutionKit, String> {
@@ -1046,6 +1062,14 @@ fn ensure_candidate_executable(
     candidate: &BenchmarkExecutionCandidate,
     executable_path: &Path,
 ) -> Result<(), String> {
+    if executable_path.is_file() {
+        return Ok(());
+    }
+
+    if let Some(parent) = executable_path.parent() {
+        fs::create_dir_all(parent).map_err(|e| format!("create {}: {e}", parent.display()))?;
+    }
+    let _compile_lock = acquire_benchmark_compile_lock(executable_path)?;
     if executable_path.is_file() {
         return Ok(());
     }
@@ -1095,12 +1119,17 @@ fn ensure_candidate_executable(
         ));
     }
 
-    if let Some(parent) = executable_path.parent() {
-        fs::create_dir_all(parent).map_err(|e| format!("create {}: {e}", parent.display()))?;
-    }
     let yaml = serde_yaml::to_string(&executable).map_err(|e| e.to_string())?;
-    fs::write(executable_path, yaml)
-        .map_err(|e| format!("write {}: {e}", executable_path.display()))
+    let temp_path = PathBuf::from(format!("{}.tmp", executable_path.display()));
+    fs::write(&temp_path, yaml)
+        .map_err(|e| format!("write {}: {e}", temp_path.display()))?;
+    fs::rename(&temp_path, executable_path).map_err(|e| {
+        format!(
+            "move {} to {}: {e}",
+            temp_path.display(),
+            executable_path.display()
+        )
+    })
 }
 
 fn benchmark_preflight_issues(
