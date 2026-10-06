@@ -381,3 +381,42 @@ The command pre-scans every expected bundle before GPU execution:
 Dry-run reports preflight state and pending/existing-valid run numbers even when the host is not runtime-ready. Real execution requires preflight readiness and, after all pending slots finish, re-validates candidate completeness through `benchmark-status`.
 
 `benchmark-run-one` and `benchmark-run-candidate` share one internal execution function so locking, compilation, source-plan validation, benchmark execution, bundle validation, and evidence-safe commit semantics cannot drift apart.
+
+
+## Host-local model paths
+
+A materialized benchmark kit may move between heterogeneous hosts whose local filesystem layouts differ. The benchmark model therefore does **not** need to live at the same absolute path on every machine.
+
+Prefer one host-local setting:
+
+```bash
+export MESHFIT_MODEL_PATH=/data/models/Qwen3-32B
+meshfit benchmark-preflight benchmark-001 meshfit --host node-b
+meshfit benchmark-run-candidate benchmark-001 meshfit --host node-b
+```
+
+Or override one command explicitly:
+
+```bash
+meshfit benchmark-preflight benchmark-001 meshfit \
+  --host node-b \
+  --model-path /data/models/Qwen3-32B
+```
+
+Path freedom does not relax evidence identity. When the resolved model source is a local file, MeshFit hashes its bytes and compares the observed SHA-256 with the frozen `ModelArtifactIdentity.artifact_sha256` from the kit:
+
+```text
+different local path + same bytes
+→ local_verified
+→ allowed
+
+different local path + different bytes
+→ local_hash_mismatch
+→ hard preflight issue
+```
+
+A host-local override is rejected when the kit has no artifact SHA-256, because MeshFit cannot prove that the replacement path refers to the same model artifact.
+
+The resolved model path also participates in executable cache validity. An existing executable compiled for another `model_source` is treated as stale and recompiled for the current host-local path.
+
+For large local model files, artifact hashing happens during command preflight, before benchmark execution. Candidate-level repeated runs reuse that verified resolved path for all run slots in the same command instead of re-hashing the model for every run.
