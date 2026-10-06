@@ -227,7 +227,8 @@ fn run() -> Result<(), String> {
         }
         "compare-benchmarks" => {
             let manifest_path = args.get(2).ok_or_else(|| {
-                "usage: meshfit compare-benchmarks <comparison.yaml> [--markdown]".to_string()
+                "usage: meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]"
+                    .to_string()
             })?;
             let raw = fs::read_to_string(manifest_path)
                 .map_err(|e| format!("read {manifest_path}: {e}"))?;
@@ -263,6 +264,14 @@ fn run() -> Result<(), String> {
                 objective: manifest.objective,
                 candidates,
             })?;
+
+            let require_publishable = args.iter().any(|arg| arg == "--require-publishable");
+            if require_publishable && !report.publishable {
+                return Err(format!(
+                    "Benchmark 001 evidence is not publishable: {}",
+                    report.evidence_status
+                ));
+            }
 
             if args.iter().any(|arg| arg == "--markdown") {
                 print!("{}", report.to_markdown());
@@ -510,6 +519,6 @@ fn print_prediction(prediction: &Prediction) {
 
 fn print_help() {
     println!(
-        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit compare-benchmarks <comparison.yaml> [--markdown]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
+        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
     );
 }
