@@ -182,7 +182,6 @@ struct BenchmarkModelResolution {
     source: String,
     status: String,
     artifact_verified: bool,
-    identity: ModelArtifactIdentity,
     issue: Option<String>,
     warning: Option<String>,
 }
@@ -707,9 +706,7 @@ fn run() -> Result<(), String> {
                 .parse::<usize>()
                 .map_err(|e| format!("invalid run-number: {e}"))?;
             let declared_host = option_value(&args[5..], "--host")?;
-            let model_path_override = option_value(&args[5..], "--model-path")?
-                .map(str::to_string)
-                .or_else(|| env::var("MESHFIT_MODEL_PATH").ok());
+            let model_path_override = option_value(&args[5..], "--model-path")?;
             let dry_run = args.iter().any(|arg| arg == "--dry-run");
             let overwrite = args.iter().any(|arg| arg == "--overwrite");
             let kit_dir = Path::new(kit_dir);
@@ -719,7 +716,7 @@ fn run() -> Result<(), String> {
                 candidate_name,
                 run_number,
                 declared_host,
-                model_path_override.as_deref(),
+                model_path_override,
             )?;
             if dry_run {
                 let yaml = serde_yaml::to_string(&plan).map_err(|e| e.to_string())?;
@@ -753,9 +750,7 @@ fn run() -> Result<(), String> {
             })?;
             let candidate_name = args.get(3).ok_or_else(|| "missing candidate".to_string())?;
             let declared_host = option_value(&args[4..], "--host")?;
-            let model_path_override = option_value(&args[4..], "--model-path")?
-                .map(str::to_string)
-                .or_else(|| env::var("MESHFIT_MODEL_PATH").ok());
+            let model_path_override = option_value(&args[4..], "--model-path")?;
             let dry_run = args.iter().any(|arg| arg == "--dry-run");
             let resume = args.iter().any(|arg| arg == "--resume");
             let overwrite = args.iter().any(|arg| arg == "--overwrite");
@@ -768,7 +763,7 @@ fn run() -> Result<(), String> {
                 kit_dir,
                 candidate_name,
                 declared_host,
-                model_path_override.as_deref(),
+                model_path_override,
                 resume,
                 overwrite,
             )?;
@@ -870,15 +865,13 @@ fn run() -> Result<(), String> {
                 .get(3)
                 .ok_or_else(|| "missing candidate name".to_string())?;
             let declared_host = option_value(&args[4..], "--host")?;
-            let model_path_override = option_value(&args[4..], "--model-path")?
-                .map(str::to_string)
-                .or_else(|| env::var("MESHFIT_MODEL_PATH").ok());
+            let model_path_override = option_value(&args[4..], "--model-path")?;
             let allow_existing = args.iter().any(|arg| arg == "--allow-existing");
             let preflight = inspect_benchmark_preflight(
                 Path::new(kit_dir),
                 candidate,
                 declared_host,
-                model_path_override.as_deref(),
+                model_path_override,
                 allow_existing,
             )?;
 
@@ -1189,6 +1182,9 @@ fn inspect_benchmark_run_one_plan(
     model_path_override: Option<&str>,
 ) -> Result<BenchmarkRunOnePlan, String> {
     let kit = load_benchmark_execution_kit(kit_dir)?;
+    if !kit.ready {
+        return Err("Benchmark 001 execution kit is not ready; refusing real benchmark run".into());
+    }
     let candidate = kit
         .candidates
         .iter()
@@ -1669,7 +1665,6 @@ fn resolve_benchmark_model(
             source,
             status,
             artifact_verified,
-            identity: expected,
             issue,
             warning,
         });
@@ -1681,7 +1676,6 @@ fn resolve_benchmark_model(
             source,
             status: "local_missing".to_string(),
             artifact_verified: false,
-            identity: expected,
             issue: Some(format!(
                 "local model artifact '{}' does not exist on this host",
                 effective_path
@@ -2551,6 +2545,67 @@ mod tests {
 
         let error = validate_existing_candidate_bundle(&bundle, "plan-test").unwrap_err();
         assert!(error.contains("parse existing bundle"));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn host_local_model_path_accepts_same_artifact_bytes() {
+        let dir = status_test_dir("model-path-same");
+        fs::create_dir_all(dir.join("inputs")).unwrap();
+        let original = dir.join("original.bin");
+        let relocated = dir.join("relocated.bin");
+        fs::write(&original, b"same-model-bytes").unwrap();
+        fs::write(&relocated, b"same-model-bytes").unwrap();
+
+        let identity =
+            inspect_model_artifact(&original, "demo", "gguf", "q4_k_m", Some("test".into()))
+                .unwrap();
+        fs::write(
+            dir.join("inputs/model-identity.yaml"),
+            serde_yaml::to_string(&identity).unwrap(),
+        )
+        .unwrap();
+
+        let mut kit = status_test_kit();
+        kit.model_path = original.display().to_string();
+        let resolved =
+            resolve_benchmark_model(&dir, &kit, Some(relocated.to_str().unwrap())).unwrap();
+
+        assert_eq!(resolved.source, "cli");
+        assert_eq!(resolved.status, "local_verified");
+        assert!(resolved.artifact_verified);
+        assert!(resolved.issue.is_none());
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn host_local_model_path_rejects_different_artifact_bytes() {
+        let dir = status_test_dir("model-path-mismatch");
+        fs::create_dir_all(dir.join("inputs")).unwrap();
+        let original = dir.join("original.bin");
+        let relocated = dir.join("relocated.bin");
+        fs::write(&original, b"expected-model-bytes").unwrap();
+        fs::write(&relocated, b"different-model-bytes").unwrap();
+
+        let identity =
+            inspect_model_artifact(&original, "demo", "gguf", "q4_k_m", Some("test".into()))
+                .unwrap();
+        fs::write(
+            dir.join("inputs/model-identity.yaml"),
+            serde_yaml::to_string(&identity).unwrap(),
+        )
+        .unwrap();
+
+        let mut kit = status_test_kit();
+        kit.model_path = original.display().to_string();
+        let resolved =
+            resolve_benchmark_model(&dir, &kit, Some(relocated.to_str().unwrap())).unwrap();
+
+        assert_eq!(resolved.status, "local_hash_mismatch");
+        assert!(!resolved.artifact_verified);
+        assert!(resolved.issue.unwrap().contains("SHA-256 mismatch"));
 
         let _ = fs::remove_dir_all(dir);
     }
