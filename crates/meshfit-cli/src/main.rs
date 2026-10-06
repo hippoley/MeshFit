@@ -1154,8 +1154,12 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 
-fn benchmark_execution_lock_target() -> PathBuf {
-    env::temp_dir().join(format!("meshfit-benchmark-port-{BENCHMARK_LISTEN_PORT}"))
+fn benchmark_execution_lock_target(listen_port: u16) -> PathBuf {
+    env::temp_dir().join(format!("meshfit-benchmark-port-{listen_port}"))
+}
+
+fn benchmark_listen_port_available(listen_port: u16) -> bool {
+    std::net::TcpListener::bind(("0.0.0.0", listen_port)).is_ok()
 }
 
 fn acquire_benchmark_file_lock(
@@ -1309,6 +1313,7 @@ fn inspect_benchmark_run_one_plan(
         model_path: preflight.model_path,
         model_path_overridden: preflight.model_path_overridden,
         model_artifact_verified: preflight.model_artifact_verified,
+        listen_port: preflight.listen_port,
         run_number,
         executable_path: executable_path.display().to_string(),
         bundle_path: bundle_path.display().to_string(),
@@ -1406,6 +1411,7 @@ fn plan_benchmark_candidate_runs(
         model_path: preflight.model_path,
         model_path_overridden: preflight.model_path_overridden,
         model_artifact_verified: preflight.model_artifact_verified,
+        listen_port: preflight.listen_port,
         total_runs: comparison.bundles.len(),
         existing_valid_runs,
         pending_runs,
@@ -1474,6 +1480,7 @@ fn plan_benchmark_host_runs(
         ready: issues.is_empty(),
         issues,
         model_path_override: model_path_override.map(str::to_string),
+        listen_port: kit.listen_port,
         resume,
         overwrite,
         candidates,
@@ -1567,7 +1574,7 @@ fn execute_benchmark_run_one(
         .ok_or_else(|| format!("unknown benchmark candidate '{candidate_name}'"))?;
     let bundle_path = PathBuf::from(&plan.bundle_path);
     let executable_path = PathBuf::from(&plan.executable_path);
-    let execution_marker = benchmark_execution_lock_target();
+    let execution_marker = benchmark_execution_lock_target(kit.listen_port);
     let _execution_lock = acquire_benchmark_file_lock(&execution_marker, "benchmark execution")?;
 
     if bundle_path.exists() && !overwrite {
@@ -1987,7 +1994,8 @@ fn inspect_benchmark_preflight(
         .cloned()
         .collect::<Vec<_>>();
 
-    let issues = benchmark_preflight_issues(
+    let listen_port_available = benchmark_listen_port_available(kit.listen_port);
+    let mut issues = benchmark_preflight_issues(
         kit.ready,
         candidate,
         &observed_host,
@@ -1996,6 +2004,12 @@ fn inspect_benchmark_preflight(
         existing_bundles.len(),
         allow_existing,
     );
+    if !listen_port_available {
+        issues.push(format!(
+            "benchmark listen port {} is not currently available on this host",
+            kit.listen_port
+        ));
+    }
     let mut warnings = model_check.warnings.clone();
     warnings.extend(local.warnings);
     warnings.extend(runtime_discovery.warnings);
@@ -2013,6 +2027,8 @@ fn inspect_benchmark_preflight(
         model_path_status: model_check.status,
         model_path_overridden: model_check.overridden,
         model_artifact_verified: model_check.verified,
+        listen_port: kit.listen_port,
+        listen_port_available,
         existing_bundles,
         issues,
         warnings,
@@ -2335,11 +2351,12 @@ fn materialize_benchmark_kit(
 
         if candidate.compile_ready {
             candidate.compile_command = Some(format!(
-                "meshfit compile-snapshot {} {} {} {} > {}",
+                "meshfit compile-snapshot {} {} {} {} --listen-port {} > {}",
                 shell_quote(&localized.snapshot),
                 shell_quote(&localized.target),
                 shell_quote(&candidate.plan_id),
                 shell_quote(&localized.model_path),
+                localized.listen_port,
                 shell_quote(&candidate.executable_path),
             ));
             candidate.run_commands = (1..=localized.runs_per_candidate)
@@ -2400,8 +2417,12 @@ fn render_benchmark_runbook(kit: &BenchmarkExecutionKit) -> String {
     let mut out = String::new();
     out.push_str("# MeshFit Benchmark 001 Runbook\n\n");
     out.push_str(&format!(
-        "**Ready:** {}  \n**Concurrency:** {}  \n**Measured requests/run:** {}  \n**Runs/candidate:** {}\n\n",
-        kit.ready, kit.concurrency, kit.measured_requests_per_run, kit.runs_per_candidate
+        "**Ready:** {}  \n**Concurrency:** {}  \n**Measured requests/run:** {}  \n**Runs/candidate:** {}  \n**Listen port:** {}\n\n",
+        kit.ready,
+        kit.concurrency,
+        kit.measured_requests_per_run,
+        kit.runs_per_candidate,
+        kit.listen_port
     ));
     out.push_str(
         "Run commands from this directory. Execute each candidate on its listed benchmark_host.\n\n",
@@ -2894,8 +2915,18 @@ mod tests {
     }
 
     #[test]
+    fn benchmark_listen_port_availability_tracks_bound_socket() {
+        let listener = std::net::TcpListener::bind(("0.0.0.0", 0)).unwrap();
+        let port = listener.local_addr().unwrap().port();
+        assert!(!benchmark_listen_port_available(port));
+
+        drop(listener);
+        assert!(benchmark_listen_port_available(port));
+    }
+
+    #[test]
     fn benchmark_execution_lock_is_host_local_and_port_scoped() {
-        let target = benchmark_execution_lock_target();
+        let target = benchmark_execution_lock_target(BENCHMARK_LISTEN_PORT);
         assert!(target.starts_with(env::temp_dir()));
         assert_eq!(
             target.file_name().and_then(|name| name.to_str()),
