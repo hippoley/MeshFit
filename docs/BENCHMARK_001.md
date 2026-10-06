@@ -261,3 +261,33 @@ The stability metric follows the selected comparison objective:
 Results above the 20% CV limit remain available as provisional diagnostics but must not be labeled PUBLISHABLE or used as a MeshFit performance claim.
 
 Comparison output also reports TTFT standard deviation/CV, decode-rate standard deviation, and run-level objective CV.
+
+
+## Host preflight
+
+Before compiling or spending GPU time on one candidate, run the preflight on the host that will execute it:
+
+```bash
+meshfit benchmark-preflight benchmark-001 meshfit --require-ready
+```
+
+If the logical snapshot node ID differs from the operating-system hostname, declare it explicitly:
+
+```bash
+meshfit benchmark-preflight benchmark-001 meshfit --host node-b --require-ready
+```
+
+The preflight verifies:
+
+- the execution kit itself is ready;
+- the selected candidate is compiler-ready;
+- the current/declarative host matches `benchmark_host`;
+- the candidate's required runtime is discoverable on `PATH`;
+- an explicit local model path exists;
+- existing result bundles will not be overwritten accidentally.
+
+Hub/runtime-resolved model identifiers are reported as `runtime_resolved_unverified`, not falsely treated as downloaded artifacts.
+
+Existing result bundles are a hard failure by default. Use `--allow-existing` only when intentionally resuming an experiment without overwriting those files.
+
+A normal preflight always emits the diagnostic report. `--require-ready` turns any hard issue into a non-zero exit code for scripts and runbooks.
