@@ -3974,6 +3974,47 @@ mod tests {
     }
 
     #[test]
+    fn status_and_finalization_reject_foreign_hardware_bundle() {
+        let dir = status_test_dir("foreign-hardware-evidence");
+        fs::create_dir_all(dir.join("results/meshfit")).unwrap();
+        write_status_contract_files(&dir);
+        fs::write(
+            dir.join("kit.yaml"),
+            serde_yaml::to_string(&status_test_kit()).unwrap(),
+        )
+        .unwrap();
+
+        let mut bundle: BenchmarkBundle =
+            serde_yaml::from_str(include_str!("../../../examples/benchmark-bundle.yaml")).unwrap();
+        bundle.request.executable.source_plan_id = "plan-test".into();
+        bundle.request.executable.working_node = "node-a".into();
+        bundle.request.executable.service.port = BENCHMARK_LISTEN_PORT;
+        bundle.request.identity.hardware = status_expected_hardware();
+        bundle.request.identity.hardware.devices[0].model = "RTX 4090".into();
+        bundle.request.identity.model = status_expected_model();
+
+        fs::write(
+            dir.join("results/meshfit/run-01.yaml"),
+            serde_yaml::to_string(&bundle).unwrap(),
+        )
+        .unwrap();
+
+        let status = inspect_benchmark_kit(&dir).unwrap();
+        assert!(!status.complete);
+        assert_eq!(status.valid_bundles, 0);
+        assert_eq!(status.candidates[0].invalid_bundles.len(), 1);
+        assert!(status.candidates[0].invalid_bundles[0]
+            .error
+            .contains("bundle hardware identity"));
+
+        let error = finalize_benchmark_kit(&dir).unwrap_err();
+        assert!(error.contains("Benchmark 001 is incomplete"));
+        assert!(error.contains("1 invalid bundle"));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn benchmark_finalize_refuses_incomplete_kit() {
         let dir = status_test_dir("finalize-incomplete");
         fs::create_dir_all(&dir).unwrap();
