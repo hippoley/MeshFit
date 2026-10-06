@@ -50,7 +50,22 @@ This is only publishable when it comes from real benchmark bundles. Synthetic fi
 
 ## CLI
 
-Create a comparison manifest:
+Start from a discovered snapshot and a placement target. The MeshFit-selected plan stays explicit; the CLI only derives the two naive baselines:
+
+```bash
+meshfit benchmark-candidates cluster.yaml target.yaml <meshfit-plan-id>
+```
+
+This emits:
+
+- `single-best-node` — highest relative compute among feasible single-node plans;
+- `max-aggregate-compute` — highest relative compute among all structurally feasible plans;
+- `meshfit` — the exact plan ID you supplied.
+
+If these resolve to overlapping plan IDs, the output carries a warning. That cluster/workload cannot support a publishable three-strategy Benchmark 001 without choosing a different discriminating setup.
+
+Then compile and execute each selected plan with the same model artifact and BenchmarkConfig, retaining every raw bundle. Finally create a comparison manifest:
+
 
 ```yaml
 benchmark_id: benchmark-001
@@ -117,6 +132,28 @@ The report also contains:
 - regret reduction vs the best baseline.
 
 ## Reality gate
+
+The intended execution chain is:
+
+```text
+discover / snapshot
+        ↓
+plan-snapshot
+        ↓
+benchmark-candidates
+        ↓
+compile each selected plan
+        ↓
+benchmark-auto / benchmark-local
+        ↓
+retain raw bundles
+        ↓
+compare-benchmarks
+        ↓
+--require-publishable
+        ↓
+README headline
+```
 
 Benchmark 001 is complete only when:
 
