@@ -148,7 +148,7 @@ Add:
 - p50 / p95
 - variance
 - exact-evidence 95% next-observation intervals with sample stddev/CV; cross-hardware intervals pending
-- cost model
+- declared marginal cost estimation contract: plan hourly cost + explicit predicted output throughput + modeled communication egress; full TCO and observed-cost calibration pending
 - memory calibration contract and CLI: required-memory vs observed peak-VRAM error/correction ratios (synthetic CI verified; real GPU repeated calibration pending)
 - latency / throughput predictors
 - estimate-vs-observed reports — VRAM plus exact-identity p95 TTFT / mean decode throughput calibration contracts implemented; real GPU performance calibration pending
@@ -159,6 +159,8 @@ Calibration validation: CI runs #877 and #900 verified the strict VRAM calibrati
 Prediction-interval validation: CI run #920 verified exact-match sample dispersion and 95% Student-t next-observation intervals through the CLI and the complete 124-step Benchmark 001 stack. These intervals do not transfer across execution identities.
 
 Performance calibration validation: CI run #956 verified exact execution fingerprint/context/concurrency/BenchmarkConfig binding, p95 TTFT and mean decode tok/s error reports, direction-aware optimistic error, conservative correction ratios, missing-usage rejection, CLI serialization, and compatibility with the complete 128-step Benchmark 001 stack. This remains a calibration contract, not a cross-hardware latency/throughput predictor.
+
+Cost-contract validation: CI run #1010 verified declared-marginal plan cost estimation through the complete 131-step Benchmark 001 stack. The contract refuses cross-node zero-egress assumptions and explicitly distinguishes a declared zero hourly compute cost from zero total cost of ownership.
 
 Principle:
 
