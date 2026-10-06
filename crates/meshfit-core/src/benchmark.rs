@@ -121,6 +121,21 @@ impl BenchmarkBundle {
             return Err("benchmark model identity lacks artifact hash or revision".into());
         }
 
+        if self.request.concurrency == 0 {
+            return Err("benchmark concurrency must be greater than zero".into());
+        }
+
+        if self.request.config.measured_requests == 0 {
+            return Err("benchmark requires at least one measured request".into());
+        }
+
+        if self.request.config.measured_requests % self.request.concurrency != 0 {
+            return Err(
+                "measured_requests must be divisible by concurrency so every measured wave uses the declared concurrency"
+                    .into(),
+            );
+        }
+
         if self.measurements.is_empty() {
             return Err("benchmark bundle contains no measured requests".into());
         }
