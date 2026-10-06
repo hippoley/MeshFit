@@ -108,8 +108,8 @@ impl ExecutionIdentity {
                 ))
         });
 
-        let bytes = serde_json::to_vec(&normalized)
-            .expect("ExecutionIdentity serialization must not fail");
+        let bytes =
+            serde_json::to_vec(&normalized).expect("ExecutionIdentity serialization must not fail");
         let digest = Sha256::digest(bytes);
         hex_lower(&digest)
     }
