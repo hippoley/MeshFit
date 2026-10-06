@@ -44,7 +44,8 @@ pub fn discover_local() -> LocalDiscovery {
     let mut warnings = Vec::new();
 
     let mut discovered = match query_nvidia_smi() {
-        Ok(output) => parse_nvidia_smi_csv(&output),
+        Ok(Some(output)) => parse_nvidia_smi_csv(&output),
+        Ok(None) => Vec::new(),
         Err(reason) => {
             warnings.push(reason);
             Vec::new()
@@ -84,12 +85,16 @@ pub fn discover_local() -> LocalDiscovery {
         Err(reason) => warnings.push(reason),
     }
 
-    let local_fabric = match query_nvidia_topology() {
-        Ok(output) => parse_nvidia_topo_matrix(&output, &node_id),
-        Err(reason) => {
-            warnings.push(reason);
-            Vec::new()
+    let local_fabric = if has_nvidia_accelerator(&discovered) {
+        match query_nvidia_topology() {
+            Ok(output) => parse_nvidia_topo_matrix(&output, &node_id),
+            Err(reason) => {
+                warnings.push(reason);
+                Vec::new()
+            }
         }
+    } else {
+        Vec::new()
     };
 
     let devices = discovered.iter().map(|gpu| gpu.identity.clone()).collect();
@@ -143,20 +148,14 @@ pub fn resolve_node_id(
         .to_string()
 }
 
-fn query_nvidia_smi() -> Result<String, String> {
-    let output = Command::new("nvidia-smi")
-        .args([
+fn query_nvidia_smi() -> Result<Option<String>, String> {
+    query_optional_command(
+        "nvidia-smi",
+        &[
             "--query-gpu=index,name,memory.total,memory.free,driver_version",
             "--format=csv,noheader,nounits",
-        ])
-        .output()
-        .map_err(|e| format!("nvidia-smi unavailable: {e}"))?;
-
-    if !output.status.success() {
-        return Err(format!("nvidia-smi failed with status {}", output.status));
-    }
-
-    String::from_utf8(output.stdout).map_err(|e| format!("nvidia-smi output is not UTF-8: {e}"))
+        ],
+    )
 }
 
 fn query_optional_command(binary: &str, args: &[&str]) -> Result<Option<String>, String> {
@@ -188,6 +187,13 @@ fn query_amd_smi_monitor() -> Result<Option<String>, String> {
 
 fn query_intel_xpu_discovery() -> Result<Option<String>, String> {
     query_optional_command("xpu-smi", &["discovery", "-j"])
+}
+
+fn has_nvidia_accelerator(devices: &[DiscoveredAccelerator]) -> bool {
+    devices.iter().any(|device| {
+        device.identity.vendor.eq_ignore_ascii_case("nvidia")
+            && device.identity.backend == AcceleratorBackend::Cuda
+    })
 }
 
 fn query_nvidia_topology() -> Result<String, String> {
@@ -714,6 +720,37 @@ mod tests {
         );
         assert_eq!(resolve_node_id(Some("   "), Some("host-a"), None), "host-a");
         assert_eq!(resolve_node_id(None, None, None), "localhost");
+    }
+
+    #[test]
+    fn nvidia_topology_probe_requires_discovered_cuda_device() {
+        assert!(!has_nvidia_accelerator(&[]));
+
+        let amd = DiscoveredAccelerator {
+            accelerator_id: "amd0".into(),
+            identity: DeviceIdentity {
+                vendor: "amd".into(),
+                model: "AMD Instinct".into(),
+                backend: AcceleratorBackend::Rocm,
+                memory_mib: 81920,
+                driver_version: None,
+            },
+            free_memory_mib: None,
+        };
+        assert!(!has_nvidia_accelerator(&[amd]));
+
+        let nvidia = DiscoveredAccelerator {
+            accelerator_id: "gpu0".into(),
+            identity: DeviceIdentity {
+                vendor: "NVIDIA".into(),
+                model: "NVIDIA H100".into(),
+                backend: AcceleratorBackend::Cuda,
+                memory_mib: 81559,
+                driver_version: None,
+            },
+            free_memory_mib: None,
+        };
+        assert!(has_nvidia_accelerator(&[nvidia]));
     }
 
     #[test]

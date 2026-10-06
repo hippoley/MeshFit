@@ -31,7 +31,7 @@ MeshFit's roadmap is ordered by the shortest path to a real closed loop.
 
 - [x] CPU / RAM — implementation complete on Linux, real host validation pending
 - [x] NVIDIA GPU / free VRAM / driver — implementation complete, real GPU validation pending
-- [ ] Apple unified memory
+- [x] Apple unified memory — Apple Silicon `metal0` discovery from `hw.memsize` + conservative `vm_stat` availability implemented and parser-tested; real Mac validation pending
 - [x] AMD / Intel baseline discovery — `amd-smi` / `xpu-smi` inventory parsers and unit conversion CI-verified on run #787; real AMD/Intel hardware validation pending
 - [x] stable vendor-local accelerator IDs — NVIDIA `gpuN`, AMD `amdN`, Intel `xpuN`, Apple `metal0`; CI Reality Verified on run #835
 - [x] PCIe / NVLink topology — parser implemented via `nvidia-smi topo -m`, real GPU validation pending
