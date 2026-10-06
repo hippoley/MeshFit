@@ -803,8 +803,7 @@ mod tests {
 
     #[test]
     fn vendor_local_accelerator_ids_do_not_share_a_global_sequence() {
-        let nvidia =
-            parse_nvidia_smi_csv("3, NVIDIA H100 80GB HBM3, 81559, 80123, 580.65.06\n");
+        let nvidia = parse_nvidia_smi_csv("3, NVIDIA H100 80GB HBM3, 81559, 80123, 580.65.06\n");
         let amd = parse_amd_smi_json(
             r#"{"gpu_data":[{"gpu":2,"asic":{"market_name":"AMD Instinct"},"vram":{"vram_size":{"value":81920,"unit":"MiB"}}}]}"#,
             None,
