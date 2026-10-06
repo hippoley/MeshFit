@@ -44,10 +44,24 @@ jobs:
       - run: cargo run -p meshfit -- benchmark-candidates /tmp/meshfit-snapshot-manifest.yaml examples/placement-target.yaml node-b:gpu0:vllm:SingleHost > /tmp/meshfit-benchmark-candidates.yaml
       - run: cargo run -p meshfit -- benchmark-kit /tmp/meshfit-snapshot-manifest.yaml examples/placement-target.yaml node-b:gpu0:vllm:SingleHost Qwen/Qwen3-32B /tmp/meshfit-model-identity.yaml > /tmp/meshfit-benchmark-kit.yaml
       - run: "! cargo run -p meshfit -- benchmark-kit /tmp/meshfit-snapshot-manifest.yaml examples/placement-target.yaml node-b:gpu0:vllm:SingleHost Qwen/Qwen3-32B /tmp/meshfit-model-identity.yaml --listen-port 0"
-      - run: cargo run -p meshfit -- benchmark-kit /tmp/meshfit-snapshot-manifest.yaml examples/placement-target.yaml node-b:gpu0:vllm:SingleHost Qwen/Qwen3-32B /tmp/meshfit-model-identity.yaml --listen-port 18181 --write-dir /tmp/meshfit-benchmark-001-materialized
+      - run: printf 'Benchmark 001 custom prompt payload.\nSecond line is preserved.\n' > /tmp/meshfit-benchmark-prompt.txt
+      - run: "! cargo run -p meshfit -- benchmark-kit /tmp/meshfit-snapshot-manifest.yaml examples/placement-target.yaml node-b:gpu0:vllm:SingleHost Qwen/Qwen3-32B /tmp/meshfit-model-identity.yaml --prompt inline --prompt-file /tmp/meshfit-benchmark-prompt.txt"
+      - run: "! cargo run -p meshfit -- benchmark-kit /tmp/meshfit-snapshot-manifest.yaml examples/placement-target.yaml node-b:gpu0:vllm:SingleHost Qwen/Qwen3-32B /tmp/meshfit-model-identity.yaml --measured-requests 11"
+      - run: cargo run -p meshfit -- benchmark-kit /tmp/meshfit-snapshot-manifest.yaml examples/placement-target.yaml node-b:gpu0:vllm:SingleHost Qwen/Qwen3-32B /tmp/meshfit-model-identity.yaml --listen-port 18181 --prompt-file /tmp/meshfit-benchmark-prompt.txt --max-tokens 96 --warmup-requests 2 --measured-requests 20 --request-timeout-ms 90000 --startup-timeout-ms 240000 --write-dir /tmp/meshfit-benchmark-001-materialized
       - run: test -f /tmp/meshfit-benchmark-001-materialized/kit.yaml
       - run: 'grep -q "listen_port: 18181" /tmp/meshfit-benchmark-001-materialized/kit.yaml'
+      - run: 'grep -q "max_tokens: 96" /tmp/meshfit-benchmark-001-materialized/kit.yaml'
+      - run: 'grep -q "warmup_requests: 2" /tmp/meshfit-benchmark-001-materialized/kit.yaml'
+      - run: 'grep -q "measured_requests_per_run: 20" /tmp/meshfit-benchmark-001-materialized/kit.yaml'
+      - run: 'grep -q "request_timeout_ms: 90000" /tmp/meshfit-benchmark-001-materialized/kit.yaml'
+      - run: 'grep -q "startup_timeout_ms: 240000" /tmp/meshfit-benchmark-001-materialized/kit.yaml'
+      - run: cmp /tmp/meshfit-benchmark-prompt.txt /tmp/meshfit-benchmark-001-materialized/inputs/prompt.txt
+      - run: grep -q -- '--prompt-file inputs/prompt.txt' /tmp/meshfit-benchmark-001-materialized/kit.yaml
       - run: grep -q 'Listen port.*18181' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
+      - run: grep -q 'Measured requests/run.*20' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
+      - run: grep -q 'Warmup requests.*2' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
+      - run: grep -q 'Max output tokens.*96' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
+      - run: grep -q 'Materialized prompt.*inputs/prompt.txt' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
       - run: test -f /tmp/meshfit-benchmark-001-materialized/comparison.yaml
       - run: test -f /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
       - run: grep -q '## Real-host execution' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
