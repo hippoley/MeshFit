@@ -1692,7 +1692,6 @@ fn resolve_benchmark_model(
         source,
         status: "runtime_resolved_unverified".to_string(),
         artifact_verified: false,
-        identity: expected,
         issue: None,
         warning: Some(format!(
             "model source '{}' is not a local file; runtime resolution has not been verified",
