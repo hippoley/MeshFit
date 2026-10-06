@@ -8,14 +8,13 @@ use serde::{Deserialize, Serialize};
 
 use meshfit_core::{
     calibrate_plan_memory, calibrate_plan_performance, compare_benchmarks, compile_plan,
-    discover_local, discover_runtimes,
-    inspect_model_artifact, prepare_local_benchmark_request, probe_peer, run_local_benchmark,
-    solve, BenchmarkBundle, BenchmarkCandidate, BenchmarkComparisonReport,
-    BenchmarkComparisonRequest, BenchmarkConfig, BenchmarkRequestIR, ComparisonObjective,
-    CompileRequest, EvidenceStore, ExecutablePlanIR, HardwareIdentity, InfrastructureSnapshot,
-    LinkKind, LocalDiscovery, ModelArtifactIdentity, PeerProbeResult, PlacementKind,
-    PerformancePredictionInput, PlacementReport, PlacementTargetIR, PlanIR, Prediction,
-    PredictionQuery, ScenarioIR, SnapshotManifest,
+    discover_local, discover_runtimes, inspect_model_artifact, prepare_local_benchmark_request,
+    probe_peer, run_local_benchmark, solve, BenchmarkBundle, BenchmarkCandidate,
+    BenchmarkComparisonReport, BenchmarkComparisonRequest, BenchmarkConfig, BenchmarkRequestIR,
+    ComparisonObjective, CompileRequest, EvidenceStore, ExecutablePlanIR, HardwareIdentity,
+    InfrastructureSnapshot, LinkKind, LocalDiscovery, ModelArtifactIdentity, PeerProbeResult,
+    PerformancePredictionInput, PlacementKind, PlacementReport, PlacementTargetIR, PlanIR,
+    Prediction, PredictionQuery, ScenarioIR, SnapshotManifest,
 };
 
 const BENCHMARK_LISTEN_PORT: u16 = 18080;
@@ -1299,9 +1298,9 @@ fn run() -> Result<(), String> {
 
             let predicted_p95_ttft_ms = option_value(options, "--predicted-p95-ttft-ms")?
                 .map(|value| {
-                    value.parse::<f64>().map_err(|e| {
-                        format!("invalid --predicted-p95-ttft-ms '{value}': {e}")
-                    })
+                    value
+                        .parse::<f64>()
+                        .map_err(|e| format!("invalid --predicted-p95-ttft-ms '{value}': {e}"))
                 })
                 .transpose()?;
             let predicted_mean_decode_tokens_per_second =
@@ -1313,8 +1312,7 @@ fn run() -> Result<(), String> {
                     })
                     .transpose()?;
 
-            if predicted_p95_ttft_ms.is_none()
-                && predicted_mean_decode_tokens_per_second.is_none()
+            if predicted_p95_ttft_ms.is_none() && predicted_mean_decode_tokens_per_second.is_none()
             {
                 return Err(
                     "calibrate-performance requires --predicted-p95-ttft-ms and/or --predicted-decode-tps"
