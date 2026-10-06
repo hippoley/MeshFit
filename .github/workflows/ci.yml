@@ -43,7 +43,7 @@ jobs:
       - run: test -d /tmp/meshfit-benchmark-001-materialized/artifacts/meshfit
       - run: cargo run -p meshfit -- benchmark-status /tmp/meshfit-benchmark-001-materialized > /tmp/meshfit-benchmark-status.yaml
       - run: cargo run -p meshfit -- benchmark-preflight /tmp/meshfit-benchmark-001-materialized meshfit --host node-b > /tmp/meshfit-benchmark-preflight.yaml
-      - run: grep -q "candidate: meshfit" /tmp/meshfit-benchmark-preflight.yaml
+      - run: 'grep -q "candidate: meshfit" /tmp/meshfit-benchmark-preflight.yaml'
       - run: '! cargo run -p meshfit -- benchmark-preflight /tmp/meshfit-benchmark-001-materialized meshfit --host node-b --require-ready'
       - run: '! cargo run -p meshfit -- benchmark-status /tmp/meshfit-benchmark-001-materialized --require-complete'
       - run: printf '[' > /tmp/meshfit-benchmark-001-materialized/results/meshfit/run-01.yaml
