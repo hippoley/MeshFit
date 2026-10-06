@@ -1540,18 +1540,14 @@ mod tests {
     #[test]
     fn preflight_hard_gates_host_runtime_and_existing_evidence() {
         let candidate = &status_test_kit().candidates[0];
-        let issues = benchmark_preflight_issues(
-            true,
-            candidate,
-            "node-b",
-            false,
-            None,
-            1,
-            false,
-        );
+        let issues = benchmark_preflight_issues(true, candidate, "node-b", false, None, 1, false);
 
-        assert!(issues.iter().any(|issue| issue.contains("wrong benchmark host")));
-        assert!(issues.iter().any(|issue| issue.contains("required runtime 'vllm'")));
+        assert!(issues
+            .iter()
+            .any(|issue| issue.contains("wrong benchmark host")));
+        assert!(issues
+            .iter()
+            .any(|issue| issue.contains("required runtime 'vllm'")));
         assert!(issues
             .iter()
             .any(|issue| issue.contains("refusing accidental evidence overwrite")));
@@ -1560,15 +1556,7 @@ mod tests {
     #[test]
     fn preflight_can_resume_existing_evidence_only_when_explicitly_allowed() {
         let candidate = &status_test_kit().candidates[0];
-        let issues = benchmark_preflight_issues(
-            true,
-            candidate,
-            "node-a",
-            true,
-            None,
-            1,
-            true,
-        );
+        let issues = benchmark_preflight_issues(true, candidate, "node-a", true, None, 1, true);
 
         assert!(issues.is_empty());
     }
