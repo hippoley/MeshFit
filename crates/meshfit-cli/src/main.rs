@@ -2556,9 +2556,7 @@ fn load_expected_benchmark_hardware(
         .get(benchmark_host)
         .cloned()
         .ok_or_else(|| {
-            format!(
-                "snapshot has no hardware identity for benchmark host '{benchmark_host}'"
-            )
+            format!("snapshot has no hardware identity for benchmark host '{benchmark_host}'")
         })
 }
 
@@ -2611,8 +2609,10 @@ fn validate_benchmark_bundle_for_candidate(
         );
     }
 
-    let attestation =
-        benchmark_hardware_profile_attestation(expected_hardware, &bundle.request.identity.hardware);
+    let attestation = benchmark_hardware_profile_attestation(
+        expected_hardware,
+        &bundle.request.identity.hardware,
+    );
     if !attestation.matches {
         return Err(format!(
             "bundle hardware identity does not match snapshot benchmark host '{}': {}",
