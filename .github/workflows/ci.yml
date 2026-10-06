@@ -70,6 +70,8 @@ jobs:
       - run: grep -q 'local_override_verified' /tmp/meshfit-model-override-preflight.yaml
       - run: grep -q 'model_artifact_verified' /tmp/meshfit-model-override-preflight.yaml
       - run: 'grep -q "listen_port: 18181" /tmp/meshfit-model-override-preflight.yaml'
+      - run: 'grep -q "hardware_profile_match: false" /tmp/meshfit-model-override-preflight.yaml'
+      - run: grep -q 'accelerator count mismatch\|hardware architecture mismatch\|hardware operating-system mismatch\|snapshot has no hardware identity' /tmp/meshfit-model-override-preflight.yaml
       - run: |
           python3 -m http.server 18181 >/tmp/meshfit-port-18181.log 2>&1 &
           pid=$!
