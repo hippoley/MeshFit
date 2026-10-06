@@ -192,7 +192,6 @@ struct BenchmarkInvalidBundle {
     error: String,
 }
 
-
 #[derive(Debug, Deserialize, Serialize)]
 #[serde(deny_unknown_fields)]
 struct BenchmarkHostEvidenceTransfer {
@@ -1244,8 +1243,8 @@ fn run() -> Result<(), String> {
                 .ok_or_else(|| "missing host-evidence.yaml".to_string())?;
             let raw = fs::read_to_string(transfer_path)
                 .map_err(|e| format!("read {transfer_path}: {e}"))?;
-            let transfer: BenchmarkHostEvidenceTransfer = serde_yaml::from_str(&raw)
-                .map_err(|e| format!("parse {transfer_path}: {e}"))?;
+            let transfer: BenchmarkHostEvidenceTransfer =
+                serde_yaml::from_str(&raw).map_err(|e| format!("parse {transfer_path}: {e}"))?;
             let result = import_benchmark_host_evidence(Path::new(kit_dir), &transfer)?;
             let yaml = serde_yaml::to_string(&result).map_err(|e| e.to_string())?;
             print!("{yaml}");
@@ -2749,8 +2748,12 @@ fn export_benchmark_host_evidence(
         let bundle_path = kit_dir.join(&path);
         let bytes = fs::read(&bundle_path)
             .map_err(|e| format!("read evidence bundle '{}': {e}", bundle_path.display()))?;
-        let content = String::from_utf8(bytes.clone())
-            .map_err(|e| format!("evidence bundle '{}' is not UTF-8 YAML: {e}", bundle_path.display()))?;
+        let content = String::from_utf8(bytes.clone()).map_err(|e| {
+            format!(
+                "evidence bundle '{}' is not UTF-8 YAML: {e}",
+                bundle_path.display()
+            )
+        })?;
         let bundle: BenchmarkBundle = serde_yaml::from_slice(&bytes)
             .map_err(|e| format!("parse evidence bundle '{}': {e}", bundle_path.display()))?;
         bundle.validate()?;
@@ -3712,11 +3715,7 @@ mod tests {
     fn write_transfer_test_kit(dir: &Path, include_bundle: bool) -> BenchmarkExecutionKit {
         let kit = status_test_kit();
         fs::create_dir_all(dir.join("results/meshfit")).unwrap();
-        fs::write(
-            dir.join("kit.yaml"),
-            serde_yaml::to_string(&kit).unwrap(),
-        )
-        .unwrap();
+        fs::write(dir.join("kit.yaml"), serde_yaml::to_string(&kit).unwrap()).unwrap();
 
         if include_bundle {
             let fixture_raw = include_str!("../../../examples/benchmark-bundle.yaml");
@@ -3758,8 +3757,7 @@ mod tests {
         assert_eq!(second.already_present, 1);
 
         let source_bytes = fs::read(source.join("results/meshfit/run-01.yaml")).unwrap();
-        let destination_bytes =
-            fs::read(destination.join("results/meshfit/run-01.yaml")).unwrap();
+        let destination_bytes = fs::read(destination.join("results/meshfit/run-01.yaml")).unwrap();
         assert_eq!(source_bytes, destination_bytes);
 
         let _ = fs::remove_dir_all(source);
