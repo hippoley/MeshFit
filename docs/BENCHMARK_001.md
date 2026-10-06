@@ -92,7 +92,7 @@ meshfit compare-benchmarks benchmark-001.yaml --markdown
 meshfit compare-benchmarks benchmark-001.yaml --require-publishable
 ```
 
-The comparison rejects mismatched model identity, context, concurrency, or any BenchmarkConfig field. A result is only marked publishable when each candidate has at least 2 independent bundles, at least 20 measured samples, unique benchmark IDs, runner provenance, and capture timestamps.
+The comparison rejects mismatched model identity, context, concurrency, or any BenchmarkConfig field. A result is only marked publishable when each candidate has at least 2 independent bundles and 20 measured samples, every strategy maps to one stable plan ID, plan IDs are distinct across strategies, benchmark IDs are unique, runner provenance includes the MeshFit source commit, and capture timestamps are present.
 
 ## Output contract
 
