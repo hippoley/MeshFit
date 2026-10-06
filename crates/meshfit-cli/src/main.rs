@@ -846,8 +846,7 @@ fn run() -> Result<(), String> {
                 }
 
                 let execution_kit = load_benchmark_execution_kit(kit_dir)?;
-                let execution_marker =
-                    benchmark_execution_lock_target(execution_kit.listen_port);
+                let execution_marker = benchmark_execution_lock_target(execution_kit.listen_port);
                 let _execution_lock = acquire_benchmark_file_lock(
                     &execution_marker,
                     "benchmark candidate execution",
