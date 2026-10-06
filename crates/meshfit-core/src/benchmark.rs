@@ -380,6 +380,47 @@ mod tests {
     }
 
     #[test]
+    fn rejects_partial_concurrency_wave_bundle() {
+        let mut bundle = BenchmarkBundle {
+            benchmark_id: "bench-partial-wave".into(),
+            request: request(),
+            measurements: vec![
+                RequestMeasurement {
+                    ttft_ms: 100.0,
+                    total_ms: 1100.0,
+                    output_tokens: Some(11),
+                    peak_vram_gb: None,
+                    peak_ram_gb: None,
+                },
+                RequestMeasurement {
+                    ttft_ms: 110.0,
+                    total_ms: 1110.0,
+                    output_tokens: Some(11),
+                    peak_vram_gb: None,
+                    peak_ram_gb: None,
+                },
+                RequestMeasurement {
+                    ttft_ms: 120.0,
+                    total_ms: 1120.0,
+                    output_tokens: Some(11),
+                    peak_vram_gb: None,
+                    peak_ram_gb: None,
+                },
+            ],
+            provenance: BenchmarkProvenance {
+                source: "meshfit-benchmark".into(),
+                source_url: None,
+                commit: None,
+                captured_at: None,
+            },
+        };
+        bundle.request.concurrency = 2;
+        bundle.request.config.measured_requests = 3;
+
+        assert!(bundle.validate().is_err());
+    }
+
+    #[test]
     fn rejects_empty_benchmark_bundle() {
         let bundle = BenchmarkBundle {
             benchmark_id: "bench-empty".into(),
