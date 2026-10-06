@@ -9,7 +9,7 @@ use serde::{Deserialize, Serialize};
 use meshfit_core::{
     compare_benchmarks, compile_plan, discover_local, discover_runtimes, inspect_model_artifact,
     prepare_local_benchmark_request, probe_peer, run_local_benchmark, solve, BenchmarkBundle,
-    BenchmarkCandidate, BenchmarkComparisonRequest, BenchmarkConfig, BenchmarkRequestIR,
+    BenchmarkCandidate, BenchmarkComparisonReport, BenchmarkComparisonRequest, BenchmarkConfig, BenchmarkRequestIR,
     ComparisonObjective, CompileRequest, EvidenceStore, ExecutablePlanIR, InfrastructureSnapshot,
     LinkKind, LocalDiscovery, ModelArtifactIdentity, PeerProbeResult, PlacementKind,
     PlacementReport, PlacementTargetIR, PlanIR, Prediction, PredictionQuery, ScenarioIR,
@@ -930,45 +930,33 @@ fn run() -> Result<(), String> {
             let yaml = serde_yaml::to_string(&preflight).map_err(|e| e.to_string())?;
             print!("{yaml}");
         }
+        "benchmark-finalize" => {
+            let kit_dir = args.get(2).ok_or_else(|| {
+                "usage: meshfit benchmark-finalize <kit-dir> [--markdown] [--require-publishable]"
+                    .to_string()
+            })?;
+            let report = finalize_benchmark_kit(Path::new(kit_dir))?;
+
+            if args.iter().any(|arg| arg == "--require-publishable") && !report.publishable {
+                return Err(format!(
+                    "Benchmark 001 evidence is not publishable: {}",
+                    report.evidence_status
+                ));
+            }
+
+            if args.iter().any(|arg| arg == "--markdown") {
+                print!("{}", report.to_markdown());
+            } else {
+                let yaml = serde_yaml::to_string(&report).map_err(|e| e.to_string())?;
+                print!("{yaml}");
+            }
+        }
         "compare-benchmarks" => {
             let manifest_path = args.get(2).ok_or_else(|| {
                 "usage: meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]"
                     .to_string()
             })?;
-            let raw = fs::read_to_string(manifest_path)
-                .map_err(|e| format!("read {manifest_path}: {e}"))?;
-            let manifest: BenchmarkComparisonManifest =
-                serde_yaml::from_str(&raw).map_err(|e| format!("parse {manifest_path}: {e}"))?;
-            let base_dir = Path::new(manifest_path)
-                .parent()
-                .unwrap_or_else(|| Path::new("."));
-
-            let mut candidates = Vec::new();
-            for candidate in manifest.candidates {
-                let mut bundles = Vec::new();
-                for bundle_file in candidate.bundles {
-                    let path = base_dir.join(&bundle_file);
-                    let bundle_raw = fs::read_to_string(&path)
-                        .map_err(|e| format!("read {}: {e}", path.display()))?;
-                    let bundle: BenchmarkBundle = serde_yaml::from_str(&bundle_raw)
-                        .map_err(|e| format!("parse {}: {e}", path.display()))?;
-                    bundles.push(bundle);
-                }
-
-                candidates.push(BenchmarkCandidate {
-                    name: candidate.name,
-                    strategy: candidate.strategy,
-                    hourly_cost_usd: candidate.hourly_cost_usd,
-                    bundles,
-                });
-            }
-
-            let report = compare_benchmarks(&BenchmarkComparisonRequest {
-                benchmark_id: manifest.benchmark_id,
-                meshfit_candidate: manifest.meshfit_candidate,
-                objective: manifest.objective,
-                candidates,
-            })?;
+            let report = load_benchmark_comparison_report(Path::new(manifest_path))?;
 
             if args.iter().any(|arg| arg == "--require-publishable") && !report.publishable {
                 return Err(format!(
@@ -1118,6 +1106,60 @@ fn run() -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn load_benchmark_comparison_report(
+    manifest_path: &Path,
+) -> Result<BenchmarkComparisonReport, String> {
+    let raw = fs::read_to_string(manifest_path)
+        .map_err(|e| format!("read {}: {e}", manifest_path.display()))?;
+    let manifest: BenchmarkComparisonManifest = serde_yaml::from_str(&raw)
+        .map_err(|e| format!("parse {}: {e}", manifest_path.display()))?;
+    let base_dir = manifest_path.parent().unwrap_or_else(|| Path::new("."));
+
+    let mut candidates = Vec::new();
+    for candidate in manifest.candidates {
+        let mut bundles = Vec::new();
+        for bundle_file in candidate.bundles {
+            let path = base_dir.join(&bundle_file);
+            let bundle_raw =
+                fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
+            let bundle: BenchmarkBundle = serde_yaml::from_str(&bundle_raw)
+                .map_err(|e| format!("parse {}: {e}", path.display()))?;
+            bundles.push(bundle);
+        }
+
+        candidates.push(BenchmarkCandidate {
+            name: candidate.name,
+            strategy: candidate.strategy,
+            hourly_cost_usd: candidate.hourly_cost_usd,
+            bundles,
+        });
+    }
+
+    compare_benchmarks(&BenchmarkComparisonRequest {
+        benchmark_id: manifest.benchmark_id,
+        meshfit_candidate: manifest.meshfit_candidate,
+        objective: manifest.objective,
+        candidates,
+    })
+}
+
+fn finalize_benchmark_kit(kit_dir: &Path) -> Result<BenchmarkComparisonReport, String> {
+    let status = inspect_benchmark_kit(kit_dir)?;
+    if !status.complete {
+        let invalid = status
+            .candidates
+            .iter()
+            .map(|candidate| candidate.invalid_bundles.len())
+            .sum::<usize>();
+        return Err(format!(
+            "Benchmark 001 is incomplete: {}/{} valid bundles, {} invalid bundle(s). Run benchmark-worklist or benchmark-status before finalizing.",
+            status.valid_bundles, status.expected_bundles, invalid
+        ));
+    }
+
+    load_benchmark_comparison_report(&kit_dir.join("comparison.yaml"))
 }
 
 fn benchmark_execution_lock_target() -> PathBuf {
@@ -2605,7 +2647,7 @@ fn print_prediction(prediction: &Prediction) {
 
 fn print_help() {
     println!(
-        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--require-ready] [--write-dir DIR]\n  meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--host NODE] [--model-path PATH] [--dry-run] [--overwrite]\n  meshfit benchmark-run-candidate <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  meshfit benchmark-run-host <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  meshfit benchmark-worklist <kit-dir> [--host NODE | --current-host] [--pending-only]\n  meshfit benchmark-status <kit-dir> [--require-complete]\n  meshfit benchmark-preflight <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--allow-existing] [--require-ready]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
+        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--require-ready] [--write-dir DIR]\n  meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--host NODE] [--model-path PATH] [--dry-run] [--overwrite]\n  meshfit benchmark-run-candidate <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  meshfit benchmark-run-host <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  meshfit benchmark-worklist <kit-dir> [--host NODE | --current-host] [--pending-only]\n  meshfit benchmark-status <kit-dir> [--require-complete]\n  meshfit benchmark-finalize <kit-dir> [--markdown] [--require-publishable]\n  meshfit benchmark-preflight <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--allow-existing] [--require-ready]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
     );
 }
 
@@ -2954,6 +2996,23 @@ mod tests {
         let invalid = inspect_work_slot(&bundle_path, "plan-test", &lock_path);
         assert_eq!(invalid.0, "invalid");
         assert!(invalid.1.unwrap().contains("parse failed"));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn benchmark_finalize_refuses_incomplete_kit() {
+        let dir = status_test_dir("finalize-incomplete");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("kit.yaml"),
+            serde_yaml::to_string(&status_test_kit()).unwrap(),
+        )
+        .unwrap();
+
+        let error = finalize_benchmark_kit(&dir).unwrap_err();
+        assert!(error.contains("Benchmark 001 is incomplete"));
+        assert!(error.contains("0/1 valid bundles"));
 
         let _ = fs::remove_dir_all(dir);
     }
