@@ -908,6 +908,62 @@ mod tests {
     }
 
     #[test]
+    fn cross_node_tp_requires_explicit_communication_profile() {
+        let mut scenario = scenario();
+        scenario.model.tp_communication_model = None;
+        scenario.infrastructure.links[1].bandwidth_gbps = Some(100.0);
+        scenario.infrastructure.links[1].latency_ms = Some(0.1);
+
+        let report = solve(&scenario);
+
+        assert!(report.rejected.iter().any(|rejection| {
+            rejection.code == "missing_tp_communication_profile"
+                && rejection.candidate.starts_with("vllm@local+remote")
+        }));
+    }
+
+    #[test]
+    fn cross_node_tp_requires_explicit_communication_budget() {
+        let mut scenario = scenario();
+        scenario.workload.max_tp_communication_ms_per_token = None;
+        scenario.infrastructure.links[1].bandwidth_gbps = Some(100.0);
+        scenario.infrastructure.links[1].latency_ms = Some(0.1);
+
+        let report = solve(&scenario);
+
+        assert!(report.rejected.iter().any(|rejection| {
+            rejection.code == "missing_tp_communication_budget"
+                && rejection.candidate.starts_with("vllm@local+remote")
+        }));
+    }
+
+    #[test]
+    fn fast_cross_node_tp_carries_structured_communication_estimate() {
+        let mut scenario = scenario();
+        scenario.infrastructure.links[1].bandwidth_gbps = Some(100.0);
+        scenario.infrastructure.links[1].latency_ms = Some(0.1);
+
+        let report = solve(&scenario);
+        let plan = report
+            .feasible
+            .iter()
+            .find(|plan| {
+                plan.runtime == "vllm"
+                    && plan.placement == PlacementKind::TensorParallel
+                    && plan.nodes.len() == 2
+            })
+            .unwrap();
+
+        let communication = plan.communication.as_ref().unwrap();
+        assert_eq!(communication.synchronizations_per_token, 2);
+        assert!(communication.bytes_per_token > 0.0);
+        assert!(communication.transfer_ms_per_token > 0.0);
+        assert!(communication.synchronization_ms_per_token > 0.0);
+        assert!(communication.total_ms_per_token < 2.0);
+        assert_eq!(communication.confidence, "analytical_unvalidated");
+    }
+
+    #[test]
     fn slow_wan_pair_is_rejected_for_tp() {
         let report = solve(&scenario());
         assert!(report
