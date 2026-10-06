@@ -737,6 +737,11 @@ HTTPServer(("127.0.0.1", {port}), Handler).serve_forever()
 
         let bundle = result.unwrap();
         assert_eq!(bundle.measurements.len(), 1);
+        assert_eq!(
+            bundle.provenance.commit.as_deref(),
+            option_env!("MESHFIT_GIT_COMMIT")
+        );
+        assert!(bundle.provenance.commit.is_some());
         assert_eq!(bundle.measurements[0].output_tokens, Some(2));
         assert!(bundle.measurements[0].peak_ram_gb.is_some());
         assert!(bundle.measurements[0].ttft_ms > 0.0);
