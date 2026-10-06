@@ -712,16 +712,16 @@ fn run() -> Result<(), String> {
                         }
                     ));
                 }
+                let execution_marker = kit_dir.join(".meshfit-benchmark");
+                let _execution_lock =
+                    acquire_benchmark_file_lock(&execution_marker, "benchmark execution")?;
+
                 if bundle_path.exists() && !overwrite {
                     return Err(format!(
                         "bundle '{}' already exists; pass --overwrite to replace it",
                         bundle_path.display()
                     ));
                 }
-
-                let execution_marker = kit_dir.join(".meshfit-benchmark");
-                let _execution_lock =
-                    acquire_benchmark_file_lock(&execution_marker, "benchmark execution")?;
 
                 if let Some(parent) = bundle_path.parent() {
                     fs::create_dir_all(parent)
