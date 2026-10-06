@@ -583,6 +583,30 @@ fn memory_assumptions(context: &PlacementContext<'_>, mut extra: Vec<String>) ->
     assumptions
 }
 
+fn communication_objective(plan: &PlanIR) -> Option<f64> {
+    match plan.placement {
+        PlacementKind::SingleHost | PlacementKind::CpuOffload | PlacementKind::Replica => Some(0.0),
+        _ => plan
+            .communication
+            .as_ref()
+            .map(|estimate| estimate.total_ms_per_token),
+    }
+}
+
+fn communication_dominance(other: &PlanIR, candidate: &PlanIR) -> (bool, bool) {
+    match (
+        communication_objective(other),
+        communication_objective(candidate),
+    ) {
+        (Some(other_ms), Some(candidate_ms)) => {
+            (other_ms <= candidate_ms, other_ms < candidate_ms)
+        }
+        (Some(_), None) => (true, true),
+        (None, Some(_)) => (false, false),
+        (None, None) => (true, false),
+    }
+}
+
 fn pareto_frontier(plans: &[PlanIR]) -> Vec<PlanIR> {
     plans
         .iter()
@@ -595,11 +619,18 @@ fn pareto_frontier(plans: &[PlanIR]) -> Vec<PlanIR> {
                 let no_more_expensive = other.hourly_cost_usd <= candidate.hourly_cost_usd;
                 let no_less_compute = other.relative_compute >= candidate.relative_compute;
                 let no_less_headroom = other.memory_headroom_gb >= candidate.memory_headroom_gb;
+                let (no_more_communication, better_communication) =
+                    communication_dominance(other, candidate);
                 let strictly_better = other.hourly_cost_usd < candidate.hourly_cost_usd
                     || other.relative_compute > candidate.relative_compute
-                    || other.memory_headroom_gb > candidate.memory_headroom_gb;
+                    || other.memory_headroom_gb > candidate.memory_headroom_gb
+                    || better_communication;
 
-                no_more_expensive && no_less_compute && no_less_headroom && strictly_better
+                no_more_expensive
+                    && no_less_compute
+                    && no_less_headroom
+                    && no_more_communication
+                    && strictly_better
             })
         })
         .cloned()
@@ -984,6 +1015,56 @@ mod tests {
                 && plan.runtime == "llama.cpp"
                 && plan.accelerators.len() == 1
         }));
+    }
+
+    fn communication_estimate(total_ms_per_token: f64) -> CommunicationEstimateIR {
+        CommunicationEstimateIR {
+            bytes_per_token: 1_000_000.0,
+            effective_bandwidth_gbps: 70.0,
+            transfer_ms_per_token: total_ms_per_token / 2.0,
+            synchronizations_per_token: 1,
+            synchronization_ms_per_token: total_ms_per_token / 2.0,
+            total_ms_per_token,
+            egress_cost_usd_per_million_tokens: 0.0,
+            confidence: "analytical_unvalidated".into(),
+        }
+    }
+
+    fn pareto_plan(id: &str, communication: Option<CommunicationEstimateIR>) -> PlanIR {
+        PlanIR {
+            id: id.into(),
+            placement: PlacementKind::TensorParallel,
+            runtime: "vllm".into(),
+            nodes: vec!["a".into(), "b".into()],
+            accelerators: vec![],
+            required_memory_gb: 40.0,
+            accelerator_memory_gb: 80.0,
+            relative_compute: 10.0,
+            hourly_cost_usd: 1.0,
+            memory_headroom_gb: 20.0,
+            communication,
+            assumptions: vec![],
+        }
+    }
+
+    #[test]
+    fn pareto_prefers_lower_known_communication_tax_when_other_objectives_match() {
+        let fast = pareto_plan("fast", Some(communication_estimate(0.2)));
+        let slow = pareto_plan("slow", Some(communication_estimate(1.5)));
+
+        let frontier = pareto_frontier(&[fast.clone(), slow]);
+
+        assert_eq!(frontier, vec![fast]);
+    }
+
+    #[test]
+    fn known_communication_evidence_dominates_unknown_when_other_objectives_match() {
+        let known = pareto_plan("known", Some(communication_estimate(0.8)));
+        let unknown = pareto_plan("unknown", None);
+
+        let frontier = pareto_frontier(&[known.clone(), unknown]);
+
+        assert_eq!(frontier, vec![known]);
     }
 
     #[test]
