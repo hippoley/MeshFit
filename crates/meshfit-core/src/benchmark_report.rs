@@ -244,8 +244,27 @@ pub fn compare_benchmarks(
 
 fn evidence_qualification(candidates: &[BenchmarkCandidate]) -> (bool, String) {
     let mut all_ids = std::collections::HashSet::new();
+    let mut compared_plan_ids = std::collections::HashSet::new();
 
     for candidate in candidates {
+        let Some(first_bundle) = candidate.bundles.first() else {
+            return (
+                false,
+                format!("candidate '{}' contains no benchmark bundles", candidate.name),
+            );
+        };
+        let plan_id = first_bundle.request.executable.source_plan_id.as_str();
+
+        if !compared_plan_ids.insert(plan_id) {
+            return (
+                false,
+                format!(
+                    "plan_id '{}' is reused across candidates; Benchmark 001 strategies must measure distinct placements",
+                    plan_id
+                ),
+            );
+        }
+
         let sample_count = candidate
             .bundles
             .iter()
@@ -275,6 +294,17 @@ fn evidence_qualification(candidates: &[BenchmarkCandidate]) -> (bool, String) {
 
         let mut candidate_ids = std::collections::HashSet::new();
         for bundle in &candidate.bundles {
+            if bundle.request.executable.source_plan_id != plan_id {
+                return (
+                    false,
+                    format!(
+                        "candidate '{}' mixes plan_id '{}' with '{}'; all repeated bundles for one strategy must execute the same plan",
+                        candidate.name,
+                        plan_id,
+                        bundle.request.executable.source_plan_id
+                    ),
+                );
+            }
             if bundle.provenance.source != "meshfit-local-runner" {
                 return (
                     false,
@@ -289,6 +319,15 @@ fn evidence_qualification(candidates: &[BenchmarkCandidate]) -> (bool, String) {
                     false,
                     format!(
                         "benchmark_id '{}' has no capture timestamp",
+                        bundle.benchmark_id
+                    ),
+                );
+            }
+            if bundle.provenance.commit.is_none() {
+                return (
+                    false,
+                    format!(
+                        "benchmark_id '{}' has no MeshFit source commit; publishable evidence must bind measurements to source",
                         bundle.benchmark_id
                     ),
                 );
