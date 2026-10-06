@@ -47,6 +47,13 @@ jobs:
       - run: grep -q 'Listen port.*18181' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
       - run: test -f /tmp/meshfit-benchmark-001-materialized/comparison.yaml
       - run: test -f /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
+      - run: grep -q '## Real-host execution' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
+      - run: grep -q 'export MESHFIT_NODE_ID=node-b' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
+      - run: grep -q 'MESHFIT_MODEL_PATH' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
+      - run: grep -q 'benchmark-run-host . --current-host --resume --dry-run' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
+      - run: grep -q 'benchmark-run-host . --current-host --resume' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
+      - run: grep -q 'benchmark-finalize . --markdown --require-publishable' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
+      - run: grep -q '## Recovery and debugging' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
       - run: test -f /tmp/meshfit-benchmark-001-materialized/inputs/snapshot.yaml
       - run: test -f /tmp/meshfit-benchmark-001-materialized/inputs/target.yaml
       - run: test -f /tmp/meshfit-benchmark-001-materialized/inputs/model-identity.yaml
