@@ -3709,6 +3709,104 @@ mod tests {
         std::env::temp_dir().join(format!("meshfit-{label}-{}-{nonce}", std::process::id()))
     }
 
+    fn write_transfer_test_kit(dir: &Path, include_bundle: bool) -> BenchmarkExecutionKit {
+        let kit = status_test_kit();
+        fs::create_dir_all(dir.join("results/meshfit")).unwrap();
+        fs::write(
+            dir.join("kit.yaml"),
+            serde_yaml::to_string(&kit).unwrap(),
+        )
+        .unwrap();
+
+        if include_bundle {
+            let fixture_raw = include_str!("../../../examples/benchmark-bundle.yaml");
+            let mut bundle: BenchmarkBundle = serde_yaml::from_str(fixture_raw).unwrap();
+            bundle.benchmark_id = "transfer-run-01".into();
+            bundle.request.executable.source_plan_id = "plan-test".into();
+            fs::write(
+                dir.join("results/meshfit/run-01.yaml"),
+                serde_yaml::to_string(&bundle).unwrap(),
+            )
+            .unwrap();
+        }
+
+        kit
+    }
+
+    #[test]
+    fn bounded_evidence_transfer_round_trips_and_is_idempotent() {
+        let source = status_test_dir("transfer-source");
+        let destination = status_test_dir("transfer-destination");
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir_all(&destination).unwrap();
+        write_transfer_test_kit(&source, true);
+        write_transfer_test_kit(&destination, false);
+
+        let transfer = export_benchmark_host_evidence(&source, "node-a").unwrap();
+        assert_eq!(transfer.schema, "meshfit.benchmark-host-evidence/v1");
+        assert_eq!(transfer.host, "node-a");
+        assert_eq!(transfer.bundles.len(), 1);
+        assert_eq!(transfer.bundles[0].sha256.len(), 64);
+
+        let first = import_benchmark_host_evidence(&destination, &transfer).unwrap();
+        assert_eq!(first.imported, 1);
+        assert_eq!(first.already_present, 0);
+        assert_eq!(first.total, 1);
+
+        let second = import_benchmark_host_evidence(&destination, &transfer).unwrap();
+        assert_eq!(second.imported, 0);
+        assert_eq!(second.already_present, 1);
+
+        let source_bytes = fs::read(source.join("results/meshfit/run-01.yaml")).unwrap();
+        let destination_bytes =
+            fs::read(destination.join("results/meshfit/run-01.yaml")).unwrap();
+        assert_eq!(source_bytes, destination_bytes);
+
+        let _ = fs::remove_dir_all(source);
+        let _ = fs::remove_dir_all(destination);
+    }
+
+    #[test]
+    fn bounded_evidence_import_rejects_tampered_content_before_write() {
+        let source = status_test_dir("transfer-tampered-source");
+        let destination = status_test_dir("transfer-tampered-destination");
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir_all(&destination).unwrap();
+        write_transfer_test_kit(&source, true);
+        write_transfer_test_kit(&destination, false);
+
+        let mut transfer = export_benchmark_host_evidence(&source, "node-a").unwrap();
+        transfer.bundles[0].content.push_str("\n# tampered\n");
+
+        let error = import_benchmark_host_evidence(&destination, &transfer).unwrap_err();
+        assert!(error.contains("SHA-256 mismatch"));
+        assert!(!destination.join("results/meshfit/run-01.yaml").exists());
+
+        let _ = fs::remove_dir_all(source);
+        let _ = fs::remove_dir_all(destination);
+    }
+
+    #[test]
+    fn bounded_evidence_import_rejects_unexpected_slot_path() {
+        let source = status_test_dir("transfer-path-source");
+        let destination = status_test_dir("transfer-path-destination");
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir_all(&destination).unwrap();
+        write_transfer_test_kit(&source, true);
+        write_transfer_test_kit(&destination, false);
+
+        let mut transfer = export_benchmark_host_evidence(&source, "node-a").unwrap();
+        transfer.bundles[0].path = "../outside.yaml".into();
+
+        let error = import_benchmark_host_evidence(&destination, &transfer).unwrap_err();
+        assert!(error.contains("does not match kit slot"));
+        assert!(!destination.join("results/meshfit/run-01.yaml").exists());
+        assert!(!destination.join("../outside.yaml").exists());
+
+        let _ = fs::remove_dir_all(source);
+        let _ = fs::remove_dir_all(destination);
+    }
+
     #[test]
     fn preflight_hard_gates_host_runtime_and_existing_evidence() {
         let candidate = &status_test_kit().candidates[0];
