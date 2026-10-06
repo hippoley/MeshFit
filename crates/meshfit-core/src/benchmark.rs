@@ -371,8 +371,6 @@ mod tests {
             ttft_ms: 100.0,
             total_ms: 1100.0,
             output_tokens: Some(11),
-            peak_vram_gb: None,
-            peak_ram_gb: None,
         };
 
         assert_eq!(measurement.tpot_ms(), Some(100.0));
@@ -385,8 +383,6 @@ mod tests {
             ttft_ms: 100.0,
             total_ms: 1100.0,
             output_tokens: None,
-            peak_vram_gb: None,
-            peak_ram_gb: None,
         };
 
         assert_eq!(measurement.tpot_ms(), None);
@@ -402,10 +398,14 @@ mod tests {
                 ttft_ms: 100.0,
                 total_ms: 1100.0,
                 output_tokens: Some(11),
+            }],
+            waves: vec![WaveMeasurement {
+                request_count: 1,
+                total_ms: 1100.0,
+                output_tokens: Some(11),
                 peak_vram_gb: Some(12.5),
                 peak_ram_gb: Some(8.0),
             }],
-            waves: vec![],
             provenance: BenchmarkProvenance {
                 source: "meshfit-benchmark".into(),
                 source_url: None,
@@ -431,8 +431,6 @@ mod tests {
                 ttft_ms: 100.0,
                 total_ms: 1100.0,
                 output_tokens: Some(11),
-                peak_vram_gb: None,
-                peak_ram_gb: None,
             }],
             waves: vec![],
             provenance: BenchmarkProvenance {
@@ -458,22 +456,16 @@ mod tests {
                     ttft_ms: 100.0,
                     total_ms: 1100.0,
                     output_tokens: Some(11),
-                    peak_vram_gb: None,
-                    peak_ram_gb: None,
                 },
                 RequestMeasurement {
                     ttft_ms: 110.0,
                     total_ms: 1110.0,
                     output_tokens: Some(11),
-                    peak_vram_gb: None,
-                    peak_ram_gb: None,
                 },
                 RequestMeasurement {
                     ttft_ms: 120.0,
                     total_ms: 1120.0,
                     output_tokens: Some(11),
-                    peak_vram_gb: None,
-                    peak_ram_gb: None,
                 },
             ],
             provenance: BenchmarkProvenance {
