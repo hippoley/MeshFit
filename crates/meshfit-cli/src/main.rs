@@ -927,9 +927,7 @@ fn run() -> Result<(), String> {
                 "--measured-requests",
                 default_measured_requests(concurrency),
             )?;
-            if measured_requests_per_run == 0
-                || measured_requests_per_run % concurrency != 0
-            {
+            if measured_requests_per_run == 0 || measured_requests_per_run % concurrency != 0 {
                 return Err(format!(
                     "--measured-requests must be greater than zero and divisible by concurrency ({concurrency})"
                 ));
