@@ -598,9 +598,7 @@ fn communication_dominance(other: &PlanIR, candidate: &PlanIR) -> (bool, bool) {
         communication_objective(other),
         communication_objective(candidate),
     ) {
-        (Some(other_ms), Some(candidate_ms)) => {
-            (other_ms <= candidate_ms, other_ms < candidate_ms)
-        }
+        (Some(other_ms), Some(candidate_ms)) => (other_ms <= candidate_ms, other_ms < candidate_ms),
         (Some(_), None) => (true, true),
         (None, Some(_)) => (false, false),
         (None, None) => (true, false),
