@@ -1,7 +1,7 @@
 use serde::{Deserialize, Serialize};
 
 use crate::{
-    benchmark::BenchmarkBundle,
+    benchmark::{BenchmarkBundle, BenchmarkConfig},
     ir::{PlacementKind, PlanIR},
 };
 
@@ -42,6 +42,87 @@ pub struct MemoryCalibrationSummary {
     pub conservative_observed_to_predicted_ratio: f64,
     pub worst_underprediction_gb: f64,
     pub samples: Vec<MemoryCalibrationSample>,
+}
+
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PerformanceMetricKind {
+    P95TtftMs,
+    MeanDecodeTokensPerSecond,
+}
+
+impl PerformanceMetricKind {
+    fn lower_is_better(self) -> bool {
+        matches!(self, Self::P95TtftMs)
+    }
+}
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum PerformanceCalibrationBias {
+    UnderPrediction,
+    OverPrediction,
+    Exact,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PerformancePredictionInput {
+    pub plan_id: String,
+    pub placement: PlacementKind,
+    pub execution_fingerprint: String,
+    pub context_tokens: u32,
+    pub concurrency: u32,
+    pub benchmark_config: BenchmarkConfig,
+    #[serde(default)]
+    pub predicted_p95_ttft_ms: Option<f64>,
+    #[serde(default)]
+    pub predicted_mean_decode_tokens_per_second: Option<f64>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PerformanceCalibrationSample {
+    pub benchmark_id: String,
+    pub metric: PerformanceMetricKind,
+    pub predicted_value: f64,
+    pub observed_value: f64,
+    pub signed_error: f64,
+    pub absolute_error: f64,
+    pub absolute_percentage_error_fraction: f64,
+    pub observed_to_predicted_ratio: f64,
+    pub optimistic_error_fraction: f64,
+    pub bias: PerformanceCalibrationBias,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PerformanceMetricCalibrationSummary {
+    pub metric: PerformanceMetricKind,
+    pub sample_count: usize,
+    pub predicted_value: f64,
+    pub observed_mean: f64,
+    #[serde(default)]
+    pub observed_stddev: Option<f64>,
+    pub mean_signed_error: f64,
+    pub mean_absolute_error: f64,
+    pub mean_absolute_percentage_error_fraction: f64,
+    pub mean_observed_to_predicted_ratio: f64,
+    pub conservative_correction_ratio: f64,
+    pub worst_optimistic_error_fraction: f64,
+    pub samples: Vec<PerformanceCalibrationSample>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PerformanceCalibrationSummary {
+    pub plan_id: String,
+    pub placement: PlacementKind,
+    pub execution_fingerprint: String,
+    pub context_tokens: u32,
+    pub concurrency: u32,
+    pub benchmark_config: BenchmarkConfig,
+    #[serde(default)]
+    pub p95_ttft_ms: Option<PerformanceMetricCalibrationSummary>,
+    #[serde(default)]
+    pub mean_decode_tokens_per_second: Option<PerformanceMetricCalibrationSummary>,
 }
 
 pub fn calibrate_plan_memory(
@@ -173,6 +254,281 @@ pub fn calibrate_plan_memory(
         worst_underprediction_gb: (observed_max_peak_vram_gb - plan.required_memory_gb).max(0.0),
         samples,
     })
+}
+
+pub fn calibrate_plan_performance(
+    prediction: &PerformancePredictionInput,
+    bundles: &[BenchmarkBundle],
+) -> Result<PerformanceCalibrationSummary, String> {
+    if bundles.is_empty() {
+        return Err("performance calibration requires at least one benchmark bundle".into());
+    }
+    if prediction.predicted_p95_ttft_ms.is_none()
+        && prediction.predicted_mean_decode_tokens_per_second.is_none()
+    {
+        return Err("performance calibration requires at least one predicted metric".into());
+    }
+    if prediction.context_tokens == 0 {
+        return Err("performance prediction context_tokens must be greater than zero".into());
+    }
+    if prediction.concurrency == 0 {
+        return Err("performance prediction concurrency must be greater than zero".into());
+    }
+
+    if let Some(value) = prediction.predicted_p95_ttft_ms {
+        if value <= 0.0 {
+            return Err("predicted_p95_ttft_ms must be greater than zero".into());
+        }
+    }
+    if let Some(value) = prediction.predicted_mean_decode_tokens_per_second {
+        if value <= 0.0 {
+            return Err(
+                "predicted_mean_decode_tokens_per_second must be greater than zero".into(),
+            );
+        }
+    }
+
+    for bundle in bundles {
+        validate_performance_bundle_identity(prediction, bundle)?;
+    }
+
+    let p95_ttft_ms = prediction
+        .predicted_p95_ttft_ms
+        .map(|predicted| {
+            let observed = bundles
+                .iter()
+                .map(bundle_p95_ttft_ms)
+                .collect::<Result<Vec<_>, _>>()?;
+            calibrate_performance_metric(
+                PerformanceMetricKind::P95TtftMs,
+                predicted,
+                bundles,
+                &observed,
+            )
+        })
+        .transpose()?;
+
+    let mean_decode_tokens_per_second = prediction
+        .predicted_mean_decode_tokens_per_second
+        .map(|predicted| {
+            let observed = bundles
+                .iter()
+                .map(bundle_mean_decode_tokens_per_second)
+                .collect::<Result<Vec<_>, _>>()?;
+            calibrate_performance_metric(
+                PerformanceMetricKind::MeanDecodeTokensPerSecond,
+                predicted,
+                bundles,
+                &observed,
+            )
+        })
+        .transpose()?;
+
+    Ok(PerformanceCalibrationSummary {
+        plan_id: prediction.plan_id.clone(),
+        placement: prediction.placement,
+        execution_fingerprint: prediction.execution_fingerprint.clone(),
+        context_tokens: prediction.context_tokens,
+        concurrency: prediction.concurrency,
+        benchmark_config: prediction.benchmark_config.clone(),
+        p95_ttft_ms,
+        mean_decode_tokens_per_second,
+    })
+}
+
+fn validate_performance_bundle_identity(
+    prediction: &PerformancePredictionInput,
+    bundle: &BenchmarkBundle,
+) -> Result<(), String> {
+    bundle.validate()?;
+
+    if bundle.request.executable.source_plan_id != prediction.plan_id {
+        return Err(format!(
+            "benchmark '{}' belongs to plan '{}' instead of performance prediction plan '{}'",
+            bundle.benchmark_id, bundle.request.executable.source_plan_id, prediction.plan_id
+        ));
+    }
+    if bundle.request.executable.placement != prediction.placement {
+        return Err(format!(
+            "benchmark '{}' placement {:?} does not match prediction placement {:?}",
+            bundle.benchmark_id, bundle.request.executable.placement, prediction.placement
+        ));
+    }
+
+    let fingerprint = bundle.request.identity.fingerprint();
+    if fingerprint != prediction.execution_fingerprint {
+        return Err(format!(
+            "benchmark '{}' execution fingerprint '{}' does not match prediction fingerprint '{}'",
+            bundle.benchmark_id, fingerprint, prediction.execution_fingerprint
+        ));
+    }
+    if bundle.request.context_tokens != prediction.context_tokens {
+        return Err(format!(
+            "benchmark '{}' context {} does not match prediction context {}",
+            bundle.benchmark_id, bundle.request.context_tokens, prediction.context_tokens
+        ));
+    }
+    if bundle.request.concurrency != prediction.concurrency {
+        return Err(format!(
+            "benchmark '{}' concurrency {} does not match prediction concurrency {}",
+            bundle.benchmark_id, bundle.request.concurrency, prediction.concurrency
+        ));
+    }
+    if bundle.request.config != prediction.benchmark_config {
+        return Err(format!(
+            "benchmark '{}' BenchmarkConfig does not match performance prediction",
+            bundle.benchmark_id
+        ));
+    }
+
+    Ok(())
+}
+
+fn bundle_p95_ttft_ms(bundle: &BenchmarkBundle) -> Result<f64, String> {
+    let values = bundle
+        .measurements
+        .iter()
+        .map(|measurement| measurement.ttft_ms)
+        .collect::<Vec<_>>();
+    percentile(&values, 0.95)
+}
+
+fn bundle_mean_decode_tokens_per_second(bundle: &BenchmarkBundle) -> Result<f64, String> {
+    let values = bundle
+        .measurements
+        .iter()
+        .filter_map(|measurement| measurement.decode_tokens_per_second())
+        .collect::<Vec<_>>();
+
+    if values.is_empty() {
+        return Err(format!(
+            "benchmark '{}' has no valid decode token-rate observations; calibration cannot invent throughput",
+            bundle.benchmark_id
+        ));
+    }
+
+    mean(&values)
+}
+
+fn calibrate_performance_metric(
+    metric: PerformanceMetricKind,
+    predicted_value: f64,
+    bundles: &[BenchmarkBundle],
+    observed_values: &[f64],
+) -> Result<PerformanceMetricCalibrationSummary, String> {
+    if bundles.len() != observed_values.len() || bundles.is_empty() {
+        return Err("performance calibration bundle/observation cardinality mismatch".into());
+    }
+
+    let mut samples = Vec::with_capacity(bundles.len());
+    for (bundle, observed_value) in bundles.iter().zip(observed_values.iter().copied()) {
+        if observed_value <= 0.0 {
+            return Err(format!(
+                "benchmark '{}' has non-positive observed value for {:?}",
+                bundle.benchmark_id, metric
+            ));
+        }
+
+        let signed_error = predicted_value - observed_value;
+        let absolute_error = signed_error.abs();
+        let absolute_percentage_error_fraction = absolute_error / observed_value;
+        let observed_to_predicted_ratio = observed_value / predicted_value;
+        let optimistic_error_fraction = if metric.lower_is_better() {
+            ((observed_value - predicted_value) / observed_value).max(0.0)
+        } else {
+            ((predicted_value - observed_value) / observed_value).max(0.0)
+        };
+        let bias = if signed_error < 0.0 {
+            PerformanceCalibrationBias::UnderPrediction
+        } else if signed_error > 0.0 {
+            PerformanceCalibrationBias::OverPrediction
+        } else {
+            PerformanceCalibrationBias::Exact
+        };
+
+        samples.push(PerformanceCalibrationSample {
+            benchmark_id: bundle.benchmark_id.clone(),
+            metric,
+            predicted_value,
+            observed_value,
+            signed_error,
+            absolute_error,
+            absolute_percentage_error_fraction,
+            observed_to_predicted_ratio,
+            optimistic_error_fraction,
+            bias,
+        });
+    }
+
+    let signed_errors = samples
+        .iter()
+        .map(|sample| sample.signed_error)
+        .collect::<Vec<_>>();
+    let absolute_errors = samples
+        .iter()
+        .map(|sample| sample.absolute_error)
+        .collect::<Vec<_>>();
+    let apes = samples
+        .iter()
+        .map(|sample| sample.absolute_percentage_error_fraction)
+        .collect::<Vec<_>>();
+    let ratios = samples
+        .iter()
+        .map(|sample| sample.observed_to_predicted_ratio)
+        .collect::<Vec<_>>();
+    let optimistic = samples
+        .iter()
+        .map(|sample| sample.optimistic_error_fraction)
+        .collect::<Vec<_>>();
+
+    let conservative_correction_ratio = if metric.lower_is_better() {
+        ratios
+            .iter()
+            .copied()
+            .max_by(f64::total_cmp)
+            .ok_or_else(|| "performance calibration contains no ratios".to_string())?
+    } else {
+        ratios
+            .iter()
+            .copied()
+            .min_by(f64::total_cmp)
+            .ok_or_else(|| "performance calibration contains no ratios".to_string())?
+    };
+
+    Ok(PerformanceMetricCalibrationSummary {
+        metric,
+        sample_count: samples.len(),
+        predicted_value,
+        observed_mean: mean(observed_values)?,
+        observed_stddev: sample_stddev(observed_values),
+        mean_signed_error: mean(&signed_errors)?,
+        mean_absolute_error: mean(&absolute_errors)?,
+        mean_absolute_percentage_error_fraction: mean(&apes)?,
+        mean_observed_to_predicted_ratio: mean(&ratios)?,
+        conservative_correction_ratio,
+        worst_optimistic_error_fraction: optimistic
+            .iter()
+            .copied()
+            .max_by(f64::total_cmp)
+            .unwrap_or(0.0),
+        samples,
+    })
+}
+
+fn percentile(values: &[f64], quantile: f64) -> Result<f64, String> {
+    if values.is_empty() {
+        return Err("cannot compute percentile over zero samples".into());
+    }
+    if !(0.0..=1.0).contains(&quantile) {
+        return Err("percentile quantile must be between zero and one".into());
+    }
+
+    let mut sorted = values.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    let rank = ((quantile * sorted.len() as f64).ceil() as usize)
+        .saturating_sub(1)
+        .min(sorted.len() - 1);
+    Ok(sorted[rank])
 }
 
 fn mean(values: &[f64]) -> Result<f64, String> {
@@ -357,6 +713,84 @@ mod tests {
         .unwrap_err();
 
         assert!(error.contains("contains no observed peak VRAM"));
+    }
+
+    fn performance_prediction() -> PerformancePredictionInput {
+        let reference = bundle("run-ref", "node-b:gpu0:vllm:SingleHost", Some(22.0));
+        PerformancePredictionInput {
+            plan_id: "node-b:gpu0:vllm:SingleHost".into(),
+            placement: PlacementKind::SingleHost,
+            execution_fingerprint: reference.request.identity.fingerprint(),
+            context_tokens: reference.request.context_tokens,
+            concurrency: reference.request.concurrency,
+            benchmark_config: reference.request.config.clone(),
+            predicted_p95_ttft_ms: Some(90.0),
+            predicted_mean_decode_tokens_per_second: Some(12.0),
+        }
+    }
+
+    #[test]
+    fn performance_calibration_reports_latency_and_decode_error() {
+        let summary = calibrate_plan_performance(
+            &performance_prediction(),
+            &[
+                bundle("run-1", "node-b:gpu0:vllm:SingleHost", Some(22.0)),
+                bundle("run-2", "node-b:gpu0:vllm:SingleHost", Some(24.0)),
+            ],
+        )
+        .unwrap();
+
+        let ttft = summary.p95_ttft_ms.unwrap();
+        assert_eq!(ttft.sample_count, 2);
+        assert_eq!(ttft.predicted_value, 90.0);
+        assert_eq!(ttft.observed_mean, 100.0);
+        assert_eq!(ttft.conservative_correction_ratio, 100.0 / 90.0);
+        assert!(ttft.worst_optimistic_error_fraction > 0.0);
+
+        let decode = summary.mean_decode_tokens_per_second.unwrap();
+        assert_eq!(decode.sample_count, 2);
+        assert_eq!(decode.predicted_value, 12.0);
+        assert!(decode.observed_mean > 9.9 && decode.observed_mean < 10.1);
+        assert!(decode.conservative_correction_ratio < 1.0);
+        assert!(decode.worst_optimistic_error_fraction > 0.0);
+    }
+
+    #[test]
+    fn performance_calibration_rejects_identity_drift() {
+        let mut prediction = performance_prediction();
+        prediction.execution_fingerprint = "different".into();
+
+        let error = calibrate_plan_performance(
+            &prediction,
+            &[bundle("run-1", "node-b:gpu0:vllm:SingleHost", Some(22.0))],
+        )
+        .unwrap_err();
+
+        assert!(error.contains("execution fingerprint"));
+    }
+
+    #[test]
+    fn performance_calibration_rejects_benchmark_config_drift() {
+        let mut prediction = performance_prediction();
+        prediction.benchmark_config.max_tokens = 128;
+
+        let error = calibrate_plan_performance(
+            &prediction,
+            &[bundle("run-1", "node-b:gpu0:vllm:SingleHost", Some(22.0))],
+        )
+        .unwrap_err();
+
+        assert!(error.contains("BenchmarkConfig"));
+    }
+
+    #[test]
+    fn performance_calibration_refuses_missing_decode_usage() {
+        let mut no_usage = bundle("run-1", "node-b:gpu0:vllm:SingleHost", Some(22.0));
+        no_usage.measurements[0].output_tokens = None;
+
+        let error = calibrate_plan_performance(&performance_prediction(), &[no_usage]).unwrap_err();
+
+        assert!(error.contains("cannot invent throughput"));
     }
 
     #[test]
