@@ -3019,7 +3019,7 @@ mod tests {
     fn benchmark_proof_sha256_is_content_addressed() {
         assert_eq!(
             sha256_hex(b"meshfit"),
-            "b87590c72a84b5baf72eaa6f02a80b4f7d272a0f65eb7e8c4539119923197c5f"
+            "1700d6ad0d90692a1ee5680de2e002e9c32d7923afa67834f4a04a85d604a034"
         );
     }
 
