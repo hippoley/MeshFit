@@ -2587,6 +2587,93 @@ mod tests {
         let _ = fs::remove_dir_all(dir);
     }
 
+    fn write_model_override_fixture(
+        dir: &Path,
+        model_bytes: &[u8],
+        override_bytes: &[u8],
+    ) -> (BenchmarkExecutionKit, PathBuf) {
+        let inputs = dir.join("inputs");
+        fs::create_dir_all(&inputs).unwrap();
+        let source = dir.join("source-model.bin");
+        let override_path = dir.join("host-model.bin");
+        fs::write(&source, model_bytes).unwrap();
+        fs::write(&override_path, override_bytes).unwrap();
+
+        let identity = inspect_model_artifact(
+            &source,
+            "benchmark-model",
+            "bin",
+            "test",
+            Some("fixture".into()),
+        )
+        .unwrap();
+        fs::write(
+            inputs.join("model-identity.yaml"),
+            serde_yaml::to_string(&identity).unwrap(),
+        )
+        .unwrap();
+
+        let mut kit = status_test_kit();
+        kit.model_identity = "inputs/model-identity.yaml".into();
+        (kit, override_path)
+    }
+
+    #[test]
+    fn model_path_override_is_verified_by_artifact_hash() {
+        let dir = status_test_dir("model-override-match");
+        fs::create_dir_all(&dir).unwrap();
+        let (kit, override_path) = write_model_override_fixture(&dir, b"same-model", b"same-model");
+
+        let check =
+            inspect_model_path_for_host(&dir, &kit, Some(override_path.to_str().unwrap())).unwrap();
+
+        assert_eq!(check.status, "local_override_verified");
+        assert!(Path::new(&check.path).is_absolute());
+        assert!(check.overridden);
+        assert!(check.verified);
+        assert!(check.issue.is_none());
+        assert!(check.warnings.is_empty());
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn model_path_override_rejects_hash_mismatch() {
+        let dir = status_test_dir("model-override-mismatch");
+        fs::create_dir_all(&dir).unwrap();
+        let (kit, override_path) =
+            write_model_override_fixture(&dir, b"expected-model", b"different-model");
+
+        let check =
+            inspect_model_path_for_host(&dir, &kit, Some(override_path.to_str().unwrap())).unwrap();
+
+        assert_eq!(check.status, "local_override_hash_mismatch");
+        assert!(check.overridden);
+        assert!(!check.verified);
+        assert!(check.issue.unwrap().contains("SHA-256"));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn executable_replacement_refuses_stale_backup() {
+        let dir = status_test_dir("executable-backup-guard");
+        fs::create_dir_all(&dir).unwrap();
+        let executable = dir.join("executable.yaml");
+        let temp = dir.join("executable.yaml.tmp");
+        let backup = PathBuf::from(format!("{}.meshfit-backup", executable.display()));
+        fs::write(&executable, "old").unwrap();
+        fs::write(&temp, "new").unwrap();
+        fs::write(&backup, "stale-backup").unwrap();
+
+        let error = commit_executable_artifact(&temp, &executable).unwrap_err();
+        assert!(error.contains("backup"));
+        assert_eq!(fs::read_to_string(&executable).unwrap(), "old");
+        assert_eq!(fs::read_to_string(&temp).unwrap(), "new");
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
     #[test]
     fn benchmark_preflight_rejects_unknown_candidate() {
         let dir = status_test_dir("preflight-missing-candidate");
