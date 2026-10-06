@@ -149,10 +149,12 @@ Add:
 - variance
 - prediction intervals
 - cost model
-- memory calibration
+- memory calibration contract and CLI: required-memory vs observed peak-VRAM error/correction ratios (synthetic CI verified; real GPU repeated calibration pending)
 - latency / throughput predictors
-- estimate-vs-observed reports
+- estimate-vs-observed reports — VRAM dimension implemented; TTFT/decode dimensions pending
 - carefully bounded cross-hardware transfer
+
+Calibration validation: CI runs #877 and #900 verified the strict VRAM calibration contract, CLI path, underprediction direction, conservative observed/predicted ratio, and compatibility with the evolving Benchmark 001 execution stack. These validations use synthetic fixtures; real GPU calibration remains pending.
 
 Principle:
 
