@@ -1,8 +1,8 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ir::{
-    AcceleratorBackend, AcceleratorIR, AcceleratorRefIR, ExclusionIR, FabricEndpointIR,
-    InfrastructureIR, ModelIR, PlacementKind, PlacementReport, PlanIR, RejectionIR, RuntimeIR,
+    AcceleratorBackend, AcceleratorIR, AcceleratorRefIR, ExclusionIR, InfrastructureIR, ModelIR,
+    PlacementKind, PlacementReport, PlanIR, RejectionIR, RuntimeIR,
     ScenarioIR,
 };
 
