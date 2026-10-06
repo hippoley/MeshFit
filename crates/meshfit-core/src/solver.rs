@@ -1,12 +1,12 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ir::{
-    AcceleratorBackend, AcceleratorIR, AcceleratorRefIR, ExclusionIR, InfrastructureIR, ModelIR,
-    PlacementKind, PlacementReport, PlanIR, RejectionIR, RuntimeIR, ScenarioIR, WorkloadIR,
+    AcceleratorBackend, AcceleratorIR, AcceleratorRefIR, CommunicationEstimateIR, ExclusionIR,
+    InfrastructureIR, ModelIR, PlacementKind, PlacementReport, PlanIR, RejectionIR, RuntimeIR,
+    ScenarioIR, WorkloadIR,
 };
 
-const CROSS_NODE_MAX_LATENCY_MS: f64 = 2.0;
-const CROSS_NODE_MIN_BANDWIDTH_GBPS: f64 = 50.0;
+const TP_EFFECTIVE_BANDWIDTH_FACTOR: f64 = 0.70;
 
 struct PlacementContext<'a> {
     model: &'a ModelIR,
@@ -116,6 +116,7 @@ fn enumerate_single_node(
                     relative_compute: accelerator.relative_compute,
                     hourly_cost_usd: node.hourly_cost_usd,
                     memory_headroom_gb: usable - required,
+                    communication: None,
                     assumptions: memory_assumptions(
                         context,
                         vec![
@@ -148,6 +149,7 @@ fn enumerate_single_node(
                         relative_compute: accelerator.relative_compute * 0.55,
                         hourly_cost_usd: node.hourly_cost_usd,
                         memory_headroom_gb: capacity - required,
+                        communication: None,
                         assumptions: memory_assumptions(
                             context,
                             vec![
@@ -316,6 +318,7 @@ fn enumerate_local_tp(
                 .map(|node| node.hourly_cost_usd)
                 .unwrap_or_default(),
             memory_headroom_gb: bottleneck_headroom,
+            communication: None,
             assumptions: memory_assumptions(
                 context,
                 vec![
@@ -372,23 +375,6 @@ fn enumerate_two_node_tp(
                 continue;
             };
 
-            if latency_ms > CROSS_NODE_MAX_LATENCY_MS
-                || bandwidth_gbps < CROSS_NODE_MIN_BANDWIDTH_GBPS
-            {
-                rejected.push(RejectionIR {
-                    candidate,
-                    code: "fabric_too_slow".into(),
-                    reason: format!(
-                        "cross-node TP gate requires <= {:.1}ms and >= {:.0}Gbps; measured {:.1}ms / {:.1}Gbps",
-                        CROSS_NODE_MAX_LATENCY_MS,
-                        CROSS_NODE_MIN_BANDWIDTH_GBPS,
-                        latency_ms,
-                        bandwidth_gbps
-                    ),
-                });
-                continue;
-            }
-
             let pair = best_cross_node_pair(a, b, model, runtime);
             let Some((accelerator_a, accelerator_b)) = pair else {
                 rejected.push(RejectionIR {
@@ -398,6 +384,49 @@ fn enumerate_two_node_tp(
                 });
                 continue;
             };
+
+            let Some(communication_profile) = &model.tp_communication_model else {
+                rejected.push(RejectionIR {
+                    candidate,
+                    code: "missing_tp_communication_profile".into(),
+                    reason: "cross-node TP requires an explicit model communication profile; MeshFit will not infer one silently".into(),
+                });
+                continue;
+            };
+
+            let Some(communication_budget_ms) =
+                context.workload.max_tp_communication_ms_per_token
+            else {
+                rejected.push(RejectionIR {
+                    candidate,
+                    code: "missing_tp_communication_budget".into(),
+                    reason: "cross-node TP requires a workload communication budget in ms/token before it can be admitted".into(),
+                });
+                continue;
+            };
+
+            let communication = estimate_tp_communication(
+                communication_profile,
+                2,
+                bandwidth_gbps,
+                latency_ms,
+                link.egress_cost_usd_per_gb,
+            );
+
+            if communication.total_ms_per_token > communication_budget_ms {
+                rejected.push(RejectionIR {
+                    candidate,
+                    code: "tp_communication_budget_exceeded".into(),
+                    reason: format!(
+                        "estimated TP communication tax is {:.3}ms/token, above the workload budget of {:.3}ms/token ({:.3}ms transfer + {:.3}ms synchronization)",
+                        communication.total_ms_per_token,
+                        communication_budget_ms,
+                        communication.transfer_ms_per_token,
+                        communication.synchronization_ms_per_token
+                    ),
+                });
+                continue;
+            }
 
             let memory = accelerator_a.usable_memory_gb() + accelerator_b.usable_memory_gb();
             let shard_required = required / 2.0;
@@ -465,6 +494,35 @@ fn enumerate_two_node_tp(
                 ),
             });
         }
+    }
+}
+
+fn estimate_tp_communication(
+    profile: &crate::ir::TpCommunicationModelIR,
+    tp_size: usize,
+    bandwidth_gbps: f64,
+    latency_ms: f64,
+    egress_cost_usd_per_gb: f64,
+) -> CommunicationEstimateIR {
+    let bytes_per_token = profile.bytes_per_token_for_tp_size(tp_size);
+    let synchronizations_per_token = profile.synchronizations_per_token();
+    let effective_bandwidth_gbps = bandwidth_gbps * TP_EFFECTIVE_BANDWIDTH_FACTOR;
+    let effective_bytes_per_second = effective_bandwidth_gbps * 1_000_000_000.0 / 8.0;
+    let transfer_ms_per_token = bytes_per_token / effective_bytes_per_second * 1000.0;
+    let synchronization_ms_per_token = latency_ms * synchronizations_per_token as f64;
+    let total_ms_per_token = transfer_ms_per_token + synchronization_ms_per_token;
+    let egress_cost_usd_per_million_tokens =
+        bytes_per_token * 1_000_000.0 / 1_000_000_000.0 * egress_cost_usd_per_gb;
+
+    CommunicationEstimateIR {
+        bytes_per_token,
+        effective_bandwidth_gbps,
+        transfer_ms_per_token,
+        synchronizations_per_token,
+        synchronization_ms_per_token,
+        total_ms_per_token,
+        egress_cost_usd_per_million_tokens,
+        confidence: "analytical_unvalidated".into(),
     }
 }
 
@@ -677,6 +735,10 @@ mod tests {
                 weight_memory_gb: 41.0,
                 kv_cache_gb: 5.0,
                 kv_cache_model: None,
+                tp_communication_model: Some(TpCommunicationModelIR::BytesPerToken {
+                    bytes_per_token: 1_000_000,
+                    synchronizations_per_token: 2,
+                }),
                 is_moe: false,
                 required_backends: vec![],
             },
@@ -708,6 +770,7 @@ mod tests {
                 context_tokens: 32768,
                 concurrency: 20,
                 max_active_sequences: None,
+                max_tp_communication_ms_per_token: Some(2.0),
                 p95_latency_ms: Some(2000),
                 budget_per_day_usd: Some(200.0),
             },
@@ -850,7 +913,7 @@ mod tests {
         assert!(report
             .rejected
             .iter()
-            .any(|rejection| rejection.code == "fabric_too_slow"));
+            .any(|rejection| rejection.code == "tp_communication_budget_exceeded"));
     }
 
     #[test]
