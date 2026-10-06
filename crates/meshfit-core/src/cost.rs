@@ -1,6 +1,6 @@
 use serde::{Deserialize, Serialize};
 
-use crate::ir::PlanIR;
+use crate::{benchmark::{BenchmarkBundle, BenchmarkConfig}, ir::PlanIR};
 
 #[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
 #[serde(rename_all = "snake_case")]
@@ -17,6 +17,45 @@ pub struct PlanCostEstimate {
     pub compute_cost_per_million_output_tokens_usd: f64,
     pub communication_egress_cost_per_million_tokens_usd: f64,
     pub total_declared_marginal_cost_per_million_output_tokens_usd: f64,
+    pub assumptions: Vec<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CostCalibrationSample {
+    pub benchmark_id: String,
+    pub observed_output_tokens_per_second: f64,
+    pub predicted_total_cost_per_million_output_tokens_usd: f64,
+    pub observed_compute_cost_per_million_output_tokens_usd: f64,
+    pub observed_total_cost_per_million_output_tokens_usd: f64,
+    pub signed_error_usd_per_million_output_tokens: f64,
+    pub absolute_error_usd_per_million_output_tokens: f64,
+    pub absolute_percentage_error_fraction: f64,
+    pub observed_to_predicted_ratio: f64,
+    pub underprediction_fraction: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CostCalibrationSummary {
+    pub plan_id: String,
+    pub execution_fingerprint: String,
+    pub context_tokens: u32,
+    pub concurrency: u32,
+    pub benchmark_config: BenchmarkConfig,
+    pub sample_count: usize,
+    pub predicted_output_tokens_per_second: f64,
+    pub predicted_total_cost_per_million_output_tokens_usd: f64,
+    pub communication_egress_cost_per_million_tokens_usd: f64,
+    pub communication_egress_is_modeled: bool,
+    pub observed_mean_output_tokens_per_second: f64,
+    #[serde(default)]
+    pub observed_stddev_output_tokens_per_second: Option<f64>,
+    pub observed_mean_total_cost_per_million_output_tokens_usd: f64,
+    pub mean_signed_error_usd_per_million_output_tokens: f64,
+    pub mean_absolute_error_usd_per_million_output_tokens: f64,
+    pub mean_absolute_percentage_error_fraction: f64,
+    pub conservative_observed_to_predicted_ratio: f64,
+    pub worst_underprediction_fraction: f64,
+    pub samples: Vec<CostCalibrationSample>,
     pub assumptions: Vec<String>,
 }
 
@@ -71,6 +110,247 @@ pub fn estimate_plan_cost(
                 + communication_egress_cost_per_million_tokens_usd,
         assumptions,
     })
+}
+
+pub fn calibrate_plan_cost(
+    plan: &PlanIR,
+    predicted_output_tokens_per_second: f64,
+    bundles: &[BenchmarkBundle],
+) -> Result<CostCalibrationSummary, String> {
+    if bundles.is_empty() {
+        return Err("cost calibration requires at least one benchmark bundle".into());
+    }
+
+    let prediction = estimate_plan_cost(plan, predicted_output_tokens_per_second)?;
+    if prediction.total_declared_marginal_cost_per_million_output_tokens_usd <= 0.0 {
+        return Err(
+            "cost calibration requires a non-zero declared marginal cost; zero-cost plans do not have a meaningful relative cost error"
+                .into(),
+        );
+    }
+
+    let anchor = &bundles[0];
+    anchor.validate()?;
+    validate_cost_bundle_plan(plan, anchor)?;
+
+    let execution_fingerprint = anchor.request.identity.fingerprint();
+    let context_tokens = anchor.request.context_tokens;
+    let concurrency = anchor.request.concurrency;
+    let benchmark_config = anchor.request.config.clone();
+
+    let mut samples = Vec::with_capacity(bundles.len());
+    for bundle in bundles {
+        bundle.validate()?;
+        validate_cost_bundle_plan(plan, bundle)?;
+
+        if bundle.request.identity.fingerprint() != execution_fingerprint {
+            return Err(format!(
+                "benchmark '{}' execution fingerprint differs from the calibration anchor",
+                bundle.benchmark_id
+            ));
+        }
+        if bundle.request.context_tokens != context_tokens {
+            return Err(format!(
+                "benchmark '{}' context differs from the calibration anchor",
+                bundle.benchmark_id
+            ));
+        }
+        if bundle.request.concurrency != concurrency {
+            return Err(format!(
+                "benchmark '{}' concurrency differs from the calibration anchor",
+                bundle.benchmark_id
+            ));
+        }
+        if bundle.request.config != benchmark_config {
+            return Err(format!(
+                "benchmark '{}' BenchmarkConfig differs from the calibration anchor",
+                bundle.benchmark_id
+            ));
+        }
+
+        let observed_output_tokens_per_second = observed_bundle_output_tokens_per_second(bundle)?;
+        let observed_compute_cost_per_million_output_tokens_usd = plan.hourly_cost_usd
+            / (observed_output_tokens_per_second * 3600.0)
+            * 1_000_000.0;
+        let observed_total_cost_per_million_output_tokens_usd =
+            observed_compute_cost_per_million_output_tokens_usd
+                + prediction.communication_egress_cost_per_million_tokens_usd;
+
+        if observed_total_cost_per_million_output_tokens_usd <= 0.0 {
+            return Err(format!(
+                "benchmark '{}' produces a non-positive declared marginal observed cost",
+                bundle.benchmark_id
+            ));
+        }
+
+        let predicted_total =
+            prediction.total_declared_marginal_cost_per_million_output_tokens_usd;
+        let signed_error =
+            predicted_total - observed_total_cost_per_million_output_tokens_usd;
+        let absolute_error = signed_error.abs();
+        let absolute_percentage_error_fraction =
+            absolute_error / observed_total_cost_per_million_output_tokens_usd;
+        let observed_to_predicted_ratio =
+            observed_total_cost_per_million_output_tokens_usd / predicted_total;
+        let underprediction_fraction =
+            ((observed_total_cost_per_million_output_tokens_usd - predicted_total)
+                / observed_total_cost_per_million_output_tokens_usd)
+                .max(0.0);
+
+        samples.push(CostCalibrationSample {
+            benchmark_id: bundle.benchmark_id.clone(),
+            observed_output_tokens_per_second,
+            predicted_total_cost_per_million_output_tokens_usd: predicted_total,
+            observed_compute_cost_per_million_output_tokens_usd,
+            observed_total_cost_per_million_output_tokens_usd,
+            signed_error_usd_per_million_output_tokens: signed_error,
+            absolute_error_usd_per_million_output_tokens: absolute_error,
+            absolute_percentage_error_fraction,
+            observed_to_predicted_ratio,
+            underprediction_fraction,
+        });
+    }
+
+    let throughputs = samples
+        .iter()
+        .map(|sample| sample.observed_output_tokens_per_second)
+        .collect::<Vec<_>>();
+    let observed_costs = samples
+        .iter()
+        .map(|sample| sample.observed_total_cost_per_million_output_tokens_usd)
+        .collect::<Vec<_>>();
+    let signed_errors = samples
+        .iter()
+        .map(|sample| sample.signed_error_usd_per_million_output_tokens)
+        .collect::<Vec<_>>();
+    let absolute_errors = samples
+        .iter()
+        .map(|sample| sample.absolute_error_usd_per_million_output_tokens)
+        .collect::<Vec<_>>();
+    let apes = samples
+        .iter()
+        .map(|sample| sample.absolute_percentage_error_fraction)
+        .collect::<Vec<_>>();
+    let ratios = samples
+        .iter()
+        .map(|sample| sample.observed_to_predicted_ratio)
+        .collect::<Vec<_>>();
+    let underprediction = samples
+        .iter()
+        .map(|sample| sample.underprediction_fraction)
+        .collect::<Vec<_>>();
+
+    let mut assumptions = prediction.assumptions.clone();
+    assumptions.push(
+        "observed compute cost is calibrated from measured wave output throughput".into(),
+    );
+    assumptions.push(
+        "communication egress remains modeled from PlanIR and is not an observed provider bill"
+            .into(),
+    );
+
+    Ok(CostCalibrationSummary {
+        plan_id: plan.id.clone(),
+        execution_fingerprint,
+        context_tokens,
+        concurrency,
+        benchmark_config,
+        sample_count: samples.len(),
+        predicted_output_tokens_per_second,
+        predicted_total_cost_per_million_output_tokens_usd: prediction
+            .total_declared_marginal_cost_per_million_output_tokens_usd,
+        communication_egress_cost_per_million_tokens_usd: prediction
+            .communication_egress_cost_per_million_tokens_usd,
+        communication_egress_is_modeled: true,
+        observed_mean_output_tokens_per_second: mean(&throughputs)?,
+        observed_stddev_output_tokens_per_second: sample_stddev(&throughputs),
+        observed_mean_total_cost_per_million_output_tokens_usd: mean(&observed_costs)?,
+        mean_signed_error_usd_per_million_output_tokens: mean(&signed_errors)?,
+        mean_absolute_error_usd_per_million_output_tokens: mean(&absolute_errors)?,
+        mean_absolute_percentage_error_fraction: mean(&apes)?,
+        conservative_observed_to_predicted_ratio: ratios
+            .iter()
+            .copied()
+            .max_by(f64::total_cmp)
+            .ok_or_else(|| "cost calibration contains no correction ratios".to_string())?,
+        worst_underprediction_fraction: underprediction
+            .iter()
+            .copied()
+            .max_by(f64::total_cmp)
+            .unwrap_or(0.0),
+        samples,
+        assumptions,
+    })
+}
+
+fn validate_cost_bundle_plan(plan: &PlanIR, bundle: &BenchmarkBundle) -> Result<(), String> {
+    if bundle.request.executable.source_plan_id != plan.id {
+        return Err(format!(
+            "benchmark '{}' belongs to plan '{}' instead of cost plan '{}'",
+            bundle.benchmark_id, bundle.request.executable.source_plan_id, plan.id
+        ));
+    }
+    if bundle.request.executable.placement != plan.placement {
+        return Err(format!(
+            "benchmark '{}' placement {:?} does not match cost plan placement {:?}",
+            bundle.benchmark_id, bundle.request.executable.placement, plan.placement
+        ));
+    }
+    if bundle.request.executable.runtime != plan.runtime {
+        return Err(format!(
+            "benchmark '{}' runtime '{}' does not match cost plan runtime '{}'",
+            bundle.benchmark_id, bundle.request.executable.runtime, plan.runtime
+        ));
+    }
+    Ok(())
+}
+
+fn observed_bundle_output_tokens_per_second(bundle: &BenchmarkBundle) -> Result<f64, String> {
+    let mut output_tokens = 0_u64;
+    let mut total_seconds = 0.0;
+
+    for wave in &bundle.waves {
+        let tokens = wave.output_tokens.ok_or_else(|| {
+            format!(
+                "benchmark '{}' wave lacks output token usage; cost calibration cannot invent observed throughput",
+                bundle.benchmark_id
+            )
+        })?;
+        output_tokens += u64::from(tokens);
+        total_seconds += wave.total_ms / 1000.0;
+    }
+
+    if output_tokens == 0 || total_seconds <= 0.0 {
+        return Err(format!(
+            "benchmark '{}' has no positive wave throughput for cost calibration",
+            bundle.benchmark_id
+        ));
+    }
+
+    Ok(output_tokens as f64 / total_seconds)
+}
+
+fn mean(values: &[f64]) -> Result<f64, String> {
+    if values.is_empty() {
+        return Err("cannot compute mean over zero cost calibration samples".into());
+    }
+    Ok(values.iter().sum::<f64>() / values.len() as f64)
+}
+
+fn sample_stddev(values: &[f64]) -> Option<f64> {
+    if values.len() < 2 {
+        return None;
+    }
+    let mean = values.iter().sum::<f64>() / values.len() as f64;
+    let variance = values
+        .iter()
+        .map(|value| {
+            let delta = value - mean;
+            delta * delta
+        })
+        .sum::<f64>()
+        / (values.len() - 1) as f64;
+    Some(variance.sqrt())
 }
 
 #[cfg(test)]
