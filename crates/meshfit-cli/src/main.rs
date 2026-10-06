@@ -1,12 +1,32 @@
 use std::{env, fs, path::Path, process};
 
+use serde::Deserialize;
+
 use meshfit_core::{
-    compile_plan, discover_local, discover_runtimes, inspect_model_artifact,
+    compare_benchmarks, compile_plan, discover_local, discover_runtimes, inspect_model_artifact,
     prepare_local_benchmark_request, probe_peer, run_local_benchmark, solve, BenchmarkBundle,
-    BenchmarkConfig, BenchmarkRequestIR, CompileRequest, EvidenceStore, ExecutablePlanIR,
-    InfrastructureSnapshot, LinkKind, LocalDiscovery, ModelArtifactIdentity, PeerProbeResult,
-    PlacementReport, PlacementTargetIR, Prediction, PredictionQuery, ScenarioIR, SnapshotManifest,
+    BenchmarkCandidate, BenchmarkComparisonRequest, BenchmarkConfig, BenchmarkRequestIR,
+    ComparisonObjective, CompileRequest, EvidenceStore, ExecutablePlanIR, InfrastructureSnapshot,
+    LinkKind, LocalDiscovery, ModelArtifactIdentity, PeerProbeResult, PlacementReport,
+    PlacementTargetIR, Prediction, PredictionQuery, ScenarioIR, SnapshotManifest,
 };
+
+#[derive(Debug, Deserialize)]
+struct BenchmarkComparisonManifest {
+    benchmark_id: String,
+    meshfit_candidate: String,
+    objective: ComparisonObjective,
+    candidates: Vec<BenchmarkCandidateManifest>,
+}
+
+#[derive(Debug, Deserialize)]
+struct BenchmarkCandidateManifest {
+    name: String,
+    strategy: String,
+    #[serde(default)]
+    hourly_cost_usd: Option<f64>,
+    bundles: Vec<String>,
+}
 
 fn main() {
     if let Err(err) = run() {
@@ -204,6 +224,60 @@ fn run() -> Result<(), String> {
             let bundle = run_local_benchmark(request)?;
             let yaml = serde_yaml::to_string(&bundle).map_err(|e| e.to_string())?;
             print!("{yaml}");
+        }
+        "compare-benchmarks" => {
+            let manifest_path = args.get(2).ok_or_else(|| {
+                "usage: meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]"
+                    .to_string()
+            })?;
+            let raw = fs::read_to_string(manifest_path)
+                .map_err(|e| format!("read {manifest_path}: {e}"))?;
+            let manifest: BenchmarkComparisonManifest =
+                serde_yaml::from_str(&raw).map_err(|e| format!("parse {manifest_path}: {e}"))?;
+            let base_dir = Path::new(manifest_path)
+                .parent()
+                .unwrap_or_else(|| Path::new("."));
+
+            let mut candidates = Vec::new();
+            for candidate in manifest.candidates {
+                let mut bundles = Vec::new();
+                for bundle_file in candidate.bundles {
+                    let path = base_dir.join(&bundle_file);
+                    let bundle_raw = fs::read_to_string(&path)
+                        .map_err(|e| format!("read {}: {e}", path.display()))?;
+                    let bundle: BenchmarkBundle = serde_yaml::from_str(&bundle_raw)
+                        .map_err(|e| format!("parse {}: {e}", path.display()))?;
+                    bundles.push(bundle);
+                }
+
+                candidates.push(BenchmarkCandidate {
+                    name: candidate.name,
+                    strategy: candidate.strategy,
+                    hourly_cost_usd: candidate.hourly_cost_usd,
+                    bundles,
+                });
+            }
+
+            let report = compare_benchmarks(&BenchmarkComparisonRequest {
+                benchmark_id: manifest.benchmark_id,
+                meshfit_candidate: manifest.meshfit_candidate,
+                objective: manifest.objective,
+                candidates,
+            })?;
+
+            if args.iter().any(|arg| arg == "--require-publishable") && !report.publishable {
+                return Err(format!(
+                    "Benchmark 001 evidence is not publishable: {}",
+                    report.evidence_status
+                ));
+            }
+
+            if args.iter().any(|arg| arg == "--markdown") {
+                print!("{}", report.to_markdown());
+            } else {
+                let yaml = serde_yaml::to_string(&report).map_err(|e| e.to_string())?;
+                print!("{yaml}");
+            }
         }
         "evidence-from-benchmark" => {
             let bundle_path = args.get(2).ok_or_else(|| {
@@ -444,6 +518,6 @@ fn print_prediction(prediction: &Prediction) {
 
 fn print_help() {
     println!(
-        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
+        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
     );
 }
