@@ -410,7 +410,10 @@ mod tests {
         })
         .unwrap();
 
-        assert!(executable.args.windows(2).any(|pair| pair == ["--device", "CUDA1"]));
+        assert!(executable
+            .args
+            .windows(2)
+            .any(|pair| pair == ["--device", "CUDA1"]));
     }
 
     #[test]
@@ -441,10 +444,7 @@ mod tests {
                 "vllm",
                 PlacementKind::TensorParallel,
                 vec!["node-a"],
-                vec![
-                    accelerator("node-a", "gpu0"),
-                    accelerator("node-a", "gpu2"),
-                ],
+                vec![accelerator("node-a", "gpu0"), accelerator("node-a", "gpu2")],
             ),
             model_path: "Qwen/Qwen3-32B".into(),
             model_id: "qwen3-32b".into(),
@@ -472,10 +472,7 @@ mod tests {
                 "vllm",
                 PlacementKind::TensorParallel,
                 vec!["node-a", "node-b"],
-                vec![
-                    accelerator("node-a", "gpu0"),
-                    accelerator("node-b", "gpu0"),
-                ],
+                vec![accelerator("node-a", "gpu0"), accelerator("node-b", "gpu0")],
             ),
             model_path: "Qwen/Qwen3-32B".into(),
             model_id: "qwen3-32b".into(),
