@@ -47,6 +47,48 @@ struct BenchmarkPlanCandidate {
     hourly_cost_usd: f64,
 }
 
+#[derive(Debug, Serialize)]
+struct BenchmarkExecutionKit {
+    benchmark_id: String,
+    snapshot: String,
+    target: String,
+    model_path: String,
+    model_identity: String,
+    concurrency: u32,
+    measured_requests_per_run: u32,
+    runs_per_candidate: u32,
+    candidates: Vec<BenchmarkExecutionCandidate>,
+    comparison_manifest: BenchmarkExecutionComparison,
+    warnings: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct BenchmarkExecutionCandidate {
+    name: String,
+    plan_id: String,
+    nodes: Vec<String>,
+    result_dir: String,
+    executable_path: String,
+    compile_command: String,
+    run_commands: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct BenchmarkExecutionComparison {
+    benchmark_id: String,
+    meshfit_candidate: String,
+    objective: String,
+    candidates: Vec<BenchmarkExecutionComparisonCandidate>,
+}
+
+#[derive(Debug, Serialize)]
+struct BenchmarkExecutionComparisonCandidate {
+    name: String,
+    strategy: String,
+    hourly_cost_usd: f64,
+    bundles: Vec<String>,
+}
+
 fn main() {
     if let Err(err) = run() {
         eprintln!("meshfit: {err}");
@@ -281,59 +323,16 @@ fn run() -> Result<(), String> {
                     .clone()
                     .into_scenario(snapshot.infrastructure.clone()),
             );
-            let meshfit = report
-                .feasible
-                .iter()
-                .find(|plan| &plan.id == meshfit_plan_id)
-                .cloned()
-                .ok_or_else(|| format!("meshfit plan-id '{meshfit_plan_id}' is not feasible"))?;
-
-            let single_best = report
-                .feasible
-                .iter()
-                .filter(|plan| plan.nodes.len() == 1)
-                .max_by(|left, right| baseline_plan_order(left, right))
-                .cloned()
-                .ok_or_else(|| "no feasible single-node baseline plan".to_string())?;
-
-            let max_compute = report
-                .feasible
-                .iter()
-                .max_by(|left, right| baseline_plan_order(left, right))
-                .cloned()
-                .ok_or_else(|| "no feasible max-compute baseline plan".to_string())?;
-
-            let mut warnings = Vec::new();
-            let unique_ids = std::collections::HashSet::from([
-                single_best.id.as_str(),
-                max_compute.id.as_str(),
-                meshfit.id.as_str(),
-            ]);
-            if unique_ids.len() != 3 {
-                warnings.push(
-                    "Benchmark 001 candidate plans overlap. A publishable comparison requires three distinct plan IDs; use a cluster/model workload with discriminating alternatives."
-                        .to_string(),
-                );
-            }
+            let selected = select_benchmark_plans(&report, meshfit_plan_id)?;
+            let warnings = benchmark_plan_warnings(&selected);
 
             let set = BenchmarkPlanSet {
-                candidates: vec![
-                    benchmark_plan_candidate(
-                        "single-best-node",
-                        "highest relative compute among feasible single-node plans",
-                        single_best,
-                    ),
-                    benchmark_plan_candidate(
-                        "max-aggregate-compute",
-                        "highest relative compute among all structurally feasible plans",
-                        max_compute,
-                    ),
-                    benchmark_plan_candidate(
-                        "meshfit",
-                        "explicit MeshFit-selected plan supplied by plan ID",
-                        meshfit,
-                    ),
-                ],
+                candidates: selected
+                    .into_iter()
+                    .map(|(name, strategy, plan)| {
+                        benchmark_plan_candidate(name, strategy, plan)
+                    })
+                    .collect(),
                 warnings,
             };
 
@@ -346,6 +345,113 @@ fn run() -> Result<(), String> {
             }
 
             let yaml = serde_yaml::to_string(&set).map_err(|e| e.to_string())?;
+            print!("{yaml}");
+        }
+        "benchmark-kit" => {
+            let snapshot_path = args.get(2).ok_or_else(|| {
+                "usage: meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml>"
+                    .to_string()
+            })?;
+            let target_path = args
+                .get(3)
+                .ok_or_else(|| "missing target.yaml".to_string())?;
+            let meshfit_plan_id = args
+                .get(4)
+                .ok_or_else(|| "missing meshfit-plan-id".to_string())?;
+            let model_path = args
+                .get(5)
+                .ok_or_else(|| "missing model-path".to_string())?;
+            let model_identity_path = args
+                .get(6)
+                .ok_or_else(|| "missing model-identity.yaml".to_string())?;
+
+            let snapshot_raw = fs::read_to_string(snapshot_path)
+                .map_err(|e| format!("read {snapshot_path}: {e}"))?;
+            let target_raw =
+                fs::read_to_string(target_path).map_err(|e| format!("read {target_path}: {e}"))?;
+            let snapshot: InfrastructureSnapshot = serde_yaml::from_str(&snapshot_raw)
+                .map_err(|e| format!("parse {snapshot_path}: {e}"))?;
+            let target: PlacementTargetIR = serde_yaml::from_str(&target_raw)
+                .map_err(|e| format!("parse {target_path}: {e}"))?;
+
+            let report = solve(
+                &target
+                    .clone()
+                    .into_scenario(snapshot.infrastructure.clone()),
+            );
+            let selected = select_benchmark_plans(&report, meshfit_plan_id)?;
+            let warnings = benchmark_plan_warnings(&selected);
+
+            let concurrency = target.workload.concurrency;
+            let measured_requests_per_run = default_measured_requests(concurrency);
+            let benchmark_id = "benchmark-001".to_string();
+            let runs_per_candidate = 2_u32;
+
+            let mut execution_candidates = Vec::new();
+            let mut comparison_candidates = Vec::new();
+
+            for (name, strategy, plan) in selected {
+                let result_dir = format!("results/{name}");
+                let executable_path = format!("artifacts/{name}/executable.yaml");
+                let compile_command = format!(
+                    "meshfit compile-snapshot {} {} {} {} > {}",
+                    snapshot_path, target_path, plan.id, model_path, executable_path
+                );
+                let bundles = (1..=runs_per_candidate)
+                    .map(|run| format!("{result_dir}/run-{run:02}.yaml"))
+                    .collect::<Vec<_>>();
+                let run_commands = bundles
+                    .iter()
+                    .map(|bundle| {
+                        format!(
+                            "meshfit benchmark-auto {} {} --concurrency {} --measured-requests {} > {}",
+                            executable_path,
+                            model_identity_path,
+                            concurrency,
+                            measured_requests_per_run,
+                            bundle
+                        )
+                    })
+                    .collect::<Vec<_>>();
+
+                execution_candidates.push(BenchmarkExecutionCandidate {
+                    name: name.to_string(),
+                    plan_id: plan.id.clone(),
+                    nodes: plan.nodes.clone(),
+                    result_dir,
+                    executable_path,
+                    compile_command,
+                    run_commands,
+                });
+
+                comparison_candidates.push(BenchmarkExecutionComparisonCandidate {
+                    name: name.to_string(),
+                    strategy: strategy.to_string(),
+                    hourly_cost_usd: plan.hourly_cost_usd,
+                    bundles,
+                });
+            }
+
+            let kit = BenchmarkExecutionKit {
+                benchmark_id: benchmark_id.clone(),
+                snapshot: snapshot_path.clone(),
+                target: target_path.clone(),
+                model_path: model_path.clone(),
+                model_identity: model_identity_path.clone(),
+                concurrency,
+                measured_requests_per_run,
+                runs_per_candidate,
+                candidates: execution_candidates,
+                comparison_manifest: BenchmarkExecutionComparison {
+                    benchmark_id,
+                    meshfit_candidate: "meshfit".to_string(),
+                    objective: "p95_ttft_ms".to_string(),
+                    candidates: comparison_candidates,
+                },
+                warnings,
+            };
+
+            let yaml = serde_yaml::to_string(&kit).map_err(|e| e.to_string())?;
             print!("{yaml}");
         }
         "compare-benchmarks" => {
@@ -544,6 +650,78 @@ fn default_measured_requests(concurrency: u32) -> u32 {
     waves.max(1).saturating_mul(concurrency)
 }
 
+fn select_benchmark_plans(
+    report: &PlacementReport,
+    meshfit_plan_id: &str,
+) -> Result<Vec<(&'static str, &'static str, PlanIR)>, String> {
+    let meshfit = report
+        .feasible
+        .iter()
+        .find(|plan| plan.id == meshfit_plan_id)
+        .cloned()
+        .ok_or_else(|| format!("meshfit plan-id '{meshfit_plan_id}' is not feasible"))?;
+
+    let single_best = report
+        .feasible
+        .iter()
+        .filter(|plan| plan.nodes.len() == 1)
+        .max_by(|left, right| baseline_plan_order(left, right))
+        .cloned()
+        .ok_or_else(|| "no feasible single-node baseline plan".to_string())?;
+
+    let max_compute = report
+        .feasible
+        .iter()
+        .max_by(|left, right| baseline_plan_order(left, right))
+        .cloned()
+        .ok_or_else(|| "no feasible max-compute baseline plan".to_string())?;
+
+    let unique_ids = std::collections::HashSet::from([
+        single_best.id.as_str(),
+        max_compute.id.as_str(),
+        meshfit.id.as_str(),
+    ]);
+
+    let selected = vec![
+        (
+            "single-best-node",
+            "highest relative compute among feasible single-node plans",
+            single_best,
+        ),
+        (
+            "max-aggregate-compute",
+            "highest relative compute among all structurally feasible plans",
+            max_compute,
+        ),
+        (
+            "meshfit",
+            "explicit MeshFit-selected plan supplied by plan ID",
+            meshfit,
+        ),
+    ];
+
+    if unique_ids.len() != 3 {
+        return Ok(selected);
+    }
+
+    Ok(selected)
+}
+
+fn benchmark_plan_warnings(selected: &[(&str, &str, PlanIR)]) -> Vec<String> {
+    let unique_ids = selected
+        .iter()
+        .map(|(_, _, plan)| plan.id.as_str())
+        .collect::<std::collections::HashSet<_>>();
+    if unique_ids.len() == selected.len() {
+        Vec::new()
+    } else {
+        vec![
+            "Benchmark 001 candidate plans overlap. A publishable comparison requires three distinct plan IDs; use a cluster/model workload with discriminating alternatives."
+                .to_string(),
+        ]
+    }
+}
+
 fn baseline_plan_order(left: &PlanIR, right: &PlanIR) -> std::cmp::Ordering {
     left.relative_compute
         .total_cmp(&right.relative_compute)
@@ -668,7 +846,7 @@ fn print_prediction(prediction: &Prediction) {
 
 fn print_help() {
     println!(
-        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
+        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml>\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
     );
 }
 
