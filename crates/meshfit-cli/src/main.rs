@@ -1195,10 +1195,7 @@ fn load_benchmark_execution_kit(kit_dir: &Path) -> Result<BenchmarkExecutionKit,
     serde_yaml::from_str(&raw).map_err(|e| format!("parse {}: {e}", kit_path.display()))
 }
 
-fn executable_matches_model_path(
-    executable_path: &Path,
-    model_path: &str,
-) -> Result<bool, String> {
+fn executable_matches_model_path(executable_path: &Path, model_path: &str) -> Result<bool, String> {
     if !executable_path.is_file() {
         return Ok(false);
     }
@@ -1293,9 +1290,8 @@ fn inspect_model_path_for_host(
         ));
     }
 
-    let model_is_explicit_local = path.is_absolute()
-        || effective_path.starts_with("./")
-        || effective_path.starts_with("../");
+    let model_is_explicit_local =
+        path.is_absolute() || effective_path.starts_with("./") || effective_path.starts_with("../");
     if path.is_file() {
         return Ok((
             effective_path,
@@ -1333,10 +1329,7 @@ fn inspect_model_path_for_host(
     ))
 }
 
-fn commit_executable_artifact(
-    temp_path: &Path,
-    executable_path: &Path,
-) -> Result<(), String> {
+fn commit_executable_artifact(temp_path: &Path, executable_path: &Path) -> Result<(), String> {
     if !executable_path.exists() {
         return fs::rename(temp_path, executable_path).map_err(|e| {
             format!(
@@ -2383,8 +2376,7 @@ mod tests {
     fn model_path_override_is_verified_by_artifact_hash() {
         let dir = status_test_dir("model-override-match");
         fs::create_dir_all(&dir).unwrap();
-        let (kit, override_path) =
-            write_model_override_fixture(&dir, b"same-model", b"same-model");
+        let (kit, override_path) = write_model_override_fixture(&dir, b"same-model", b"same-model");
 
         let (path, status, overridden, verified, issue, warnings) =
             inspect_model_path_for_host(&dir, &kit, Some(override_path.to_str().unwrap())).unwrap();
@@ -2446,8 +2438,9 @@ mod tests {
         )
         .unwrap();
 
-        let error = inspect_benchmark_preflight(&dir, "not-a-candidate", Some("node-a"), None, false)
-            .unwrap_err();
+        let error =
+            inspect_benchmark_preflight(&dir, "not-a-candidate", Some("node-a"), None, false)
+                .unwrap_err();
         assert!(error.contains("not present in kit.yaml"));
 
         let _ = fs::remove_dir_all(dir);
