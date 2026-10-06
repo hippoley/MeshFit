@@ -551,7 +551,7 @@ mod tests {
     use super::*;
 
     #[test]
-    fn one_bundle_is_not_publishable() {
+    fn empty_candidate_is_not_publishable() {
         let candidate = BenchmarkCandidate {
             name: "meshfit".into(),
             strategy: "test".into(),
@@ -560,7 +560,7 @@ mod tests {
         };
         let (publishable, status) = evidence_qualification(&[candidate]);
         assert!(!publishable);
-        assert!(status.contains("requires at least 2"));
+        assert!(status.contains("contains no benchmark bundles"));
     }
 
     #[test]
