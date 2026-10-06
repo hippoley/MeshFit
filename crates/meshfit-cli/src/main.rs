@@ -1318,6 +1318,117 @@ fn plan_benchmark_candidate_runs(
     })
 }
 
+fn plan_benchmark_host_runs(
+    kit_dir: &Path,
+    host: &str,
+    resume: bool,
+    overwrite: bool,
+) -> Result<BenchmarkRunHostPlan, String> {
+    let kit = load_benchmark_execution_kit(kit_dir)?;
+    let assigned = kit
+        .candidates
+        .iter()
+        .filter(|candidate| candidate.benchmark_host == host)
+        .map(|candidate| candidate.name.clone())
+        .collect::<Vec<_>>();
+
+    if assigned.is_empty() {
+        return Err(format!(
+            "benchmark host '{host}' has no assigned candidates in this kit"
+        ));
+    }
+
+    let mut issues = Vec::new();
+    let mut candidates = Vec::new();
+
+    for candidate_name in assigned {
+        match plan_benchmark_candidate_runs(
+            kit_dir,
+            &candidate_name,
+            Some(host),
+            resume,
+            overwrite,
+        ) {
+            Ok(plan) => {
+                if !plan.preflight_ready {
+                    if plan.preflight_issues.is_empty() {
+                        issues.push(format!(
+                            "candidate '{}' is not preflight-ready",
+                            candidate_name
+                        ));
+                    } else {
+                        for issue in &plan.preflight_issues {
+                            issues.push(format!("candidate '{}': {issue}", candidate_name));
+                        }
+                    }
+                }
+                candidates.push(plan);
+            }
+            Err(error) => {
+                issues.push(format!("candidate '{}': {error}", candidate_name));
+            }
+        }
+    }
+
+    Ok(BenchmarkRunHostPlan {
+        benchmark_id: kit.benchmark_id,
+        host: host.to_string(),
+        ready: issues.is_empty(),
+        issues,
+        resume,
+        overwrite,
+        candidates,
+    })
+}
+
+fn execute_benchmark_host_plan(
+    kit_dir: &Path,
+    plan: &BenchmarkRunHostPlan,
+) -> Result<(usize, usize), String> {
+    if !plan.ready {
+        return Err(format!(
+            "Benchmark 001 host preflight failed for '{}': {}",
+            plan.host,
+            if plan.issues.is_empty() {
+                "unknown host preflight failure".to_string()
+            } else {
+                plan.issues.join(" ")
+            }
+        ));
+    }
+
+    for candidate_plan in &plan.candidates {
+        for run_number in &candidate_plan.pending_runs {
+            execute_benchmark_run_one(
+                kit_dir,
+                &candidate_plan.candidate,
+                *run_number,
+                Some(plan.host.as_str()),
+                plan.overwrite,
+            )?;
+        }
+    }
+
+    let worklist = inspect_benchmark_worklist(kit_dir, Some(&plan.host), false)?;
+    if worklist.valid_slots != worklist.total_slots
+        || worklist.pending_slots != 0
+        || worklist.locked_slots != 0
+        || worklist.invalid_slots != 0
+    {
+        return Err(format!(
+            "host '{}' remains incomplete after execution: {}/{} valid slots, {} pending, {} locked, {} invalid",
+            plan.host,
+            worklist.valid_slots,
+            worklist.total_slots,
+            worklist.pending_slots,
+            worklist.locked_slots,
+            worklist.invalid_slots
+        ));
+    }
+
+    Ok((worklist.valid_slots, worklist.total_slots))
+}
+
 fn execute_benchmark_run_one(
     kit_dir: &Path,
     candidate_name: &str,
@@ -1691,9 +1802,10 @@ fn inspect_benchmark_worklist(
             }
 
             let command = format!(
-                "meshfit benchmark-run-one . {} {}",
+                "meshfit benchmark-run-one . {} {} --host {}",
                 shell_quote(&candidate.name),
-                run_number
+                run_number,
+                shell_quote(&candidate.benchmark_host)
             );
             host.slots.push(BenchmarkWorkSlot {
                 candidate: candidate.name.clone(),
