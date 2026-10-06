@@ -69,7 +69,11 @@ struct BenchmarkExecutionCandidate {
     nodes: Vec<String>,
     result_dir: String,
     executable_path: String,
-    compile_command: String,
+    compile_ready: bool,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    compile_error: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    compile_command: Option<String>,
     run_commands: Vec<String>,
 }
 
@@ -318,6 +322,19 @@ fn run() -> Result<(), String> {
             let target: PlacementTargetIR = serde_yaml::from_str(&target_raw)
                 .map_err(|e| format!("parse {target_path}: {e}"))?;
 
+            if model_identity.model_id != target.model.id {
+                return Err(format!(
+                    "model identity '{}' does not match target model '{}'",
+                    model_identity.model_id, target.model.id
+                ));
+            }
+            if model_identity.artifact_sha256.is_none() && model_identity.revision.is_none() {
+                return Err(
+                    "model identity must include artifact_sha256 or revision for Benchmark 001"
+                        .to_string(),
+                );
+            }
+
             let report = solve(
                 &target
                     .clone()
@@ -365,6 +382,11 @@ fn run() -> Result<(), String> {
                 .get(6)
                 .ok_or_else(|| "missing model-identity.yaml".to_string())?;
 
+            let model_identity_raw = fs::read_to_string(model_identity_path)
+                .map_err(|e| format!("read {model_identity_path}: {e}"))?;
+            let model_identity: ModelArtifactIdentity = serde_yaml::from_str(&model_identity_raw)
+                .map_err(|e| format!("parse {model_identity_path}: {e}"))?;
+
             let snapshot_raw = fs::read_to_string(snapshot_path)
                 .map_err(|e| format!("read {snapshot_path}: {e}"))?;
             let target_raw =
@@ -380,7 +402,7 @@ fn run() -> Result<(), String> {
                     .into_scenario(snapshot.infrastructure.clone()),
             );
             let selected = select_benchmark_plans(&report, meshfit_plan_id)?;
-            let warnings = benchmark_plan_warnings(&selected);
+            let mut warnings = benchmark_plan_warnings(&selected);
 
             let concurrency = target.workload.concurrency;
             let measured_requests_per_run = default_measured_requests(concurrency);
@@ -393,26 +415,56 @@ fn run() -> Result<(), String> {
             for (name, strategy, plan) in selected {
                 let result_dir = format!("results/{name}");
                 let executable_path = format!("artifacts/{name}/executable.yaml");
-                let compile_command = format!(
-                    "meshfit compile-snapshot {} {} {} {} > {}",
-                    snapshot_path, target_path, plan.id, model_path, executable_path
-                );
                 let bundles = (1..=runs_per_candidate)
                     .map(|run| format!("{result_dir}/run-{run:02}.yaml"))
                     .collect::<Vec<_>>();
-                let run_commands = bundles
-                    .iter()
-                    .map(|bundle| {
-                        format!(
-                            "meshfit benchmark-auto {} {} --concurrency {} --measured-requests {} > {}",
-                            executable_path,
-                            model_identity_path,
-                            concurrency,
-                            measured_requests_per_run,
-                            bundle
-                        )
-                    })
-                    .collect::<Vec<_>>();
+
+                let compile_request = CompileRequest {
+                    plan: plan.clone(),
+                    model_path: model_path.clone(),
+                    model_id: target.model.id.clone(),
+                    context_tokens: target.workload.context_tokens,
+                    listen_port: 18080,
+                    gpu_layers: None,
+                    extra_args: vec![],
+                };
+                let compile_result = compile_plan(&compile_request);
+
+                let (compile_ready, compile_error, compile_command, run_commands) =
+                    match compile_result {
+                        Ok(_) => {
+                            let compile_command = format!(
+                                "mkdir -p artifacts/{name} {result_dir} && meshfit compile-snapshot {} {} {} {} > {}",
+                                snapshot_path,
+                                target_path,
+                                plan.id,
+                                model_path,
+                                executable_path
+                            );
+                            let run_commands = bundles
+                                .iter()
+                                .map(|bundle| {
+                                    format!(
+                                        "meshfit benchmark-auto {} {} --concurrency {} --measured-requests {} > {}",
+                                        executable_path,
+                                        model_identity_path,
+                                        concurrency,
+                                        measured_requests_per_run,
+                                        bundle
+                                    )
+                                })
+                                .collect::<Vec<_>>();
+                            (true, None, Some(compile_command), run_commands)
+                        }
+                        Err(error) => {
+                            let message = error.to_string();
+                            warnings.push(format!(
+                                "candidate '{name}' plan '{}' is not compile-ready: {message}",
+                                plan.id
+                            ));
+                            (false, Some(message), None, Vec::new())
+                        }
+                    };
 
                 execution_candidates.push(BenchmarkExecutionCandidate {
                     name: name.to_string(),
@@ -420,6 +472,8 @@ fn run() -> Result<(), String> {
                     nodes: plan.nodes.clone(),
                     result_dir,
                     executable_path,
+                    compile_ready,
+                    compile_error,
                     compile_command,
                     run_commands,
                 });
@@ -676,12 +730,6 @@ fn select_benchmark_plans(
         .cloned()
         .ok_or_else(|| "no feasible max-compute baseline plan".to_string())?;
 
-    let unique_ids = std::collections::HashSet::from([
-        single_best.id.as_str(),
-        max_compute.id.as_str(),
-        meshfit.id.as_str(),
-    ]);
-
     let selected = vec![
         (
             "single-best-node",
@@ -699,10 +747,6 @@ fn select_benchmark_plans(
             meshfit,
         ),
     ];
-
-    if unique_ids.len() != 3 {
-        return Ok(selected);
-    }
 
     Ok(selected)
 }
