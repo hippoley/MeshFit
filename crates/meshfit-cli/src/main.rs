@@ -1182,9 +1182,6 @@ fn inspect_benchmark_run_one_plan(
     model_path_override: Option<&str>,
 ) -> Result<BenchmarkRunOnePlan, String> {
     let kit = load_benchmark_execution_kit(kit_dir)?;
-    if !kit.ready {
-        return Err("Benchmark 001 execution kit is not ready; refusing real benchmark run".into());
-    }
     let candidate = kit
         .candidates
         .iter()
@@ -1346,6 +1343,9 @@ fn execute_benchmark_run_one_prevalidated(
     overwrite: bool,
 ) -> Result<PathBuf, String> {
     let kit = load_benchmark_execution_kit(kit_dir)?;
+    if !kit.ready {
+        return Err("Benchmark 001 execution kit is not ready; refusing real benchmark run".into());
+    }
     let candidate = kit
         .candidates
         .iter()
