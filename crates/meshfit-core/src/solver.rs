@@ -219,19 +219,31 @@ fn enumerate_local_tp(
                 .then_with(|| a.id.cmp(&b.id))
         });
 
-        let mut selected = Vec::new();
-        let mut memory = 0.0;
-        for accelerator in accelerators {
-            selected.push(accelerator);
-            memory += accelerator.usable_memory_gb();
-            if memory >= required {
-                break;
-            }
-        }
+        let selected = (2..=accelerators.len()).find_map(|count| {
+            let shard_required = required / count as f64;
+            let candidate = &accelerators[..count];
 
-        if selected.len() < 2 || memory < required {
+            if candidate
+                .iter()
+                .all(|accelerator| accelerator.usable_memory_gb() >= shard_required)
+            {
+                Some(candidate.to_vec())
+            } else {
+                None
+            }
+        });
+
+        let Some(selected) = selected else {
+            rejected.push(RejectionIR {
+                candidate: format!("{}@{}:{:?}", runtime.id, node_id, backend),
+                code: "tp_shard_does_not_fit".into(),
+                reason: format!(
+                    "aggregate local accelerator memory is insufficiently balanced for an equal TP shard of {:.1}GB total",
+                    required
+                ),
+            });
             continue;
-        }
+        };
 
         let missing_link = selected.iter().enumerate().find_map(|(i, left)| {
             selected.iter().skip(i + 1).find_map(|right| {
@@ -256,6 +268,17 @@ fn enumerate_local_tp(
             });
             continue;
         }
+
+        let tp_size = selected.len();
+        let shard_required = required / tp_size as f64;
+        let memory = selected
+            .iter()
+            .map(|accelerator| accelerator.usable_memory_gb())
+            .sum();
+        let bottleneck_headroom = selected
+            .iter()
+            .map(|accelerator| accelerator.usable_memory_gb() - shard_required)
+            .fold(f64::INFINITY, f64::min);
 
         let accelerator_ids = selected
             .iter()
@@ -292,12 +315,17 @@ fn enumerate_local_tp(
                 .node(node_id)
                 .map(|node| node.hourly_cost_usd)
                 .unwrap_or_default(),
-            memory_headroom_gb: memory - required,
+            memory_headroom_gb: bottleneck_headroom,
             assumptions: memory_assumptions(
                 context,
                 vec![
-                    format!("local TP uses explicit {:?} accelerators", backend),
+                    format!(
+                        "local TP uses {} explicit {:?} accelerators with {:.1}GB equal structural shards",
+                        tp_size, backend, shard_required
+                    ),
                     "all selected accelerator pairs have a discovered local fabric relation".into(),
+                    "TP feasibility is gated by the weakest selected device, not aggregate VRAM"
+                        .into(),
                     "local fabric performance is not yet predicted in v0.1".into(),
                 ],
             ),
@@ -372,13 +400,21 @@ fn enumerate_two_node_tp(
             };
 
             let memory = accelerator_a.usable_memory_gb() + accelerator_b.usable_memory_gb();
-            if memory < required {
+            let shard_required = required / 2.0;
+            let bottleneck_headroom = accelerator_a
+                .usable_memory_gb()
+                .min(accelerator_b.usable_memory_gb())
+                - shard_required;
+
+            if bottleneck_headroom < 0.0 {
                 rejected.push(RejectionIR {
                     candidate,
-                    code: "insufficient_pair_memory".into(),
+                    code: "tp_shard_does_not_fit".into(),
                     reason: format!(
-                        "selected pair exposes {:.1}GB but model requires {:.1}GB",
-                        memory, required
+                        "cross-node TP requires each device to hold an equal {:.1}GB shard; selected devices expose {:.1}GB and {:.1}GB",
+                        shard_required,
+                        accelerator_a.usable_memory_gb(),
+                        accelerator_b.usable_memory_gb()
                     ),
                 });
                 continue;
@@ -413,13 +449,19 @@ fn enumerate_two_node_tp(
                 accelerator_memory_gb: memory,
                 relative_compute: accelerator_a.relative_compute + accelerator_b.relative_compute,
                 hourly_cost_usd: a.hourly_cost_usd + b.hourly_cost_usd,
-                memory_headroom_gb: memory - required,
+                memory_headroom_gb: bottleneck_headroom,
                 assumptions: memory_assumptions(
                     context,
-                    vec![format!(
-                        "cross-node TP uses explicit devices over measured {:.1}Gbps / {:.1}ms fabric",
-                        bandwidth_gbps, latency_ms
-                    )],
+                    vec![
+                        format!(
+                            "cross-node TP uses explicit devices over measured {:.1}Gbps / {:.1}ms fabric",
+                            bandwidth_gbps, latency_ms
+                        ),
+                        format!(
+                            "cross-node TP uses {:.1}GB equal structural shards and is gated by the weaker device",
+                            shard_required
+                        ),
+                    ],
                 ),
             });
         }
