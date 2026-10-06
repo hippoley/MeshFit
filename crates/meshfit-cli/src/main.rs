@@ -2806,6 +2806,34 @@ fn import_benchmark_host_evidence(
     }
 
     let slots = benchmark_expected_host_slots(&kit, &transfer.host)?;
+
+    let model_identity_path = kit_dir.join(&kit.model_identity);
+    let model_identity_raw = fs::read_to_string(&model_identity_path)
+        .map_err(|e| format!("read {}: {e}", model_identity_path.display()))?;
+    let expected_model: ModelArtifactIdentity = serde_yaml::from_str(&model_identity_raw)
+        .map_err(|e| format!("parse {}: {e}", model_identity_path.display()))?;
+
+    let target_path = kit_dir.join(&kit.target);
+    let target_raw = fs::read_to_string(&target_path)
+        .map_err(|e| format!("read {}: {e}", target_path.display()))?;
+    let target: PlacementTargetIR = serde_yaml::from_str(&target_raw)
+        .map_err(|e| format!("parse {}: {e}", target_path.display()))?;
+
+    let snapshot_path = kit_dir.join(&kit.snapshot);
+    let snapshot_raw = fs::read_to_string(&snapshot_path)
+        .map_err(|e| format!("read {}: {e}", snapshot_path.display()))?;
+    let snapshot: InfrastructureSnapshot = serde_yaml::from_str(&snapshot_raw)
+        .map_err(|e| format!("parse {}: {e}", snapshot_path.display()))?;
+    let expected_hardware = snapshot
+        .hardware_identities
+        .get(&transfer.host)
+        .ok_or_else(|| {
+            format!(
+                "snapshot has no hardware identity for transferred benchmark host '{}'",
+                transfer.host
+            )
+        })?;
+
     if transfer.bundles.len() != slots.len() {
         return Err(format!(
             "benchmark host '{}' evidence package has {} bundle(s); kit requires {}",
@@ -2869,6 +2897,67 @@ fn import_benchmark_host_evidence(
             return Err(format!(
                 "transferred candidate '{}' run {} source plan '{}' does not match kit plan '{}'",
                 candidate, run_number, bundle.request.executable.source_plan_id, plan_id
+            ));
+        }
+        if bundle.request.identity.model != expected_model {
+            return Err(format!(
+                "transferred candidate '{}' run {} model identity does not match the coordinator kit",
+                candidate, run_number
+            ));
+        }
+        if bundle.request.executable.runtime
+            != kit
+                .candidates
+                .iter()
+                .find(|item| item.name == candidate)
+                .map(|item| item.runtime.as_str())
+                .unwrap_or_default()
+        {
+            return Err(format!(
+                "transferred candidate '{}' run {} runtime '{}' does not match the coordinator kit",
+                candidate, run_number, bundle.request.executable.runtime
+            ));
+        }
+        if bundle.request.executable.working_node != transfer.host {
+            return Err(format!(
+                "transferred candidate '{}' run {} working node '{}' does not match host '{}'",
+                candidate, run_number, bundle.request.executable.working_node, transfer.host
+            ));
+        }
+        if bundle.request.concurrency != kit.concurrency {
+            return Err(format!(
+                "transferred candidate '{}' run {} concurrency {} does not match kit {}",
+                candidate, run_number, bundle.request.concurrency, kit.concurrency
+            ));
+        }
+        if bundle.request.context_tokens != target.workload.context_tokens {
+            return Err(format!(
+                "transferred candidate '{}' run {} context {} does not match target {}",
+                candidate,
+                run_number,
+                bundle.request.context_tokens,
+                target.workload.context_tokens
+            ));
+        }
+        if bundle.request.config.measured_requests != kit.measured_requests_per_run {
+            return Err(format!(
+                "transferred candidate '{}' run {} measured request count {} does not match kit {}",
+                candidate,
+                run_number,
+                bundle.request.config.measured_requests,
+                kit.measured_requests_per_run
+            ));
+        }
+
+        let hardware_attestation =
+            benchmark_hardware_profile_attestation(expected_hardware, &bundle.request.identity.hardware);
+        if !hardware_attestation.matches {
+            return Err(format!(
+                "transferred candidate '{}' run {} hardware does not match host '{}': {}",
+                candidate,
+                run_number,
+                transfer.host,
+                hardware_attestation.issues.join("; ")
             ));
         }
 
