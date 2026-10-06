@@ -164,6 +164,8 @@ struct BenchmarkRunCandidatePlan {
     benchmark_id: String,
     candidate: String,
     benchmark_host: String,
+    preflight_ready: bool,
+    preflight_issues: Vec<String>,
     total_runs: usize,
     existing_valid_runs: Vec<usize>,
     pending_runs: Vec<usize>,
@@ -817,6 +819,18 @@ fn run() -> Result<(), String> {
                 let yaml = serde_yaml::to_string(&plan).map_err(|e| e.to_string())?;
                 print!("{yaml}");
             } else {
+                if !plan.preflight_ready {
+                    return Err(format!(
+                        "Benchmark 001 preflight failed for '{}': {}",
+                        candidate_name,
+                        if plan.preflight_issues.is_empty() {
+                            "unknown preflight failure".to_string()
+                        } else {
+                            plan.preflight_issues.join(" ")
+                        }
+                    ));
+                }
+
                 for run_number in &plan.pending_runs {
                     execute_benchmark_run_one(
                         kit_dir,
@@ -1172,17 +1186,6 @@ fn plan_benchmark_candidate_runs(
         })?;
 
     let preflight = inspect_benchmark_preflight(kit_dir, candidate_name, declared_host, true)?;
-    if !preflight.ready {
-        return Err(format!(
-            "Benchmark 001 preflight failed for '{}': {}",
-            candidate.name,
-            if preflight.issues.is_empty() {
-                "unknown preflight failure".to_string()
-            } else {
-                preflight.issues.join(" ")
-            }
-        ));
-    }
 
     let mut existing_valid_runs = Vec::new();
     let mut pending_runs = Vec::new();
@@ -1216,6 +1219,8 @@ fn plan_benchmark_candidate_runs(
         benchmark_id: kit.benchmark_id,
         candidate: candidate.name.clone(),
         benchmark_host: candidate.benchmark_host.clone(),
+        preflight_ready: preflight.ready,
+        preflight_issues: preflight.issues,
         total_runs: comparison.bundles.len(),
         existing_valid_runs,
         pending_runs,
