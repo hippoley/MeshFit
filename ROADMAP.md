@@ -24,7 +24,7 @@ MeshFit's roadmap is ordered by the shortest path to a real closed loop.
 - [x] stable execution fingerprint
 - [x] model artifact identity from file bytes — SHA-256 inspection implemented, real model validation pending
 - [x] runtime + driver identity capture primitives implemented — real benchmark bundle pending
-- [ ] repeated-run statistics
+- [x] repeated-run aggregation + p50/p95 comparison harness — real repeated hardware runs pending
 
 ## 3. Automatic discovery — v0.2.5
 
@@ -53,7 +53,8 @@ MeshFit's roadmap is ordered by the shortest path to a real closed loop.
 
 ## 5. Predict and calibrate — v0.4
 
-- [ ] repeated-run distributions
+- [x] repeated-run candidate aggregation and observed-oracle placement regret
+- [ ] real repeated-run distributions on heterogeneous hardware
 - [ ] prediction intervals
 - [ ] memory calibration
 - [ ] latency / throughput model
