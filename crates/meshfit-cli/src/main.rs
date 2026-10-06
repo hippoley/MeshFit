@@ -50,6 +50,7 @@ struct BenchmarkPlanCandidate {
 #[derive(Debug, Serialize)]
 struct BenchmarkExecutionKit {
     benchmark_id: String,
+    ready: bool,
     snapshot: String,
     target: String,
     model_path: String,
@@ -366,7 +367,7 @@ fn run() -> Result<(), String> {
         }
         "benchmark-kit" => {
             let snapshot_path = args.get(2).ok_or_else(|| {
-                "usage: meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml>"
+                "usage: meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--require-ready]"
                     .to_string()
             })?;
             let target_path = args
@@ -486,8 +487,14 @@ fn run() -> Result<(), String> {
                 });
             }
 
+            let ready = warnings.is_empty()
+                && execution_candidates
+                    .iter()
+                    .all(|candidate| candidate.compile_ready);
+
             let kit = BenchmarkExecutionKit {
                 benchmark_id: benchmark_id.clone(),
+                ready,
                 snapshot: snapshot_path.clone(),
                 target: target_path.clone(),
                 model_path: model_path.clone(),
@@ -504,6 +511,17 @@ fn run() -> Result<(), String> {
                 },
                 warnings,
             };
+
+            if args.iter().any(|arg| arg == "--require-ready") && !kit.ready {
+                return Err(format!(
+                    "Benchmark 001 execution kit is not ready: {}",
+                    if kit.warnings.is_empty() {
+                        "one or more candidates failed compiler preflight".to_string()
+                    } else {
+                        kit.warnings.join(" ")
+                    }
+                ));
+            }
 
             let yaml = serde_yaml::to_string(&kit).map_err(|e| e.to_string())?;
             print!("{yaml}");
@@ -890,7 +908,7 @@ fn print_prediction(prediction: &Prediction) {
 
 fn print_help() {
     println!(
-        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml>\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
+        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--require-ready]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
     );
 }
 
