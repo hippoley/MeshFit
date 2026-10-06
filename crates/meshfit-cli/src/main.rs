@@ -2549,6 +2549,42 @@ mod tests {
     }
 
     #[test]
+    fn benchmark_host_plan_rejects_unassigned_host() {
+        let dir = status_test_dir("host-plan-unassigned");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("kit.yaml"),
+            serde_yaml::to_string(&status_test_kit()).unwrap(),
+        )
+        .unwrap();
+
+        let error = plan_benchmark_host_runs(&dir, "node-z", true, false).unwrap_err();
+        assert!(error.contains("has no assigned candidates"));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn benchmark_worklist_commands_pin_logical_host() {
+        let dir = status_test_dir("worklist-command-host");
+        fs::create_dir_all(&dir).unwrap();
+        fs::write(
+            dir.join("kit.yaml"),
+            serde_yaml::to_string(&status_test_kit()).unwrap(),
+        )
+        .unwrap();
+
+        let worklist = inspect_benchmark_worklist(&dir, Some("node-a"), true).unwrap();
+        assert_eq!(worklist.hosts.len(), 1);
+        assert_eq!(worklist.hosts[0].slots.len(), 1);
+        assert!(worklist.hosts[0].slots[0]
+            .command
+            .contains("--host node-a"));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn benchmark_worklist_rejects_unassigned_host() {
         let dir = status_test_dir("worklist-host");
         fs::create_dir_all(&dir).unwrap();
