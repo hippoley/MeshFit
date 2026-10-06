@@ -3223,6 +3223,55 @@ mod tests {
     }
 
     #[test]
+    fn benchmark_plan_selection_keeps_three_strategies_distinct() {
+        let plan = |id: &str, nodes: Vec<&str>, relative_compute: f64| PlanIR {
+            id: id.into(),
+            placement: if nodes.len() == 1 {
+                PlacementKind::SingleHost
+            } else {
+                PlacementKind::TensorParallel
+            },
+            runtime: "vllm".into(),
+            nodes: nodes.into_iter().map(str::to_string).collect(),
+            accelerators: vec![],
+            required_memory_gb: 64.0,
+            accelerator_memory_gb: 80.0,
+            relative_compute,
+            hourly_cost_usd: 1.0,
+            memory_headroom_gb: 16.0,
+            communication: None,
+            assumptions: vec![],
+        };
+
+        let report = PlacementReport {
+            model: "benchmark-fixture".into(),
+            feasible: vec![
+                plan("node-c-single", vec!["node-c"], 110.0),
+                plan("node-a-tp", vec!["node-a", "node-a"], 120.0),
+                plan("node-b-meshfit", vec!["node-b"], 100.0),
+            ],
+            pareto: vec![],
+            rejected: vec![],
+            excluded_nodes: vec![],
+        };
+
+        let selected = select_benchmark_plans(&report, "node-b-meshfit").unwrap();
+        assert_eq!(selected[0].0, "single-best-node");
+        assert_eq!(selected[0].2.id, "node-c-single");
+        assert_eq!(selected[1].0, "max-aggregate-compute");
+        assert_eq!(selected[1].2.id, "node-a-tp");
+        assert_eq!(selected[2].0, "meshfit");
+        assert_eq!(selected[2].2.id, "node-b-meshfit");
+
+        let unique = selected
+            .iter()
+            .map(|(_, _, plan)| plan.id.as_str())
+            .collect::<std::collections::HashSet<_>>();
+        assert_eq!(unique.len(), 3);
+        assert!(benchmark_plan_warnings(&selected).is_empty());
+    }
+
+    #[test]
     fn benchmark_auto_defaults_to_at_least_ten_samples() {
         assert_eq!(default_measured_requests(1), 10);
         assert_eq!(default_measured_requests(2), 10);
