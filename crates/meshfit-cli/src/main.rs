@@ -1445,7 +1445,9 @@ fn ensure_candidate_executable(
         let raw = fs::read_to_string(executable_path)
             .map_err(|e| format!("read {}: {e}", executable_path.display()))?;
         if let Ok(executable) = serde_yaml::from_str::<ExecutablePlanIR>(&raw) {
-            if executable.source_plan_id == candidate.plan_id && executable.model_source == model_path {
+            if executable.source_plan_id == candidate.plan_id
+                && executable.model_source == model_path
+            {
                 return Ok(());
             }
         }
@@ -1459,7 +1461,9 @@ fn ensure_candidate_executable(
         let raw = fs::read_to_string(executable_path)
             .map_err(|e| format!("read {}: {e}", executable_path.display()))?;
         if let Ok(executable) = serde_yaml::from_str::<ExecutablePlanIR>(&raw) {
-            if executable.source_plan_id == candidate.plan_id && executable.model_source == model_path {
+            if executable.source_plan_id == candidate.plan_id
+                && executable.model_source == model_path
+            {
                 return Ok(());
             }
         }
@@ -1579,8 +1583,7 @@ fn load_benchmark_model_identity(
     kit: &BenchmarkExecutionKit,
 ) -> Result<ModelArtifactIdentity, String> {
     let path = kit_dir.join(&kit.model_identity);
-    let raw = fs::read_to_string(&path)
-        .map_err(|e| format!("read {}: {e}", path.display()))?;
+    let raw = fs::read_to_string(&path).map_err(|e| format!("read {}: {e}", path.display()))?;
     serde_yaml::from_str(&raw).map_err(|e| format!("parse {}: {e}", path.display()))
 }
 
@@ -2620,8 +2623,9 @@ mod tests {
         )
         .unwrap();
 
-        let error = inspect_benchmark_preflight(&dir, "not-a-candidate", Some("node-a"), None, false)
-            .unwrap_err();
+        let error =
+            inspect_benchmark_preflight(&dir, "not-a-candidate", Some("node-a"), None, false)
+                .unwrap_err();
         assert!(error.contains("not present in kit.yaml"));
 
         let _ = fs::remove_dir_all(dir);
