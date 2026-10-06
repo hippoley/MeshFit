@@ -128,6 +128,21 @@ MESHFIT_NODE_ID=node-b meshfit benchmark-worklist benchmark-001 --current-host -
 
 Each slot is reported as `pending`, `locked`, `valid`, or `invalid`. A `valid` slot must parse as a BenchmarkBundle, pass bundle validation, and match the candidate plan ID. `locked` means the result-slot lock exists; MeshFit deliberately does not claim the process is alive because the lock may be stale. Every visible slot includes the exact `benchmark-run-one` command.
 
+If the same immutable model artifact lives at a different filesystem path on a benchmark host, override only the path—not the identity:
+
+```bash
+meshfit benchmark-preflight benchmark-001 meshfit \
+  --model-path /data/models/qwen.gguf
+
+meshfit benchmark-run-one benchmark-001 meshfit 1 \
+  --model-path /data/models/qwen.gguf
+
+meshfit benchmark-run-candidate benchmark-001 meshfit \
+  --model-path /data/models/qwen.gguf --resume
+```
+
+A local model-path override is accepted only when the materialized model identity contains `artifact_sha256` and the host-local file hashes to exactly the same value. The path is canonicalized before compilation. Dry-run output for both one-run and candidate-level execution includes the effective path and verification state. If an executable already exists with a different model source, MeshFit recompiles it under the executable lock and replaces it with backup/restore protection. The local benchmark runner hashes the executable's model source again immediately before launch, so path relocation is verified twice while model identity remains immutable.
+
 Run one assigned candidate/run directly from the materialized kit:
 
 ```bash
@@ -378,6 +393,6 @@ The command pre-scans every expected bundle before GPU execution:
 - `--overwrite` reruns every slot through the evidence-safe backup/restore commit path;
 - `--resume` and `--overwrite` are mutually exclusive.
 
-Dry-run reports preflight state and pending/existing-valid run numbers even when the host is not runtime-ready. Real execution requires preflight readiness and, after all pending slots finish, re-validates candidate completeness through `benchmark-status`.
+Dry-run reports preflight state, the effective model path and verification state, plus pending/existing-valid run numbers even when the host is not runtime-ready. Real execution requires preflight readiness and, after all pending slots finish, re-validates candidate completeness through `benchmark-status`. A `--model-path` supplied to candidate-level execution is reused for every pending run.
 
 `benchmark-run-one` and `benchmark-run-candidate` share one internal execution function so locking, compilation, source-plan validation, benchmark execution, bundle validation, and evidence-safe commit semantics cannot drift apart.
