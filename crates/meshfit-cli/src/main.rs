@@ -258,6 +258,15 @@ struct BenchmarkPreflight {
     warnings: Vec<String>,
 }
 
+fn benchmark_model_path_override(args: &[String]) -> Result<Option<String>, String> {
+    if let Some(path) = option_value(args, "--model-path")? {
+        return Ok(Some(path.to_string()));
+    }
+    Ok(env::var("MESHFIT_MODEL_PATH")
+        .ok()
+        .filter(|path| !path.trim().is_empty()))
+}
+
 fn main() {
     if let Err(err) = run() {
         eprintln!("meshfit: {err}");
@@ -720,7 +729,7 @@ fn run() -> Result<(), String> {
                 .parse::<usize>()
                 .map_err(|e| format!("invalid run-number: {e}"))?;
             let declared_host = option_value(&args[5..], "--host")?;
-            let model_path_override = option_value(&args[5..], "--model-path")?;
+            let model_path_override = benchmark_model_path_override(&args[5..])?;
             let dry_run = args.iter().any(|arg| arg == "--dry-run");
             let overwrite = args.iter().any(|arg| arg == "--overwrite");
             let kit_dir = Path::new(kit_dir);
@@ -730,18 +739,34 @@ fn run() -> Result<(), String> {
                 candidate_name,
                 run_number,
                 declared_host,
-                model_path_override,
+                model_path_override.as_deref(),
             )?;
             if dry_run {
                 let yaml = serde_yaml::to_string(&plan).map_err(|e| e.to_string())?;
                 print!("{yaml}");
             } else {
-                let bundle_path = execute_benchmark_run_one(
+                if !plan.kit_ready {
+                    return Err(
+                        "Benchmark 001 execution kit is not ready; refusing real benchmark run"
+                            .to_string(),
+                    );
+                }
+                if !plan.preflight_ready {
+                    return Err(format!(
+                        "Benchmark 001 preflight failed for '{}': {}",
+                        candidate_name,
+                        if plan.preflight_issues.is_empty() {
+                            "unknown preflight failure".to_string()
+                        } else {
+                            plan.preflight_issues.join(" ")
+                        }
+                    ));
+                }
+                let bundle_path = execute_benchmark_run_one_prevalidated(
                     kit_dir,
                     candidate_name,
                     run_number,
-                    declared_host,
-                    model_path_override,
+                    &plan.model_path,
                     overwrite,
                 )?;
                 println!("{}", bundle_path.display());
@@ -754,7 +779,7 @@ fn run() -> Result<(), String> {
             })?;
             let candidate_name = args.get(3).ok_or_else(|| "missing candidate".to_string())?;
             let declared_host = option_value(&args[4..], "--host")?;
-            let model_path_override = option_value(&args[4..], "--model-path")?;
+            let model_path_override = benchmark_model_path_override(&args[4..])?;
             let dry_run = args.iter().any(|arg| arg == "--dry-run");
             let resume = args.iter().any(|arg| arg == "--resume");
             let overwrite = args.iter().any(|arg| arg == "--overwrite");
@@ -767,7 +792,7 @@ fn run() -> Result<(), String> {
                 kit_dir,
                 candidate_name,
                 declared_host,
-                model_path_override,
+                model_path_override.as_deref(),
                 resume,
                 overwrite,
             )?;
@@ -789,12 +814,11 @@ fn run() -> Result<(), String> {
                 }
 
                 for run_number in &plan.pending_runs {
-                    execute_benchmark_run_one(
+                    execute_benchmark_run_one_prevalidated(
                         kit_dir,
                         candidate_name,
                         *run_number,
-                        declared_host,
-                        model_path_override,
+                        &plan.model_path,
                         overwrite,
                     )?;
                 }
@@ -833,7 +857,7 @@ fn run() -> Result<(), String> {
                 return Err("exactly one of --host NODE or --current-host is required".to_string());
             }
             let host = explicit_host.unwrap_or_else(|| discover_local().node.id);
-            let model_path_override = option_value(&args[3..], "--model-path")?.map(str::to_string);
+            let model_path_override = benchmark_model_path_override(&args[3..])?;
             let dry_run = args.iter().any(|arg| arg == "--dry-run");
             let resume = args.iter().any(|arg| arg == "--resume");
             let overwrite = args.iter().any(|arg| arg == "--overwrite");
@@ -1301,7 +1325,11 @@ fn inspect_benchmark_run_one_plan(
     )?;
     let executable_path = kit_dir.join(&candidate.executable_path);
     let bundle_path = kit_dir.join(&comparison.bundles[run_number - 1]);
-    let compile_required = !executable_matches_model_path(&executable_path, &preflight.model_path)?;
+    let compile_required = !executable_matches_candidate(
+        &executable_path,
+        &candidate.plan_id,
+        &preflight.model_path,
+    )?;
 
     Ok(BenchmarkRunOnePlan {
         benchmark_id: kit.benchmark_id,
@@ -1506,12 +1534,11 @@ fn execute_benchmark_host_plan(
 
     for candidate_plan in &plan.candidates {
         for run_number in &candidate_plan.pending_runs {
-            execute_benchmark_run_one(
+            execute_benchmark_run_one_prevalidated(
                 kit_dir,
                 &candidate_plan.candidate,
                 *run_number,
-                Some(plan.host.as_str()),
-                plan.model_path_override.as_deref(),
+                &candidate_plan.model_path,
                 plan.overwrite,
             )?;
         }
@@ -1537,44 +1564,42 @@ fn execute_benchmark_host_plan(
     Ok((worklist.valid_slots, worklist.total_slots))
 }
 
-fn execute_benchmark_run_one(
+fn execute_benchmark_run_one_prevalidated(
     kit_dir: &Path,
     candidate_name: &str,
     run_number: usize,
-    declared_host: Option<&str>,
-    model_path_override: Option<&str>,
+    model_path: &str,
     overwrite: bool,
 ) -> Result<PathBuf, String> {
-    let plan = inspect_benchmark_run_one_plan(
-        kit_dir,
-        candidate_name,
-        run_number,
-        declared_host,
-        model_path_override,
-    )?;
-    if !plan.kit_ready {
+    let kit = load_benchmark_execution_kit(kit_dir)?;
+    if !kit.ready {
         return Err("Benchmark 001 execution kit is not ready; refusing real benchmark run".into());
     }
-    if !plan.preflight_ready {
-        return Err(format!(
-            "Benchmark 001 preflight failed for '{}': {}",
-            candidate_name,
-            if plan.preflight_issues.is_empty() {
-                "unknown preflight failure".to_string()
-            } else {
-                plan.preflight_issues.join(" ")
-            }
-        ));
-    }
-
-    let kit = load_benchmark_execution_kit(kit_dir)?;
     let candidate = kit
         .candidates
         .iter()
         .find(|candidate| candidate.name == candidate_name)
         .ok_or_else(|| format!("unknown benchmark candidate '{candidate_name}'"))?;
-    let bundle_path = PathBuf::from(&plan.bundle_path);
-    let executable_path = PathBuf::from(&plan.executable_path);
+    let comparison = kit
+        .comparison_manifest
+        .candidates
+        .iter()
+        .find(|item| item.name == candidate.name)
+        .ok_or_else(|| {
+            format!(
+                "candidate '{}' is missing from comparison manifest",
+                candidate.name
+            )
+        })?;
+    if run_number == 0 || run_number > comparison.bundles.len() {
+        return Err(format!(
+            "run-number must be between 1 and {} for candidate '{}'",
+            comparison.bundles.len(),
+            candidate.name
+        ));
+    }
+    let bundle_path = kit_dir.join(&comparison.bundles[run_number - 1]);
+    let executable_path = kit_dir.join(&candidate.executable_path);
     let execution_marker = benchmark_execution_lock_target();
     let _execution_lock = acquire_benchmark_file_lock(&execution_marker, "benchmark execution")?;
 
@@ -1589,7 +1614,7 @@ fn execute_benchmark_run_one(
     }
     let _slot_lock = acquire_benchmark_run_slot(&bundle_path)?;
 
-    ensure_candidate_executable(kit_dir, &kit, candidate, &executable_path, &plan.model_path)?;
+    ensure_candidate_executable(kit_dir, &kit, candidate, &executable_path, model_path)?;
     let executable_raw = fs::read_to_string(&executable_path)
         .map_err(|e| format!("read {}: {e}", executable_path.display()))?;
     let executable: ExecutablePlanIR = serde_yaml::from_str(&executable_raw)
@@ -1638,7 +1663,20 @@ fn load_benchmark_execution_kit(kit_dir: &Path) -> Result<BenchmarkExecutionKit,
     serde_yaml::from_str(&raw).map_err(|e| format!("parse {}: {e}", kit_path.display()))
 }
 
-fn executable_matches_model_path(executable_path: &Path, model_path: &str) -> Result<bool, String> {
+fn executable_identity_matches(
+    source_plan_id: &str,
+    model_source: &str,
+    expected_plan_id: &str,
+    expected_model_path: &str,
+) -> bool {
+    source_plan_id == expected_plan_id && model_source == expected_model_path
+}
+
+fn executable_matches_candidate(
+    executable_path: &Path,
+    expected_plan_id: &str,
+    expected_model_path: &str,
+) -> Result<bool, String> {
     if !executable_path.is_file() {
         return Ok(false);
     }
@@ -1646,7 +1684,12 @@ fn executable_matches_model_path(executable_path: &Path, model_path: &str) -> Re
         .map_err(|e| format!("read {}: {e}", executable_path.display()))?;
     let executable: ExecutablePlanIR = serde_yaml::from_str(&raw)
         .map_err(|e| format!("parse {}: {e}", executable_path.display()))?;
-    Ok(executable.model_source == model_path)
+    Ok(executable_identity_matches(
+        &executable.source_plan_id,
+        &executable.model_source,
+        expected_plan_id,
+        expected_model_path,
+    ))
 }
 
 fn inspect_model_path_for_host(
@@ -1831,7 +1874,7 @@ fn ensure_candidate_executable(
     executable_path: &Path,
     model_path: &str,
 ) -> Result<(), String> {
-    if executable_matches_model_path(executable_path, model_path)? {
+    if executable_matches_candidate(executable_path, &candidate.plan_id, model_path)? {
         return Ok(());
     }
 
@@ -1839,7 +1882,7 @@ fn ensure_candidate_executable(
         fs::create_dir_all(parent).map_err(|e| format!("create {}: {e}", parent.display()))?;
     }
     let _compile_lock = acquire_benchmark_compile_lock(executable_path)?;
-    if executable_matches_model_path(executable_path, model_path)? {
+    if executable_matches_candidate(executable_path, &candidate.plan_id, model_path)? {
         return Ok(());
     }
 
@@ -2647,7 +2690,7 @@ fn print_prediction(prediction: &Prediction) {
 
 fn print_help() {
     println!(
-        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--require-ready] [--write-dir DIR]\n  meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--host NODE] [--model-path PATH] [--dry-run] [--overwrite]\n  meshfit benchmark-run-candidate <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  meshfit benchmark-run-host <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  meshfit benchmark-worklist <kit-dir> [--host NODE | --current-host] [--pending-only]\n  meshfit benchmark-status <kit-dir> [--require-complete]\n  meshfit benchmark-finalize <kit-dir> [--markdown] [--require-publishable]\n  meshfit benchmark-preflight <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--allow-existing] [--require-ready]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
+        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--require-ready] [--write-dir DIR]\n  meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--host NODE] [--model-path PATH] [--dry-run] [--overwrite]\n  meshfit benchmark-run-candidate <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  meshfit benchmark-run-host <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  env MESHFIT_MODEL_PATH may provide the host-local model path when --model-path is omitted\n  meshfit benchmark-worklist <kit-dir> [--host NODE | --current-host] [--pending-only]\n  meshfit benchmark-status <kit-dir> [--require-complete]\n  meshfit benchmark-finalize <kit-dir> [--markdown] [--require-publishable]\n  meshfit benchmark-preflight <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--allow-existing] [--require-ready]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
     );
 }
 
