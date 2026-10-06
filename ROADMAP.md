@@ -71,7 +71,7 @@ MeshFit's roadmap is ordered by the shortest path to a real closed loop.
 - [x] host-level readiness audit — one read-only report reuses execution preflight across every candidate assigned to a machine, exposes local hardware/runtime/model readiness, and supports a non-zero `--require-ready` gate before any runtime launch
 - [x] port-scoped batch execution isolation — run-one locks one slot, candidate/host executors hold the listen-port lock across the full batch to prevent interleaved timing evidence; 109-step main CI Reality Verified on run #764
 - [ ] real repeated-run distributions on heterogeneous hardware
-- [ ] prediction intervals
+- [x] exact-evidence prediction intervals — sample stddev/CV + 95% Student-t next-observation interval for identical execution identity/context/concurrency; 124-step CI Reality Verified on run #920; cross-hardware intervals remain pending
 - [x] memory calibration contract + CLI — PlanIR required-memory vs observed peak-VRAM error/correction ratios; synthetic CI Reality Verified on runs #877/#900; real GPU repeated calibration pending
 - [ ] latency / throughput model
 - [ ] cost model
