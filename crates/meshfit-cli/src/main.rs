@@ -1,13 +1,13 @@
 use std::{env, fs, path::Path, process};
 
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 use meshfit_core::{
     compare_benchmarks, compile_plan, discover_local, discover_runtimes, inspect_model_artifact,
     prepare_local_benchmark_request, probe_peer, run_local_benchmark, solve, BenchmarkBundle,
     BenchmarkCandidate, BenchmarkComparisonRequest, BenchmarkConfig, BenchmarkRequestIR,
     ComparisonObjective, CompileRequest, EvidenceStore, ExecutablePlanIR, InfrastructureSnapshot,
-    LinkKind, LocalDiscovery, ModelArtifactIdentity, PeerProbeResult, PlacementReport,
+    LinkKind, LocalDiscovery, ModelArtifactIdentity, PeerProbeResult, PlacementKind, PlacementReport, PlanIR,
     PlacementTargetIR, Prediction, PredictionQuery, ScenarioIR, SnapshotManifest,
 };
 
@@ -26,6 +26,24 @@ struct BenchmarkCandidateManifest {
     #[serde(default)]
     hourly_cost_usd: Option<f64>,
     bundles: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct BenchmarkPlanSet {
+    candidates: Vec<BenchmarkPlanCandidate>,
+    warnings: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct BenchmarkPlanCandidate {
+    name: String,
+    strategy: String,
+    plan_id: String,
+    placement: PlacementKind,
+    runtime: String,
+    nodes: Vec<String>,
+    relative_compute: f64,
+    hourly_cost_usd: f64,
 }
 
 fn main() {
@@ -225,6 +243,89 @@ fn run() -> Result<(), String> {
             let yaml = serde_yaml::to_string(&bundle).map_err(|e| e.to_string())?;
             print!("{yaml}");
         }
+        "benchmark-candidates" => {
+            let snapshot_path = args.get(2).ok_or_else(|| {
+                "usage: meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id>"
+                    .to_string()
+            })?;
+            let target_path = args.get(3).ok_or_else(|| "missing target.yaml".to_string())?;
+            let meshfit_plan_id = args
+                .get(4)
+                .ok_or_else(|| "missing meshfit-plan-id".to_string())?;
+
+            let snapshot_raw = fs::read_to_string(snapshot_path)
+                .map_err(|e| format!("read {snapshot_path}: {e}"))?;
+            let target_raw =
+                fs::read_to_string(target_path).map_err(|e| format!("read {target_path}: {e}"))?;
+            let snapshot: InfrastructureSnapshot = serde_yaml::from_str(&snapshot_raw)
+                .map_err(|e| format!("parse {snapshot_path}: {e}"))?;
+            let target: PlacementTargetIR = serde_yaml::from_str(&target_raw)
+                .map_err(|e| format!("parse {target_path}: {e}"))?;
+
+            let report = solve(
+                &target
+                    .clone()
+                    .into_scenario(snapshot.infrastructure.clone()),
+            );
+            let meshfit = report
+                .feasible
+                .iter()
+                .find(|plan| &plan.id == meshfit_plan_id)
+                .cloned()
+                .ok_or_else(|| format!("meshfit plan-id '{meshfit_plan_id}' is not feasible"))?;
+
+            let single_best = report
+                .feasible
+                .iter()
+                .filter(|plan| plan.nodes.len() == 1)
+                .max_by(|left, right| baseline_plan_order(left, right))
+                .cloned()
+                .ok_or_else(|| "no feasible single-node baseline plan".to_string())?;
+
+            let max_compute = report
+                .feasible
+                .iter()
+                .max_by(|left, right| baseline_plan_order(left, right))
+                .cloned()
+                .ok_or_else(|| "no feasible max-compute baseline plan".to_string())?;
+
+            let mut warnings = Vec::new();
+            let unique_ids = std::collections::HashSet::from([
+                single_best.id.as_str(),
+                max_compute.id.as_str(),
+                meshfit.id.as_str(),
+            ]);
+            if unique_ids.len() != 3 {
+                warnings.push(
+                    "Benchmark 001 candidate plans overlap. A publishable comparison requires three distinct plan IDs; use a cluster/model workload with discriminating alternatives."
+                        .to_string(),
+                );
+            }
+
+            let set = BenchmarkPlanSet {
+                candidates: vec![
+                    benchmark_plan_candidate(
+                        "single-best-node",
+                        "highest relative compute among feasible single-node plans",
+                        single_best,
+                    ),
+                    benchmark_plan_candidate(
+                        "max-aggregate-compute",
+                        "highest relative compute among all structurally feasible plans",
+                        max_compute,
+                    ),
+                    benchmark_plan_candidate(
+                        "meshfit",
+                        "explicit MeshFit-selected plan supplied by plan ID",
+                        meshfit,
+                    ),
+                ],
+                warnings,
+            };
+
+            let yaml = serde_yaml::to_string(&set).map_err(|e| e.to_string())?;
+            print!("{yaml}");
+        }
         "compare-benchmarks" => {
             let manifest_path = args.get(2).ok_or_else(|| {
                 "usage: meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]"
@@ -415,6 +516,27 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 
+fn baseline_plan_order(left: &PlanIR, right: &PlanIR) -> std::cmp::Ordering {
+    left.relative_compute
+        .total_cmp(&right.relative_compute)
+        .then_with(|| right.hourly_cost_usd.total_cmp(&left.hourly_cost_usd))
+        .then_with(|| left.memory_headroom_gb.total_cmp(&right.memory_headroom_gb))
+        .then_with(|| right.id.cmp(&left.id))
+}
+
+fn benchmark_plan_candidate(name: &str, strategy: &str, plan: PlanIR) -> BenchmarkPlanCandidate {
+    BenchmarkPlanCandidate {
+        name: name.to_string(),
+        strategy: strategy.to_string(),
+        plan_id: plan.id,
+        placement: plan.placement,
+        runtime: plan.runtime,
+        nodes: plan.nodes,
+        relative_compute: plan.relative_compute,
+        hourly_cost_usd: plan.hourly_cost_usd,
+    }
+}
+
 fn option_value<'a>(args: &'a [String], option: &str) -> Result<Option<&'a str>, String> {
     for (index, arg) in args.iter().enumerate() {
         if arg == option {
@@ -518,6 +640,6 @@ fn print_prediction(prediction: &Prediction) {
 
 fn print_help() {
     println!(
-        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
+        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id>\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
     );
 }
