@@ -246,6 +246,20 @@ meshfit compare-benchmarks benchmark-001.yaml --require-publishable
 
 The comparison rejects mismatched model identity, context, concurrency, or any BenchmarkConfig field. A result is only marked publishable when each candidate has at least 2 independent bundles and 20 measured samples, every strategy maps to one stable plan ID, plan IDs are distinct across strategies, benchmark IDs are unique, runner provenance includes the MeshFit source commit, and capture timestamps are present.
 
+## Proof receipt
+
+After a materialized Benchmark 001 kit is complete, emit one content-addressed receipt for the experiment:
+
+```bash
+meshfit benchmark-status benchmark-001 --require-complete
+meshfit benchmark-finalize benchmark-001 --markdown --require-publishable
+meshfit benchmark-proof benchmark-001 --require-publishable > benchmark-proof.yaml
+```
+
+The proof command refuses incomplete kits. Its versioned `meshfit.benchmark-proof/v1` receipt binds the final comparison report to the frozen control inputs (`kit.yaml`, `comparison.yaml`, snapshot, target, and model identity) and to every raw benchmark bundle by SHA-256. Each bundle entry also records its benchmark ID, source plan ID, MeshFit source commit, and capture timestamp.
+
+A proof receipt does **not** upgrade provisional or synthetic evidence into a performance claim. Completeness, evidence publishability, and any performance-advantage claim remain separate gates.
+
 ## Output contract
 
 The report contains, per candidate:
