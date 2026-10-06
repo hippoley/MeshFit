@@ -158,7 +158,6 @@ struct BenchmarkRunOnePlan {
     bundle_exists: bool,
 }
 
-
 #[derive(Debug, Serialize)]
 struct BenchmarkRunCandidatePlan {
     benchmark_id: String,
@@ -812,8 +811,13 @@ fn run() -> Result<(), String> {
             }
 
             let kit_dir = Path::new(kit_dir);
-            let plan =
-                plan_benchmark_candidate_runs(kit_dir, candidate_name, declared_host, resume, overwrite)?;
+            let plan = plan_benchmark_candidate_runs(
+                kit_dir,
+                candidate_name,
+                declared_host,
+                resume,
+                overwrite,
+            )?;
 
             if dry_run {
                 let yaml = serde_yaml::to_string(&plan).map_err(|e| e.to_string())?;
@@ -856,17 +860,13 @@ fn run() -> Result<(), String> {
                 if candidate_status.valid_runs != candidate_status.expected_runs {
                     return Err(format!(
                         "candidate '{}' remains incomplete after execution: {}/{} valid runs",
-                        candidate_name,
-                        candidate_status.valid_runs,
-                        candidate_status.expected_runs
+                        candidate_name, candidate_status.valid_runs, candidate_status.expected_runs
                     ));
                 }
 
                 println!(
                     "{}: {}/{} valid runs",
-                    candidate_name,
-                    candidate_status.valid_runs,
-                    candidate_status.expected_runs
+                    candidate_name, candidate_status.valid_runs, candidate_status.expected_runs
                 );
             }
         }
