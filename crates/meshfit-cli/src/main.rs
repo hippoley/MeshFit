@@ -181,7 +181,7 @@ fn run() -> Result<(), String> {
         }
         "benchmark-auto" => {
             let executable_path = args.get(2).ok_or_else(|| {
-                "usage: meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--prompt TEXT]"
+                "usage: meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]"
                     .to_string()
             })?;
             let model_identity_path = args
@@ -201,9 +201,20 @@ fn run() -> Result<(), String> {
                 .map(str::to_string)
                 .unwrap_or_else(|| "Explain MeshFit in one sentence.".to_string());
 
-            let measured_requests = concurrency
-                .checked_mul(3)
-                .ok_or_else(|| "concurrency is too large".to_string())?;
+            let measured_requests = option_value(&args[4..], "--measured-requests")?
+                .map(|value| {
+                    value
+                        .parse::<u32>()
+                        .map_err(|e| format!("invalid --measured-requests '{value}': {e}"))
+                })
+                .transpose()?
+                .unwrap_or_else(|| default_measured_requests(concurrency));
+
+            if measured_requests == 0 || measured_requests % concurrency != 0 {
+                return Err(format!(
+                    "--measured-requests must be greater than zero and divisible by concurrency ({concurrency})"
+                ));
+            }
 
             let executable_raw = fs::read_to_string(executable_path)
                 .map_err(|e| format!("read {executable_path}: {e}"))?;
@@ -527,6 +538,12 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 
+fn default_measured_requests(concurrency: u32) -> u32 {
+    let minimum_samples_per_run = 10_u32;
+    let waves = minimum_samples_per_run.div_ceil(concurrency);
+    waves.max(1).saturating_mul(concurrency)
+}
+
 fn baseline_plan_order(left: &PlanIR, right: &PlanIR) -> std::cmp::Ordering {
     left.relative_compute
         .total_cmp(&right.relative_compute)
@@ -651,6 +668,6 @@ fn print_prediction(prediction: &Prediction) {
 
 fn print_help() {
     println!(
-        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
+        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
     );
 }
