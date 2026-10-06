@@ -16,6 +16,8 @@ use meshfit_core::{
     SnapshotManifest,
 };
 
+const BENCHMARK_LISTEN_PORT: u16 = 18080;
+
 #[derive(Debug, Deserialize)]
 struct BenchmarkComparisonManifest {
     benchmark_id: String,
@@ -586,7 +588,7 @@ fn run() -> Result<(), String> {
                     model_path: model_path.clone(),
                     model_id: target.model.id.clone(),
                     context_tokens: target.workload.context_tokens,
-                    listen_port: 18080,
+                    listen_port: BENCHMARK_LISTEN_PORT,
                     gpu_layers: None,
                     extra_args: vec![],
                 };
@@ -1054,7 +1056,7 @@ fn run() -> Result<(), String> {
                 model_path: model_path.clone(),
                 model_id: target.model.id.clone(),
                 context_tokens: target.workload.context_tokens,
-                listen_port: 18080,
+                listen_port: BENCHMARK_LISTEN_PORT,
                 gpu_layers,
                 extra_args: vec![],
             };
@@ -1116,6 +1118,12 @@ fn run() -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn benchmark_execution_lock_target() -> PathBuf {
+    env::temp_dir().join(format!(
+        "meshfit-benchmark-port-{BENCHMARK_LISTEN_PORT}"
+    ))
 }
 
 fn acquire_benchmark_file_lock(
@@ -1527,7 +1535,7 @@ fn execute_benchmark_run_one(
         .ok_or_else(|| format!("unknown benchmark candidate '{candidate_name}'"))?;
     let bundle_path = PathBuf::from(&plan.bundle_path);
     let executable_path = PathBuf::from(&plan.executable_path);
-    let execution_marker = kit_dir.join(".meshfit-benchmark");
+    let execution_marker = benchmark_execution_lock_target();
     let _execution_lock = acquire_benchmark_file_lock(&execution_marker, "benchmark execution")?;
 
     if bundle_path.exists() && !overwrite {
@@ -1828,7 +1836,7 @@ fn ensure_candidate_executable(
         model_path: model_path.to_string(),
         model_id: target.model.id.clone(),
         context_tokens: target.workload.context_tokens,
-        listen_port: 18080,
+        listen_port: BENCHMARK_LISTEN_PORT,
         gpu_layers: None,
         extra_args: vec![],
     };
@@ -2846,6 +2854,16 @@ mod tests {
         assert!(error.contains("not present in kit.yaml"));
 
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn benchmark_execution_lock_is_host_local_and_port_scoped() {
+        let target = benchmark_execution_lock_target();
+        assert!(target.starts_with(env::temp_dir()));
+        assert_eq!(
+            target.file_name().and_then(|name| name.to_str()),
+            Some("meshfit-benchmark-port-18080")
+        );
     }
 
     #[test]
