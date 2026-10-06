@@ -308,3 +308,29 @@ A normal preflight always emits the diagnostic report. `--require-ready` turns a
 
 
 The `--host` option follows the same logical-node contract as `benchmark-preflight`: use it when the snapshot node ID intentionally differs from the operating-system hostname. Real execution still requires runtime/model readiness; `--host` does not bypass those checks.
+
+
+## Candidate-level repeated-run executor
+
+Once a candidate host is ready, all independent runs for that candidate can be managed with one command:
+
+```bash
+meshfit benchmark-run-candidate benchmark-001 meshfit --host node-b
+```
+
+Inspect the full run plan without launching the runtime:
+
+```bash
+meshfit benchmark-run-candidate benchmark-001 meshfit --host node-b --dry-run
+```
+
+The executor performs a pre-scan before starting any run so evidence policy is decided before GPU time is spent.
+
+Default behavior is conservative: if any target run bundle already exists, execution stops before starting. Two explicit recovery modes exist:
+
+- `--resume`: skip only existing bundles that parse, pass `BenchmarkBundle::validate`, and belong to the expected candidate plan. Corrupt or mismatched evidence is a hard failure.
+- `--overwrite`: rerun all slots and use the evidence-safe replacement protocol for each bundle.
+
+`--resume` and `--overwrite` are mutually exclusive.
+
+A failed runtime/model/host preflight is visible in dry-run output but blocks real execution. After all pending runs complete, MeshFit re-runs benchmark status and requires the candidate to have every expected bundle valid.
