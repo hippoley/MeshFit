@@ -454,18 +454,13 @@ fn best_cross_node_pair<'a>(
     })
 }
 
-fn memory_assumptions(
-    context: &PlacementContext<'_>,
-    mut extra: Vec<String>,
-) -> Vec<String> {
+fn memory_assumptions(context: &PlacementContext<'_>, mut extra: Vec<String>) -> Vec<String> {
     let model = context.model;
     let workload = context.workload;
     let kv_cache_gb = context.kv_cache_gb;
     let mut assumptions = vec![format!(
         "memory = {:.1}GB weights + {:.1}GB KV = {:.1}GB total",
-        model.weight_memory_gb,
-        kv_cache_gb,
-        context.required_memory_gb
+        model.weight_memory_gb, kv_cache_gb, context.required_memory_gb
     )];
 
     if model.kv_cache_model.is_some() {
