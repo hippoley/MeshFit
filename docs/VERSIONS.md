@@ -27,6 +27,7 @@ Delivered:
 - per-device tensor-parallel shard gate; aggregate VRAM is not treated as sufficient capacity
 - analytical cross-node TP communication gate with explicit model profile, measured fabric, workload ms/token budget, and structured plan estimate
 - Pareto frontier
+- communication-aware Pareto dominance with explicit unknown-evidence semantics
 - explicit rejection/exclusion reasons
 - executable YAML scenario
 - strict CI: rustfmt, clippy -D warnings, workspace tests, release build, and CLI E2E verified after workload-aware placement on PR run #326
