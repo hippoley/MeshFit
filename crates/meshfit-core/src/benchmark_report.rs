@@ -803,12 +803,8 @@ mod tests {
             0.20
         );
         assert_eq!(
-            relative_improvement(
-                120.0,
-                100.0,
-                ComparisonObjective::MeanDecodeTokensPerSecond
-            )
-            .unwrap(),
+            relative_improvement(120.0, 100.0, ComparisonObjective::MeanDecodeTokensPerSecond)
+                .unwrap(),
             0.20
         );
         assert_eq!(
