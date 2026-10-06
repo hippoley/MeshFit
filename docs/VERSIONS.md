@@ -17,8 +17,9 @@ Delivered:
 - HardwareIR
 - FabricIR
 - ModelIR
+- workload-aware KV cache profile (bytes/token or transformer shape)
 - RuntimeIR
-- WorkloadIR
+- WorkloadIR with explicit max active sequence residency
 - PlanIR
 - hard feasibility pruning
 - single-host candidates
@@ -26,7 +27,7 @@ Delivered:
 - Pareto frontier
 - explicit rejection/exclusion reasons
 - executable YAML scenario
-- strict CI: rustfmt, clippy -D warnings, workspace tests, release build, and CLI E2E verified on PR run #201
+- strict CI: rustfmt, clippy -D warnings, workspace tests, release build, and CLI E2E verified after workload-aware placement on PR run #326
 
 Exit gate:
 
