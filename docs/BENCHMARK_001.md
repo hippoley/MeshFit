@@ -484,6 +484,8 @@ Finalization is intentionally stricter than `compare-benchmarks`.
 
 It first re-runs the materialized kit status and refuses to compare if any expected bundle is missing or invalid. Only a complete kit is allowed to load `comparison.yaml` and enter the same shared Benchmark 001 comparison path used by `compare-benchmarks`.
 
+A persisted bundle is not considered valid merely because it parses and passes its internal schema checks. Worklist, resume, status, and finalization re-attest each fixed result slot against the materialized experiment contract: source plan ID, benchmark host, runtime, service listen port, model identity, and snapshot hardware identity must all match. This prevents evidence copied from another host, model artifact, or execution port from being silently accepted as Benchmark 001 evidence.
+
 Therefore the end-to-end operator flow becomes:
 
 ```text
