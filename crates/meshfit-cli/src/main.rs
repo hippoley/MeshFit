@@ -149,7 +149,7 @@ fn run() -> Result<(), String> {
                 .get(3)
                 .ok_or_else(|| "missing model-identity.yaml".to_string())?;
 
-            let concurrency = option_value(&args[4..], "--concurrency")
+            let concurrency = option_value(&args[4..], "--concurrency")?
                 .map(|value| {
                     value
                         .parse::<u32>()
@@ -158,7 +158,7 @@ fn run() -> Result<(), String> {
                 .transpose()?
                 .unwrap_or(1);
 
-            let prompt = option_value(&args[4..], "--prompt")
+            let prompt = option_value(&args[4..], "--prompt")?
                 .map(str::to_string)
                 .unwrap_or_else(|| "Explain MeshFit in one sentence.".to_string());
 
@@ -341,10 +341,17 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 
-fn option_value<'a>(args: &'a [String], option: &str) -> Option<&'a str> {
-    args.windows(2)
-        .find(|pair| pair[0] == option)
-        .map(|pair| pair[1].as_str())
+fn option_value<'a>(args: &'a [String], option: &str) -> Result<Option<&'a str>, String> {
+    for (index, arg) in args.iter().enumerate() {
+        if arg == option {
+            return args
+                .get(index + 1)
+                .map(|value| Some(value.as_str()))
+                .ok_or_else(|| format!("missing value for {option}"));
+        }
+    }
+
+    Ok(None)
 }
 
 fn print_report(report: &PlacementReport) {
