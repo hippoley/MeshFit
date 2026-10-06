@@ -5,6 +5,10 @@ on:
   pull_request:
   workflow_dispatch:
 
+concurrency:
+  group: meshfit-ci-${{ github.workflow }}-${{ github.ref }}
+  cancel-in-progress: true
+
 jobs:
   rust:
     runs-on: ubuntu-latest
@@ -41,6 +45,10 @@ jobs:
       - run: test -f /tmp/meshfit-benchmark-001-materialized/inputs/model-identity.yaml
       - run: test -d /tmp/meshfit-benchmark-001-materialized/results/meshfit
       - run: test -d /tmp/meshfit-benchmark-001-materialized/artifacts/meshfit
+      - run: cargo run -p meshfit -- benchmark-run-one /tmp/meshfit-benchmark-001-materialized meshfit 1 --dry-run > /tmp/meshfit-benchmark-run-one.yaml
+      - run: grep -q 'candidate' /tmp/meshfit-benchmark-run-one.yaml
+      - run: grep -q 'run_number' /tmp/meshfit-benchmark-run-one.yaml
+      - run: "! cargo run -p meshfit -- benchmark-run-one /tmp/meshfit-benchmark-001-materialized meshfit 0 --dry-run"
       - run: cargo run -p meshfit -- benchmark-status /tmp/meshfit-benchmark-001-materialized > /tmp/meshfit-benchmark-status.yaml
       - run: cargo run -p meshfit -- benchmark-preflight /tmp/meshfit-benchmark-001-materialized meshfit --host node-b > /tmp/meshfit-benchmark-preflight.yaml
       - run: 'grep -q "candidate: meshfit" /tmp/meshfit-benchmark-preflight.yaml'
