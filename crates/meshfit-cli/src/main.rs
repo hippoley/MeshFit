@@ -3224,13 +3224,14 @@ mod tests {
 
     #[test]
     fn benchmark_plan_selection_keeps_three_strategies_distinct() {
-        let plan = |id: &str, nodes: Vec<&str>, relative_compute: f64| PlanIR {
+        let plan = |id: &str,
+                    placement: PlacementKind,
+                    nodes: Vec<&str>,
+                    relative_compute: f64|
+         -> PlanIR {
+            PlanIR {
             id: id.into(),
-            placement: if nodes.len() == 1 {
-                PlacementKind::SingleHost
-            } else {
-                PlacementKind::TensorParallel
-            },
+            placement,
             runtime: "vllm".into(),
             nodes: nodes.into_iter().map(str::to_string).collect(),
             accelerators: vec![],
@@ -3241,14 +3242,30 @@ mod tests {
             memory_headroom_gb: 16.0,
             communication: None,
             assumptions: vec![],
+        }
         };
 
         let report = PlacementReport {
             model: "benchmark-fixture".into(),
             feasible: vec![
-                plan("node-c-single", vec!["node-c"], 110.0),
-                plan("node-a-tp", vec!["node-a", "node-a"], 120.0),
-                plan("node-b-meshfit", vec!["node-b"], 100.0),
+                plan(
+                    "node-c-single",
+                    PlacementKind::SingleHost,
+                    vec!["node-c"],
+                    110.0,
+                ),
+                plan(
+                    "node-a-tp",
+                    PlacementKind::TensorParallel,
+                    vec!["node-a"],
+                    120.0,
+                ),
+                plan(
+                    "node-b-meshfit",
+                    PlacementKind::SingleHost,
+                    vec!["node-b"],
+                    100.0,
+                ),
             ],
             pareto: vec![],
             rejected: vec![],
