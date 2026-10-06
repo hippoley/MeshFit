@@ -98,7 +98,8 @@ The report contains, per candidate:
 - bundle and sample counts;
 - p50 and p95 TTFT;
 - mean total latency;
-- mean decode tok/s when token usage is available;
+- mean per-request decode tok/s when token usage is available;
+- mean aggregate wave throughput tok/s when wave usage is available;
 - peak observed RAM and VRAM;
 - optional estimated cost per 1M output tokens from aggregate wave output divided by measured wave wall-clock time;
 - objective value;
