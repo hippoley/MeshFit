@@ -358,15 +358,35 @@ fn benchmark_hardware_profile_attestation(
         })
         .collect::<Vec<_>>();
 
-    let sort_key = |item: &(
+    let compare_devices = |left: &(
         &str,
         &str,
         meshfit_core::AcceleratorBackend,
         u64,
         Option<&str>,
-    )| { (item.0, item.1, format!("{:?}", item.2), item.3) };
-    expected_devices.sort_by_key(sort_key);
-    observed_devices.sort_by_key(sort_key);
+    ),
+                           right: &(
+        &str,
+        &str,
+        meshfit_core::AcceleratorBackend,
+        u64,
+        Option<&str>,
+    )| {
+        (
+            left.0,
+            left.1,
+            format!("{:?}", left.2),
+            left.3,
+        )
+            .cmp(&(
+                right.0,
+                right.1,
+                format!("{:?}", right.2),
+                right.3,
+            ))
+    };
+    expected_devices.sort_by(compare_devices);
+    observed_devices.sort_by(compare_devices);
 
     if expected_devices.len() != observed_devices.len() {
         issues.push(format!(
