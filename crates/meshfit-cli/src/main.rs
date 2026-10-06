@@ -4,7 +4,7 @@ use meshfit_core::{
     compile_plan, discover_local, discover_runtimes, inspect_model_artifact, probe_peer, solve,
     prepare_local_benchmark_request, run_local_benchmark, BenchmarkBundle, BenchmarkConfig,
     BenchmarkRequestIR, CompileRequest, EvidenceStore, ExecutablePlanIR, InfrastructureSnapshot,
-    LinkKind, LocalDiscovery, ModelArtifactIdentity, PeerProbeResult, PlacementKind,
+    LinkKind, LocalDiscovery, ModelArtifactIdentity, PeerProbeResult,
     PlacementReport, PlacementTargetIR, Prediction, PredictionQuery, ScenarioIR,
     SnapshotManifest,
 };
