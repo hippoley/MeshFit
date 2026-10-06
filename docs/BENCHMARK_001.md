@@ -113,6 +113,17 @@ meshfit benchmark-kit \
 
 This writes `kit.yaml`, `comparison.yaml`, `RUNBOOK.md`, an `inputs/` snapshot of the small control files, and per-strategy `artifacts/` + `results/` directories. Commands in the materialized kit are rewritten to run from that directory. Local model paths are canonicalized instead of copying large weights; model hub identifiers are preserved as-is.
 
+During real execution, inspect progress at any time:
+
+```bash
+meshfit benchmark-status benchmark-001
+
+# final gate before comparison
+meshfit benchmark-status benchmark-001 --require-complete
+```
+
+The status command reports each candidate's `benchmark_host`, expected/valid run counts, missing bundle paths, and invalid bundles. Existing bundle files are parsed and validated, and their `source_plan_id` must match the candidate plan; a merely present file does not count as a completed run.
+
 Every candidate is compiler-preflighted before a command is emitted. Unsupported plans are marked `compile_ready: false` with the compiler error instead of receiving a command that is known to fail. The kit also validates that the model identity matches the target model and carries an artifact hash or revision.
 
 Then compile and execute each selected plan with the same model artifact and BenchmarkConfig, retaining every raw bundle. `benchmark-auto` defaults to at least 10 measured requests per run, so two independent runs can satisfy the 20-sample publication floor. Override with `--measured-requests N` when needed.
