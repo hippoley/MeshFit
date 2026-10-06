@@ -207,3 +207,32 @@ Benchmark 001 is complete only when:
 - [ ] at least one harmful or inferior resource/placement is explainable from evidence.
 
 Until these boxes are checked, MeshFit must say **result pending**, not invent a benchmark claim.
+
+
+## Run-to-run stability
+
+A Benchmark 001 comparison is not publishable merely because it has enough samples.
+
+For each candidate, MeshFit derives one objective value per independent benchmark bundle and computes the run-level coefficient of variation:
+
+```text
+run_objective_cv = sample_stddev(run_objective_values) / abs(mean(run_objective_values))
+```
+
+The current publication contract requires:
+
+- at least 2 independent benchmark bundles per candidate,
+- at least 20 measured request samples per candidate,
+- unique benchmark IDs and MeshFit source provenance,
+- identical model/workload/benchmark configuration across candidates,
+- **run-level objective CV <= 20%** for every candidate.
+
+The stability metric follows the selected comparison objective:
+
+- `p95_ttft_ms` -> p95 TTFT per run,
+- `mean_decode_tokens_per_second` -> mean decode rate per run,
+- `mean_total_ms` -> mean total request time per run.
+
+Results above the 20% CV limit remain available as provisional diagnostics but must not be labeled PUBLISHABLE or used as a MeshFit performance claim.
+
+Comparison output also reports TTFT standard deviation/CV, decode-rate standard deviation, and run-level objective CV.
