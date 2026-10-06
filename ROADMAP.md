@@ -59,6 +59,8 @@ MeshFit's roadmap is ordered by the shortest path to a real closed loop.
 - [x] direct best-baseline headline — objective-aware MeshFit improvement/regression delta, still gated by publishability; CI Reality Verified on run #480
 - [x] per-host benchmark preflight — host/runtime/model/evidence hard gates; full CLI Reality Verified on CI run #553
 - [x] preflight-gated one-run executor — logical host override, locking, source-plan validation, atomic bundle write; full CLI Reality Verified on CI run #576
+- [x] evidence-safe overwrite — backup/restore replacement protects existing benchmark evidence; full CI Reality Verified on run #583
+- [x] candidate-level repeated-run executor — shared one-run core, pre-scan, validated resume, explicit overwrite, completeness recheck; 62-step CI Reality Verified on run #616
 - [ ] real repeated-run distributions on heterogeneous hardware
 - [ ] prediction intervals
 - [ ] memory calibration
