@@ -219,7 +219,7 @@ mod tests {
         identity::{
             HardwareIdentity, ModelArtifactIdentity, RuntimeIdentity, TopologyIdentity,
         },
-        ir::{PlacementKind, PlanIR},
+        ir::PlacementKind,
     };
 
     fn request() -> BenchmarkRequestIR {
