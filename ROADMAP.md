@@ -10,7 +10,7 @@ MeshFit's roadmap is ordered by the shortest path to a real closed loop.
 - [x] conservative cross-node TP gate
 - [x] Pareto frontier
 - [x] explicit rejection / exclusion
-- [ ] CI/build verification
+- [x] CI/build verification — strict PR CI passed fmt, clippy, workspace tests, release build, and CLI E2E (run #201)
 
 ## 2. Evidence identity — v0.2
 
@@ -43,7 +43,7 @@ MeshFit's roadmap is ordered by the shortest path to a real closed loop.
 - [x] benchmark bundle contract + evidence conversion — real process/HTTP runner still pending
 - [x] TTFT / TPOT metric derivation contract — real measurement runner pending
 - [x] decode tok/s derivation contract — prefill and real measurement runner pending
-- [ ] peak memory
+- [ ] peak memory — next: real RAM/VRAM sampling during local benchmark execution
 - [ ] evidence bundle
 
 ## 5. Predict and calibrate — v0.4
