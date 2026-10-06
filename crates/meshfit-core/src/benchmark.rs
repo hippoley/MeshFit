@@ -405,6 +405,7 @@ mod tests {
                 peak_vram_gb: Some(12.5),
                 peak_ram_gb: Some(8.0),
             }],
+            waves: vec![],
             provenance: BenchmarkProvenance {
                 source: "meshfit-benchmark".into(),
                 source_url: None,
@@ -433,6 +434,7 @@ mod tests {
                 peak_vram_gb: None,
                 peak_ram_gb: None,
             }],
+            waves: vec![],
             provenance: BenchmarkProvenance {
                 source: "meshfit-benchmark".into(),
                 source_url: None,
@@ -493,6 +495,7 @@ mod tests {
             benchmark_id: "bench-empty".into(),
             request: request(),
             measurements: vec![],
+            waves: vec![],
             provenance: BenchmarkProvenance {
                 source: "meshfit-benchmark".into(),
                 source_url: None,
