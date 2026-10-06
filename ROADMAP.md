@@ -6,6 +6,7 @@ MeshFit's roadmap is ordered by the shortest path to a real closed loop.
 
 - [x] core IRs
 - [x] hard feasibility pruning
+- [x] workload-aware KV memory — context + active-sequence residency affect feasibility; CI Reality Verified on run #326
 - [x] single-host candidates — explicit accelerator-level selection; no host-wide VRAM aggregation
 - [x] conservative cross-node TP gate — explicit device pairs over measured node fabric
 - [x] Pareto frontier
