@@ -7,7 +7,8 @@ use std::{
 use serde::{Deserialize, Serialize};
 
 use meshfit_core::{
-    compare_benchmarks, compile_plan, discover_local, discover_runtimes, inspect_model_artifact,
+    calibrate_plan_memory, compare_benchmarks, compile_plan, discover_local, discover_runtimes,
+    inspect_model_artifact,
     prepare_local_benchmark_request, probe_peer, run_local_benchmark, solve, BenchmarkBundle,
     BenchmarkCandidate, BenchmarkComparisonReport, BenchmarkComparisonRequest, BenchmarkConfig,
     BenchmarkRequestIR, ComparisonObjective, CompileRequest, EvidenceStore, ExecutablePlanIR,
@@ -1231,6 +1232,36 @@ fn run() -> Result<(), String> {
                 let yaml = serde_yaml::to_string(&report).map_err(|e| e.to_string())?;
                 print!("{yaml}");
             }
+        }
+        "calibrate-memory" => {
+            let plan_path = args.get(2).ok_or_else(|| {
+                "usage: meshfit calibrate-memory <plan.yaml> <bundle.yaml> [bundle.yaml ...]"
+                    .to_string()
+            })?;
+            let bundle_paths = &args[3..];
+            if bundle_paths.is_empty() {
+                return Err(
+                    "calibrate-memory requires at least one benchmark bundle".to_string(),
+                );
+            }
+
+            let plan_raw =
+                fs::read_to_string(plan_path).map_err(|e| format!("read {plan_path}: {e}"))?;
+            let plan: PlanIR =
+                serde_yaml::from_str(&plan_raw).map_err(|e| format!("parse {plan_path}: {e}"))?;
+
+            let mut bundles = Vec::with_capacity(bundle_paths.len());
+            for bundle_path in bundle_paths {
+                let raw = fs::read_to_string(bundle_path)
+                    .map_err(|e| format!("read {bundle_path}: {e}"))?;
+                let bundle: BenchmarkBundle = serde_yaml::from_str(&raw)
+                    .map_err(|e| format!("parse {bundle_path}: {e}"))?;
+                bundles.push(bundle);
+            }
+
+            let summary = calibrate_plan_memory(&plan, &bundles)?;
+            let yaml = serde_yaml::to_string(&summary).map_err(|e| e.to_string())?;
+            print!("{yaml}");
         }
         "evidence-from-benchmark" => {
             let bundle_path = args.get(2).ok_or_else(|| {
@@ -3039,7 +3070,7 @@ fn print_prediction(prediction: &Prediction) {
 
 fn print_help() {
     println!(
-        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--listen-port N] [--require-ready] [--write-dir DIR]\n  meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--host NODE] [--model-path PATH] [--dry-run] [--overwrite]\n  meshfit benchmark-run-candidate <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  meshfit benchmark-run-host <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  env MESHFIT_MODEL_PATH may provide the host-local model path when --model-path is omitted\n  meshfit benchmark-worklist <kit-dir> [--host NODE | --current-host] [--pending-only]\n  meshfit benchmark-status <kit-dir> [--require-complete]\n  meshfit benchmark-finalize <kit-dir> [--markdown] [--require-publishable]\n  meshfit benchmark-preflight <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--allow-existing] [--require-ready]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
+        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--listen-port N] [--require-ready] [--write-dir DIR]\n  meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--host NODE] [--model-path PATH] [--dry-run] [--overwrite]\n  meshfit benchmark-run-candidate <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  meshfit benchmark-run-host <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  env MESHFIT_MODEL_PATH may provide the host-local model path when --model-path is omitted\n  meshfit benchmark-worklist <kit-dir> [--host NODE | --current-host] [--pending-only]\n  meshfit benchmark-status <kit-dir> [--require-complete]\n  meshfit benchmark-finalize <kit-dir> [--markdown] [--require-publishable]\n  meshfit benchmark-preflight <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--allow-existing] [--require-ready]\n  meshfit calibrate-memory <plan.yaml> <bundle.yaml> [bundle.yaml ...]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
     );
 }
 
