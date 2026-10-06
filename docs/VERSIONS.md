@@ -10,7 +10,7 @@ The product goal is:
 
 **Question:** What plans are structurally possible?
 
-Status: **implemented, build verification still pending**
+Status: **implemented and CI-verified**
 
 Delivered:
 
@@ -26,6 +26,7 @@ Delivered:
 - Pareto frontier
 - explicit rejection/exclusion reasons
 - executable YAML scenario
+- strict CI: rustfmt, clippy -D warnings, workspace tests, release build, and CLI E2E verified on PR run #201
 
 Exit gate:
 
