@@ -770,7 +770,7 @@ mod tests {
         };
 
         let markdown = report.to_markdown();
-        assert!(markdown.contains("MeshFit placement regret"));
+        assert!(markdown.contains("MeshFit vs best baseline (heuristic): 20.0% better"));
         assert!(markdown.contains("| meshfit | topology-aware | 2 | 20 |"));
         assert!(markdown.contains("Observed oracle: **meshfit**"));
     }
