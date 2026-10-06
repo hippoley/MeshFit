@@ -1345,6 +1345,23 @@ fn run() -> Result<(), String> {
             let yaml = serde_yaml::to_string(&summary).map_err(|e| e.to_string())?;
             print!("{yaml}");
         }
+        "estimate-cost" => {
+            let plan_path = args.get(2).ok_or_else(|| {
+                "usage: meshfit estimate-cost <plan.yaml> --predicted-output-tps N".to_string()
+            })?;
+            let predicted_output_tps = option_value(&args[3..], "--predicted-output-tps")?
+                .ok_or_else(|| "--predicted-output-tps is required".to_string())?
+                .parse::<f64>()
+                .map_err(|e| format!("invalid --predicted-output-tps: {e}"))?;
+
+            let raw =
+                fs::read_to_string(plan_path).map_err(|e| format!("read {plan_path}: {e}"))?;
+            let plan: PlanIR =
+                serde_yaml::from_str(&raw).map_err(|e| format!("parse {plan_path}: {e}"))?;
+            let estimate = estimate_plan_cost(&plan, predicted_output_tps)?;
+            let yaml = serde_yaml::to_string(&estimate).map_err(|e| e.to_string())?;
+            print!("{yaml}");
+        }
         "calibrate-memory" => {
             let plan_path = args.get(2).ok_or_else(|| {
                 "usage: meshfit calibrate-memory <plan.yaml> <bundle.yaml> [bundle.yaml ...]"
