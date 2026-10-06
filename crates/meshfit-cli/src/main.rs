@@ -2539,7 +2539,8 @@ fn render_benchmark_runbook(kit: &BenchmarkExecutionKit) -> String {
         out.push('\n');
     }
 
-    let mut by_host = std::collections::BTreeMap::<String, Vec<&BenchmarkExecutionCandidate>>::new();
+    let mut by_host =
+        std::collections::BTreeMap::<String, Vec<&BenchmarkExecutionCandidate>>::new();
     for candidate in &kit.candidates {
         by_host
             .entry(candidate.benchmark_host.clone())
