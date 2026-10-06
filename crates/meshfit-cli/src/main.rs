@@ -630,9 +630,7 @@ fn run() -> Result<(), String> {
                 "usage: meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--dry-run] [--overwrite]"
                     .to_string()
             })?;
-            let candidate_name = args
-                .get(3)
-                .ok_or_else(|| "missing candidate".to_string())?;
+            let candidate_name = args.get(3).ok_or_else(|| "missing candidate".to_string())?;
             let run_number = args
                 .get(4)
                 .ok_or_else(|| "missing run-number".to_string())?
@@ -668,8 +666,7 @@ fn run() -> Result<(), String> {
                 ));
             }
 
-            let preflight =
-                inspect_benchmark_preflight(kit_dir, candidate_name, None, true)?;
+            let preflight = inspect_benchmark_preflight(kit_dir, candidate_name, None, true)?;
             let executable_path = kit_dir.join(&candidate.executable_path);
             let bundle_rel = &comparison.bundles[run_number - 1];
             let bundle_path = kit_dir.join(bundle_rel);
@@ -745,9 +742,8 @@ fn run() -> Result<(), String> {
                 let model_identity_raw = fs::read_to_string(&model_identity_path)
                     .map_err(|e| format!("read {}: {e}", model_identity_path.display()))?;
                 let model_identity: ModelArtifactIdentity =
-                    serde_yaml::from_str(&model_identity_raw).map_err(|e| {
-                        format!("parse {}: {e}", model_identity_path.display())
-                    })?;
+                    serde_yaml::from_str(&model_identity_raw)
+                        .map_err(|e| format!("parse {}: {e}", model_identity_path.display()))?;
 
                 let request = prepare_local_benchmark_request(
                     executable,
@@ -1048,16 +1044,14 @@ fn acquire_benchmark_run_slot(bundle_path: &Path) -> Result<BenchmarkRunSlotLock
     acquire_benchmark_file_lock(bundle_path, "run slot")
 }
 
-fn acquire_benchmark_compile_lock(
-    executable_path: &Path,
-) -> Result<BenchmarkRunSlotLock, String> {
+fn acquire_benchmark_compile_lock(executable_path: &Path) -> Result<BenchmarkRunSlotLock, String> {
     acquire_benchmark_file_lock(executable_path, "executable")
 }
 
 fn load_benchmark_execution_kit(kit_dir: &Path) -> Result<BenchmarkExecutionKit, String> {
     let kit_path = kit_dir.join("kit.yaml");
-    let raw = fs::read_to_string(&kit_path)
-        .map_err(|e| format!("read {}: {e}", kit_path.display()))?;
+    let raw =
+        fs::read_to_string(&kit_path).map_err(|e| format!("read {}: {e}", kit_path.display()))?;
     serde_yaml::from_str(&raw).map_err(|e| format!("parse {}: {e}", kit_path.display()))
 }
 
@@ -1126,8 +1120,7 @@ fn ensure_candidate_executable(
 
     let yaml = serde_yaml::to_string(&executable).map_err(|e| e.to_string())?;
     let temp_path = PathBuf::from(format!("{}.tmp", executable_path.display()));
-    fs::write(&temp_path, yaml)
-        .map_err(|e| format!("write {}: {e}", temp_path.display()))?;
+    fs::write(&temp_path, yaml).map_err(|e| format!("write {}: {e}", temp_path.display()))?;
     fs::rename(&temp_path, executable_path).map_err(|e| {
         format!(
             "move {} to {}: {e}",
@@ -1842,18 +1835,14 @@ mod tests {
     #[test]
     fn preflight_hard_gates_host_runtime_and_existing_evidence() {
         let candidate = &status_test_kit().candidates[0];
-        let issues = benchmark_preflight_issues(
-            true,
-            candidate,
-            "node-b",
-            false,
-            None,
-            1,
-            false,
-        );
+        let issues = benchmark_preflight_issues(true, candidate, "node-b", false, None, 1, false);
 
-        assert!(issues.iter().any(|issue| issue.contains("wrong benchmark host")));
-        assert!(issues.iter().any(|issue| issue.contains("required runtime 'vllm'")));
+        assert!(issues
+            .iter()
+            .any(|issue| issue.contains("wrong benchmark host")));
+        assert!(issues
+            .iter()
+            .any(|issue| issue.contains("required runtime 'vllm'")));
         assert!(issues
             .iter()
             .any(|issue| issue.contains("refusing accidental evidence overwrite")));
@@ -1862,15 +1851,7 @@ mod tests {
     #[test]
     fn preflight_can_resume_existing_evidence_only_when_explicitly_allowed() {
         let candidate = &status_test_kit().candidates[0];
-        let issues = benchmark_preflight_issues(
-            true,
-            candidate,
-            "node-a",
-            true,
-            None,
-            1,
-            true,
-        );
+        let issues = benchmark_preflight_issues(true, candidate, "node-a", true, None, 1, true);
 
         assert!(issues.is_empty());
     }
