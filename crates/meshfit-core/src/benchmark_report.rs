@@ -1,0 +1,581 @@
+use serde::{Deserialize, Serialize};
+
+use crate::benchmark::BenchmarkBundle;
+
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq)]
+#[serde(rename_all = "snake_case")]
+pub enum ComparisonObjective {
+    P95TtftMs,
+    MeanDecodeTokensPerSecond,
+    MeanTotalMs,
+}
+
+impl ComparisonObjective {
+    fn lower_is_better(self) -> bool {
+        !matches!(self, Self::MeanDecodeTokensPerSecond)
+    }
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BenchmarkCandidate {
+    pub name: String,
+    pub strategy: String,
+    #[serde(default)]
+    pub hourly_cost_usd: Option<f64>,
+    pub bundles: Vec<BenchmarkBundle>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BenchmarkComparisonRequest {
+    pub benchmark_id: String,
+    pub meshfit_candidate: String,
+    pub objective: ComparisonObjective,
+    pub candidates: Vec<BenchmarkCandidate>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct CandidateBenchmarkSummary {
+    pub name: String,
+    pub strategy: String,
+    pub bundle_count: usize,
+    pub sample_count: usize,
+    pub p50_ttft_ms: f64,
+    pub p95_ttft_ms: f64,
+    pub mean_total_ms: f64,
+    #[serde(default)]
+    pub mean_decode_tokens_per_second: Option<f64>,
+    #[serde(default)]
+    pub mean_wave_throughput_tokens_per_second: Option<f64>,
+    #[serde(default)]
+    pub peak_vram_gb: Option<f64>,
+    #[serde(default)]
+    pub peak_ram_gb: Option<f64>,
+    #[serde(default)]
+    pub hourly_cost_usd: Option<f64>,
+    #[serde(default)]
+    pub estimated_cost_per_million_output_tokens_usd: Option<f64>,
+    pub objective_value: f64,
+    pub regret_fraction: f64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct BenchmarkComparisonReport {
+    pub benchmark_id: String,
+    pub objective: ComparisonObjective,
+    pub publishable: bool,
+    pub evidence_status: String,
+    pub oracle_candidate: String,
+    pub meshfit_candidate: String,
+    pub oracle_objective_value: f64,
+    pub meshfit_objective_value: f64,
+    pub meshfit_regret_fraction: f64,
+    pub best_baseline_regret_fraction: f64,
+    #[serde(default)]
+    pub regret_reduction_vs_best_baseline_fraction: Option<f64>,
+    pub candidates: Vec<CandidateBenchmarkSummary>,
+}
+
+impl BenchmarkComparisonReport {
+    pub fn to_markdown(&self) -> String {
+        let regret_reduction = self
+            .regret_reduction_vs_best_baseline_fraction
+            .map(|value| format!("{:.1}%", value * 100.0))
+            .unwrap_or_else(|| "n/a".into());
+
+        let mut out = String::new();
+        out.push_str(&format!("## {}\n\n", self.benchmark_id));
+        if self.publishable {
+            out.push_str(
+                "**Evidence status:** PUBLISHABLE · independent repeated runs verified\n\n",
+            );
+            out.push_str(&format!(
+                "**MeshFit placement regret:** {:.1}% · **best baseline regret:** {:.1}% · **regret reduction:** {}\n\n",
+                self.meshfit_regret_fraction * 100.0,
+                self.best_baseline_regret_fraction * 100.0,
+                regret_reduction
+            ));
+        } else {
+            out.push_str(&format!(
+                "**Evidence status:** NOT PUBLISHABLE · {}\n\n",
+                self.evidence_status
+            ));
+            out.push_str(
+                "Provisional comparison only. Do not publish these values as a MeshFit performance claim.\n\n",
+            );
+        }
+        out.push_str(
+            "| Candidate | Strategy | Runs | Samples | p95 TTFT | Decode | Throughput | Cost / 1M output tok | Regret |\n",
+        );
+        out.push_str("|---|---|---:|---:|---:|---:|---:|---:|---:|\n");
+
+        for candidate in &self.candidates {
+            let decode = candidate
+                .mean_decode_tokens_per_second
+                .map(|value| format!("{value:.2} tok/s"))
+                .unwrap_or_else(|| "n/a".into());
+            let throughput = candidate
+                .mean_wave_throughput_tokens_per_second
+                .map(|value| format!("{value:.2} tok/s"))
+                .unwrap_or_else(|| "n/a".into());
+            let cost = candidate
+                .estimated_cost_per_million_output_tokens_usd
+                .map(|value| format!("USD {value:.3}"))
+                .unwrap_or_else(|| "n/a".into());
+            out.push_str(&format!(
+                "| {} | {} | {} | {} | {:.2} ms | {} | {} | {} | {:.1}% |\n",
+                candidate.name,
+                candidate.strategy,
+                candidate.bundle_count,
+                candidate.sample_count,
+                candidate.p95_ttft_ms,
+                decode,
+                throughput,
+                cost,
+                candidate.regret_fraction * 100.0
+            ));
+        }
+
+        out.push_str(&format!(
+            "\nObserved oracle: **{}** ({:?} = {:.3}).\n",
+            self.oracle_candidate, self.objective, self.oracle_objective_value
+        ));
+        out
+    }
+}
+
+pub fn compare_benchmarks(
+    request: &BenchmarkComparisonRequest,
+) -> Result<BenchmarkComparisonReport, String> {
+    if request.candidates.len() < 2 {
+        return Err("benchmark comparison requires at least two candidates".into());
+    }
+
+    let mut names = std::collections::HashSet::new();
+    for candidate in &request.candidates {
+        if !names.insert(candidate.name.as_str()) {
+            return Err(format!(
+                "duplicate benchmark candidate name '{}'",
+                candidate.name
+            ));
+        }
+    }
+
+    let meshfit_count = request
+        .candidates
+        .iter()
+        .filter(|candidate| candidate.name == request.meshfit_candidate)
+        .count();
+    if meshfit_count != 1 {
+        return Err(format!(
+            "meshfit_candidate '{}' must match exactly one candidate",
+            request.meshfit_candidate
+        ));
+    }
+
+    validate_comparable_workloads(&request.candidates)?;
+    let (publishable, evidence_status) = evidence_qualification(&request.candidates);
+
+    let mut summaries = request
+        .candidates
+        .iter()
+        .map(|candidate| summarize_candidate(candidate, request.objective))
+        .collect::<Result<Vec<_>, _>>()?;
+
+    let oracle_idx = summaries
+        .iter()
+        .enumerate()
+        .min_by(|(_, left), (_, right)| {
+            let ordering = left.objective_value.total_cmp(&right.objective_value);
+            if request.objective.lower_is_better() {
+                ordering
+            } else {
+                ordering.reverse()
+            }
+        })
+        .map(|(idx, _)| idx)
+        .ok_or_else(|| "benchmark comparison contains no candidates".to_string())?;
+
+    let oracle_value = summaries[oracle_idx].objective_value;
+    if oracle_value <= 0.0 {
+        return Err("oracle objective value must be greater than zero".into());
+    }
+
+    for summary in &mut summaries {
+        summary.regret_fraction =
+            regret_fraction(summary.objective_value, oracle_value, request.objective)?;
+    }
+
+    let meshfit = summaries
+        .iter()
+        .find(|summary| summary.name == request.meshfit_candidate)
+        .ok_or_else(|| "meshfit candidate disappeared during aggregation".to_string())?;
+
+    let meshfit_objective_value = meshfit.objective_value;
+    let meshfit_regret_fraction = meshfit.regret_fraction;
+
+    let best_baseline_regret = summaries
+        .iter()
+        .filter(|summary| summary.name != request.meshfit_candidate)
+        .map(|summary| summary.regret_fraction)
+        .min_by(f64::total_cmp)
+        .ok_or_else(|| "comparison has no baseline candidate".to_string())?;
+
+    let regret_reduction = if best_baseline_regret > 0.0 {
+        Some((best_baseline_regret - meshfit_regret_fraction) / best_baseline_regret)
+    } else {
+        None
+    };
+
+    Ok(BenchmarkComparisonReport {
+        benchmark_id: request.benchmark_id.clone(),
+        objective: request.objective,
+        publishable,
+        evidence_status,
+        oracle_candidate: summaries[oracle_idx].name.clone(),
+        meshfit_candidate: request.meshfit_candidate.clone(),
+        oracle_objective_value: oracle_value,
+        meshfit_objective_value,
+        meshfit_regret_fraction,
+        best_baseline_regret_fraction: best_baseline_regret,
+        regret_reduction_vs_best_baseline_fraction: regret_reduction,
+        candidates: summaries,
+    })
+}
+
+fn evidence_qualification(candidates: &[BenchmarkCandidate]) -> (bool, String) {
+    let mut all_ids = std::collections::HashSet::new();
+
+    for candidate in candidates {
+        let sample_count = candidate
+            .bundles
+            .iter()
+            .map(|bundle| bundle.measurements.len())
+            .sum::<usize>();
+
+        if candidate.bundles.len() < 2 {
+            return (
+                false,
+                format!(
+                    "candidate '{}' has {} independent bundle(s); Benchmark 001 requires at least 2",
+                    candidate.name,
+                    candidate.bundles.len()
+                ),
+            );
+        }
+
+        if sample_count < 20 {
+            return (
+                false,
+                format!(
+                    "candidate '{}' has {} measured samples; p95 publication requires at least 20",
+                    candidate.name, sample_count
+                ),
+            );
+        }
+
+        let mut candidate_ids = std::collections::HashSet::new();
+        for bundle in &candidate.bundles {
+            if bundle.provenance.source != "meshfit-local-runner" {
+                return (
+                    false,
+                    format!(
+                        "benchmark_id '{}' uses provenance source '{}'; publishable Benchmark 001 evidence must come from meshfit-local-runner",
+                        bundle.benchmark_id, bundle.provenance.source
+                    ),
+                );
+            }
+            if bundle.provenance.captured_at.is_none() {
+                return (
+                    false,
+                    format!(
+                        "benchmark_id '{}' has no capture timestamp",
+                        bundle.benchmark_id
+                    ),
+                );
+            }
+            if !candidate_ids.insert(bundle.benchmark_id.as_str()) {
+                return (
+                    false,
+                    format!(
+                        "candidate '{}' repeats benchmark_id '{}'; duplicate bundles do not count as independent runs",
+                        candidate.name, bundle.benchmark_id
+                    ),
+                );
+            }
+            if !all_ids.insert(bundle.benchmark_id.as_str()) {
+                return (
+                    false,
+                    format!(
+                        "benchmark_id '{}' is reused across candidates; each compared run must be independent",
+                        bundle.benchmark_id
+                    ),
+                );
+            }
+        }
+    }
+
+    (
+        true,
+        "independent repeated benchmark bundles verified".into(),
+    )
+}
+
+fn validate_comparable_workloads(candidates: &[BenchmarkCandidate]) -> Result<(), String> {
+    let reference = candidates
+        .first()
+        .and_then(|candidate| candidate.bundles.first())
+        .ok_or_else(|| "first comparison candidate contains no benchmark bundles".to_string())?;
+
+    reference.validate()?;
+
+    for candidate in candidates {
+        if candidate.bundles.is_empty() {
+            return Err(format!(
+                "candidate '{}' contains no benchmark bundles",
+                candidate.name
+            ));
+        }
+
+        for bundle in &candidate.bundles {
+            bundle.validate()?;
+            if bundle.request.identity.model != reference.request.identity.model {
+                return Err(format!(
+                    "candidate '{}' uses a different model artifact identity",
+                    candidate.name
+                ));
+            }
+            if bundle.request.context_tokens != reference.request.context_tokens
+                || bundle.request.concurrency != reference.request.concurrency
+                || bundle.request.config != reference.request.config
+            {
+                return Err(format!(
+                    "candidate '{}' is not comparable: context, concurrency, or BenchmarkConfig differ",
+                    candidate.name
+                ));
+            }
+        }
+    }
+
+    Ok(())
+}
+
+fn summarize_candidate(
+    candidate: &BenchmarkCandidate,
+    objective: ComparisonObjective,
+) -> Result<CandidateBenchmarkSummary, String> {
+    let measurements = candidate
+        .bundles
+        .iter()
+        .flat_map(|bundle| bundle.measurements.iter())
+        .collect::<Vec<_>>();
+
+    if measurements.is_empty() {
+        return Err(format!(
+            "candidate '{}' has no measurements",
+            candidate.name
+        ));
+    }
+
+    let ttft = measurements
+        .iter()
+        .map(|measurement| measurement.ttft_ms)
+        .collect::<Vec<_>>();
+    let total = measurements
+        .iter()
+        .map(|measurement| measurement.total_ms)
+        .collect::<Vec<_>>();
+    let decode = measurements
+        .iter()
+        .filter_map(|measurement| measurement.decode_tokens_per_second())
+        .collect::<Vec<_>>();
+
+    let mean_decode = mean(&decode);
+    let wave_throughput = candidate
+        .bundles
+        .iter()
+        .flat_map(|bundle| bundle.waves.iter())
+        .filter_map(|wave| wave.throughput_tokens_per_second())
+        .collect::<Vec<_>>();
+    let mean_wave_throughput = mean(&wave_throughput);
+    let p50_ttft_ms = percentile(&ttft, 0.50)?;
+    let p95_ttft_ms = percentile(&ttft, 0.95)?;
+    let mean_total_ms = mean(&total).ok_or_else(|| "missing total duration".to_string())?;
+    let peak_vram_gb = candidate
+        .bundles
+        .iter()
+        .flat_map(|bundle| bundle.waves.iter())
+        .filter_map(|wave| wave.peak_vram_gb)
+        .max_by(f64::total_cmp);
+    let peak_ram_gb = candidate
+        .bundles
+        .iter()
+        .flat_map(|bundle| bundle.waves.iter())
+        .filter_map(|wave| wave.peak_ram_gb)
+        .max_by(f64::total_cmp);
+
+    let objective_value = match objective {
+        ComparisonObjective::P95TtftMs => p95_ttft_ms,
+        ComparisonObjective::MeanDecodeTokensPerSecond => mean_decode.ok_or_else(|| {
+            format!(
+                "candidate '{}' has no decode token-rate observations",
+                candidate.name
+            )
+        })?,
+        ComparisonObjective::MeanTotalMs => mean_total_ms,
+    };
+
+    let estimated_cost = candidate.hourly_cost_usd.and_then(|hourly_cost| {
+        let output_tokens = candidate
+            .bundles
+            .iter()
+            .flat_map(|bundle| bundle.waves.iter())
+            .filter_map(|wave| wave.output_tokens)
+            .map(u64::from)
+            .sum::<u64>();
+        let total_seconds = candidate
+            .bundles
+            .iter()
+            .flat_map(|bundle| bundle.waves.iter())
+            .map(|wave| wave.total_ms / 1000.0)
+            .sum::<f64>();
+
+        if output_tokens == 0 || total_seconds <= 0.0 {
+            None
+        } else {
+            let output_tps = output_tokens as f64 / total_seconds;
+            Some(hourly_cost / (output_tps * 3600.0) * 1_000_000.0)
+        }
+    });
+
+    Ok(CandidateBenchmarkSummary {
+        name: candidate.name.clone(),
+        strategy: candidate.strategy.clone(),
+        bundle_count: candidate.bundles.len(),
+        sample_count: measurements.len(),
+        p50_ttft_ms,
+        p95_ttft_ms,
+        mean_total_ms,
+        mean_decode_tokens_per_second: mean_decode,
+        mean_wave_throughput_tokens_per_second: mean_wave_throughput,
+        peak_vram_gb,
+        peak_ram_gb,
+        hourly_cost_usd: candidate.hourly_cost_usd,
+        estimated_cost_per_million_output_tokens_usd: estimated_cost,
+        objective_value,
+        regret_fraction: 0.0,
+    })
+}
+
+fn percentile(values: &[f64], quantile: f64) -> Result<f64, String> {
+    if values.is_empty() {
+        return Err("cannot compute percentile over zero samples".into());
+    }
+    if !(0.0..=1.0).contains(&quantile) {
+        return Err("percentile quantile must be between zero and one".into());
+    }
+
+    let mut sorted = values.to_vec();
+    sorted.sort_by(f64::total_cmp);
+    let rank = ((quantile * sorted.len() as f64).ceil() as usize)
+        .saturating_sub(1)
+        .min(sorted.len() - 1);
+    Ok(sorted[rank])
+}
+
+fn mean(values: &[f64]) -> Option<f64> {
+    if values.is_empty() {
+        None
+    } else {
+        Some(values.iter().sum::<f64>() / values.len() as f64)
+    }
+}
+
+fn regret_fraction(value: f64, oracle: f64, objective: ComparisonObjective) -> Result<f64, String> {
+    if value <= 0.0 || oracle <= 0.0 {
+        return Err("objective values must be greater than zero".into());
+    }
+
+    let regret = if objective.lower_is_better() {
+        (value - oracle) / oracle
+    } else {
+        (oracle - value) / oracle
+    };
+
+    Ok(regret.max(0.0))
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn one_bundle_is_not_publishable() {
+        let candidate = BenchmarkCandidate {
+            name: "meshfit".into(),
+            strategy: "test".into(),
+            hourly_cost_usd: None,
+            bundles: vec![],
+        };
+        let (publishable, status) = evidence_qualification(&[candidate]);
+        assert!(!publishable);
+        assert!(status.contains("requires at least 2"));
+    }
+
+    #[test]
+    fn markdown_report_is_readme_ready() {
+        let report = BenchmarkComparisonReport {
+            benchmark_id: "benchmark-001".into(),
+            objective: ComparisonObjective::P95TtftMs,
+            publishable: true,
+            evidence_status: "independent repeated benchmark bundles verified".into(),
+            oracle_candidate: "meshfit".into(),
+            meshfit_candidate: "meshfit".into(),
+            oracle_objective_value: 100.0,
+            meshfit_objective_value: 100.0,
+            meshfit_regret_fraction: 0.0,
+            best_baseline_regret_fraction: 0.25,
+            regret_reduction_vs_best_baseline_fraction: Some(1.0),
+            candidates: vec![CandidateBenchmarkSummary {
+                name: "meshfit".into(),
+                strategy: "topology-aware".into(),
+                bundle_count: 2,
+                sample_count: 20,
+                p50_ttft_ms: 90.0,
+                p95_ttft_ms: 100.0,
+                mean_total_ms: 500.0,
+                mean_decode_tokens_per_second: Some(40.0),
+                mean_wave_throughput_tokens_per_second: Some(120.0),
+                peak_vram_gb: Some(20.0),
+                peak_ram_gb: Some(10.0),
+                hourly_cost_usd: Some(1.0),
+                estimated_cost_per_million_output_tokens_usd: Some(6.944),
+                objective_value: 100.0,
+                regret_fraction: 0.0,
+            }],
+        };
+
+        let markdown = report.to_markdown();
+        assert!(markdown.contains("MeshFit placement regret"));
+        assert!(markdown.contains("| meshfit | topology-aware | 2 | 20 |"));
+        assert!(markdown.contains("Observed oracle: **meshfit**"));
+    }
+
+    #[test]
+    fn nearest_rank_percentile_is_deterministic() {
+        let values = vec![10.0, 20.0, 30.0, 40.0, 50.0];
+        assert_eq!(percentile(&values, 0.50).unwrap(), 30.0);
+        assert_eq!(percentile(&values, 0.95).unwrap(), 50.0);
+    }
+
+    #[test]
+    fn regret_handles_lower_and_higher_is_better_metrics() {
+        assert_eq!(
+            regret_fraction(125.0, 100.0, ComparisonObjective::P95TtftMs).unwrap(),
+            0.25
+        );
+        assert_eq!(
+            regret_fraction(80.0, 100.0, ComparisonObjective::MeanDecodeTokensPerSecond).unwrap(),
+            0.20
+        );
+    }
+}
