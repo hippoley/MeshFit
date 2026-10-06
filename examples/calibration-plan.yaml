@@ -1,0 +1,17 @@
+id: node-b:gpu0:vllm:SingleHost
+placement: single_host
+runtime: vllm
+nodes:
+  - node-b
+accelerators:
+  - node: node-b
+    accelerator: gpu0
+    backend: cuda
+required_memory_gb: 19.0
+accelerator_memory_gb: 78.0
+relative_compute: 10.0
+hourly_cost_usd: 3.5
+memory_headroom_gb: 59.0
+communication: null
+assumptions:
+  - synthetic calibration fixture for contract validation only
