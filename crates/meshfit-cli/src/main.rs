@@ -128,6 +128,16 @@ struct BenchmarkInvalidBundle {
     error: String,
 }
 
+struct BenchmarkRunSlotLock {
+    path: PathBuf,
+}
+
+impl Drop for BenchmarkRunSlotLock {
+    fn drop(&mut self) {
+        let _ = fs::remove_file(&self.path);
+    }
+}
+
 #[derive(Debug, Serialize)]
 struct BenchmarkRunOnePlan {
     benchmark_id: String,
@@ -708,6 +718,12 @@ fn run() -> Result<(), String> {
                     ));
                 }
 
+                if let Some(parent) = bundle_path.parent() {
+                    fs::create_dir_all(parent)
+                        .map_err(|e| format!("create {}: {e}", parent.display()))?;
+                }
+                let _slot_lock = acquire_benchmark_run_slot(&bundle_path)?;
+
                 ensure_candidate_executable(kit_dir, &kit, candidate, &executable_path)?;
                 let executable_raw = fs::read_to_string(&executable_path)
                     .map_err(|e| format!("read {}: {e}", executable_path.display()))?;
@@ -744,10 +760,6 @@ fn run() -> Result<(), String> {
                 let bundle = run_local_benchmark(request)?;
                 bundle.validate()?;
 
-                if let Some(parent) = bundle_path.parent() {
-                    fs::create_dir_all(parent)
-                        .map_err(|e| format!("create {}: {e}", parent.display()))?;
-                }
                 let bundle_yaml = serde_yaml::to_string(&bundle).map_err(|e| e.to_string())?;
                 let temp_path = bundle_path.with_extension("yaml.tmp");
                 fs::write(&temp_path, bundle_yaml)
@@ -1002,6 +1014,23 @@ fn run() -> Result<(), String> {
     }
 
     Ok(())
+}
+
+fn acquire_benchmark_run_slot(bundle_path: &Path) -> Result<BenchmarkRunSlotLock, String> {
+    let lock_path = bundle_path.with_extension("yaml.lock");
+    match std::fs::OpenOptions::new()
+        .write(true)
+        .create_new(true)
+        .open(&lock_path)
+    {
+        Ok(_) => Ok(BenchmarkRunSlotLock { path: lock_path }),
+        Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => Err(format!(
+            "run slot '{}' is already locked by another benchmark process; if no process is active, remove '{}'",
+            bundle_path.display(),
+            lock_path.display()
+        )),
+        Err(error) => Err(format!("create run lock '{}': {error}", lock_path.display())),
+    }
 }
 
 fn load_benchmark_execution_kit(kit_dir: &Path) -> Result<BenchmarkExecutionKit, String> {
@@ -1825,6 +1854,23 @@ mod tests {
         let error = inspect_benchmark_preflight(&dir, "not-a-candidate", Some("node-a"), false)
             .unwrap_err();
         assert!(error.contains("not present in kit.yaml"));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn benchmark_run_slot_lock_is_exclusive_and_released() {
+        let dir = status_test_dir("run-lock");
+        fs::create_dir_all(&dir).unwrap();
+        let bundle_path = dir.join("run-01.yaml");
+
+        let first = acquire_benchmark_run_slot(&bundle_path).unwrap();
+        let second = acquire_benchmark_run_slot(&bundle_path).unwrap_err();
+        assert!(second.contains("already locked"));
+
+        drop(first);
+        let third = acquire_benchmark_run_slot(&bundle_path).unwrap();
+        drop(third);
 
         let _ = fs::remove_dir_all(dir);
     }
