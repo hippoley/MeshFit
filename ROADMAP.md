@@ -43,7 +43,8 @@ MeshFit's roadmap is ordered by the shortest path to a real closed loop.
 - [x] benchmark bundle contract + evidence conversion — real process/HTTP runner still pending
 - [x] TTFT / TPOT metric derivation contract — real measurement runner pending
 - [x] decode tok/s derivation contract — prefill and real measurement runner pending
-- [ ] peak memory — next: real RAM/VRAM sampling during local benchmark execution
+- [x] peak RAM — process-tree RSS sampling integrated and Linux mock-runtime CI verified (run #216)
+- [ ] peak VRAM — NVIDIA process-tree sampler implemented and parser-tested; real GPU validation pending
 - [ ] evidence bundle
 
 ## 5. Predict and calibrate — v0.4
