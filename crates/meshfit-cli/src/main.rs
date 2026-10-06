@@ -799,6 +799,7 @@ fn run() -> Result<(), String> {
                     run_number,
                     &plan.model_path,
                     overwrite,
+                    true,
                 )?;
                 println!("{}", bundle_path.display());
             }
@@ -844,6 +845,13 @@ fn run() -> Result<(), String> {
                     ));
                 }
 
+                let execution_kit = load_benchmark_execution_kit(kit_dir)?;
+                let execution_marker = benchmark_execution_lock_target(execution_kit.listen_port);
+                let _execution_lock = acquire_benchmark_file_lock(
+                    &execution_marker,
+                    "benchmark candidate execution",
+                )?;
+
                 for run_number in &plan.pending_runs {
                     execute_benchmark_run_one_prevalidated(
                         kit_dir,
@@ -851,6 +859,7 @@ fn run() -> Result<(), String> {
                         *run_number,
                         &plan.model_path,
                         overwrite,
+                        false,
                     )?;
                 }
 
@@ -1574,6 +1583,11 @@ fn execute_benchmark_host_plan(
         ));
     }
 
+    let execution_kit = load_benchmark_execution_kit(kit_dir)?;
+    let execution_marker = benchmark_execution_lock_target(execution_kit.listen_port);
+    let _execution_lock =
+        acquire_benchmark_file_lock(&execution_marker, "benchmark host execution")?;
+
     for candidate_plan in &plan.candidates {
         for run_number in &candidate_plan.pending_runs {
             execute_benchmark_run_one_prevalidated(
@@ -1582,6 +1596,7 @@ fn execute_benchmark_host_plan(
                 *run_number,
                 &candidate_plan.model_path,
                 plan.overwrite,
+                false,
             )?;
         }
     }
@@ -1612,6 +1627,7 @@ fn execute_benchmark_run_one_prevalidated(
     run_number: usize,
     model_path: &str,
     overwrite: bool,
+    acquire_execution_lock: bool,
 ) -> Result<PathBuf, String> {
     let kit = load_benchmark_execution_kit(kit_dir)?;
     if !kit.ready {
@@ -1642,8 +1658,15 @@ fn execute_benchmark_run_one_prevalidated(
     }
     let bundle_path = kit_dir.join(&comparison.bundles[run_number - 1]);
     let executable_path = kit_dir.join(&candidate.executable_path);
-    let execution_marker = benchmark_execution_lock_target(kit.listen_port);
-    let _execution_lock = acquire_benchmark_file_lock(&execution_marker, "benchmark execution")?;
+    let _execution_lock = if acquire_execution_lock {
+        let execution_marker = benchmark_execution_lock_target(kit.listen_port);
+        Some(acquire_benchmark_file_lock(
+            &execution_marker,
+            "benchmark execution",
+        )?)
+    } else {
+        None
+    };
 
     if bundle_path.exists() && !overwrite {
         return Err(format!(
