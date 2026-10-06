@@ -62,7 +62,7 @@ meshfit benchmark-candidates cluster.yaml target.yaml <meshfit-plan-id> --requir
 
 This emits:
 
-- `single-best-node` — highest relative compute among feasible single-node plans;
+- `single-best-node` — highest relative compute among feasible single-device `SingleHost` plans;
 - `max-aggregate-compute` — highest relative compute among all structurally feasible plans;
 - `meshfit` — the exact plan ID you supplied.
 
