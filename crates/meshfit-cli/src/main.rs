@@ -51,7 +51,7 @@ struct BenchmarkPlanCandidate {
     hourly_cost_usd: f64,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct BenchmarkExecutionKit {
     benchmark_id: String,
     ready: bool,
@@ -67,7 +67,7 @@ struct BenchmarkExecutionKit {
     warnings: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct BenchmarkExecutionCandidate {
     name: String,
     plan_id: String,
@@ -83,7 +83,7 @@ struct BenchmarkExecutionCandidate {
     run_commands: Vec<String>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct BenchmarkExecutionComparison {
     benchmark_id: String,
     meshfit_candidate: String,
@@ -91,12 +91,41 @@ struct BenchmarkExecutionComparison {
     candidates: Vec<BenchmarkExecutionComparisonCandidate>,
 }
 
-#[derive(Debug, Clone, Serialize)]
+#[derive(Debug, Clone, Deserialize, Serialize)]
 struct BenchmarkExecutionComparisonCandidate {
     name: String,
     strategy: String,
     hourly_cost_usd: f64,
     bundles: Vec<String>,
+}
+
+
+#[derive(Debug, Serialize)]
+struct BenchmarkKitStatus {
+    benchmark_id: String,
+    kit_ready: bool,
+    complete: bool,
+    expected_bundles: usize,
+    valid_bundles: usize,
+    candidates: Vec<BenchmarkCandidateStatus>,
+    issues: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct BenchmarkCandidateStatus {
+    name: String,
+    benchmark_host: String,
+    plan_id: String,
+    expected_runs: usize,
+    valid_runs: usize,
+    missing_bundles: Vec<String>,
+    invalid_bundles: Vec<BenchmarkInvalidBundle>,
+}
+
+#[derive(Debug, Serialize)]
+struct BenchmarkInvalidBundle {
+    path: String,
+    error: String,
 }
 
 fn main() {
@@ -548,6 +577,22 @@ fn run() -> Result<(), String> {
                 print!("{yaml}");
             }
         }
+        "benchmark-status" => {
+            let kit_dir = args.get(2).ok_or_else(|| {
+                "usage: meshfit benchmark-status <kit-dir> [--require-complete]".to_string()
+            })?;
+            let status = inspect_benchmark_kit(Path::new(kit_dir))?;
+
+            if args.iter().any(|arg| arg == "--require-complete") && !status.complete {
+                return Err(format!(
+                    "Benchmark 001 execution is incomplete: {}/{} valid bundles",
+                    status.valid_bundles, status.expected_bundles
+                ));
+            }
+
+            let yaml = serde_yaml::to_string(&status).map_err(|e| e.to_string())?;
+            print!("{yaml}");
+        }
         "compare-benchmarks" => {
             let manifest_path = args.get(2).ok_or_else(|| {
                 "usage: meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]"
@@ -738,6 +783,145 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 
+
+fn inspect_benchmark_kit(kit_dir: &Path) -> Result<BenchmarkKitStatus, String> {
+    let kit_path = kit_dir.join("kit.yaml");
+    let raw = fs::read_to_string(&kit_path)
+        .map_err(|e| format!("read {}: {e}", kit_path.display()))?;
+    let kit: BenchmarkExecutionKit =
+        serde_yaml::from_str(&raw).map_err(|e| format!("parse {}: {e}", kit_path.display()))?;
+
+    let mut expected_bundles = 0_usize;
+    let mut valid_bundles = 0_usize;
+    let mut issues = kit.warnings.clone();
+    let mut candidates = Vec::new();
+
+    if !kit.ready {
+        issues.push("execution kit is not marked ready".to_string());
+    }
+
+    for candidate in &kit.candidates {
+        if !candidate.compile_ready {
+            issues.push(format!(
+                "candidate '{}' is not compiler-ready{}",
+                candidate.name,
+                candidate
+                    .compile_error
+                    .as_deref()
+                    .map(|error| format!(": {error}"))
+                    .unwrap_or_default()
+            ));
+        }
+
+        let comparison = kit
+            .comparison_manifest
+            .candidates
+            .iter()
+            .find(|item| item.name == candidate.name);
+
+        let Some(comparison) = comparison else {
+            issues.push(format!(
+                "candidate '{}' is missing from comparison manifest",
+                candidate.name
+            ));
+            candidates.push(BenchmarkCandidateStatus {
+                name: candidate.name.clone(),
+                benchmark_host: candidate.benchmark_host.clone(),
+                plan_id: candidate.plan_id.clone(),
+                expected_runs: 0,
+                valid_runs: 0,
+                missing_bundles: Vec::new(),
+                invalid_bundles: Vec::new(),
+            });
+            continue;
+        };
+
+        expected_bundles += comparison.bundles.len();
+        let mut valid_runs = 0_usize;
+        let mut missing_bundles = Vec::new();
+        let mut invalid_bundles = Vec::new();
+
+        for bundle_rel in &comparison.bundles {
+            let bundle_path = kit_dir.join(bundle_rel);
+            if !bundle_path.is_file() {
+                missing_bundles.push(bundle_rel.clone());
+                continue;
+            }
+
+            let bundle_raw = match fs::read_to_string(&bundle_path) {
+                Ok(raw) => raw,
+                Err(error) => {
+                    invalid_bundles.push(BenchmarkInvalidBundle {
+                        path: bundle_rel.clone(),
+                        error: format!("read failed: {error}"),
+                    });
+                    continue;
+                }
+            };
+
+            let bundle: BenchmarkBundle = match serde_yaml::from_str(&bundle_raw) {
+                Ok(bundle) => bundle,
+                Err(error) => {
+                    invalid_bundles.push(BenchmarkInvalidBundle {
+                        path: bundle_rel.clone(),
+                        error: format!("parse failed: {error}"),
+                    });
+                    continue;
+                }
+            };
+
+            if let Err(error) = bundle.validate() {
+                invalid_bundles.push(BenchmarkInvalidBundle {
+                    path: bundle_rel.clone(),
+                    error,
+                });
+                continue;
+            }
+
+            if bundle.request.executable.source_plan_id != candidate.plan_id {
+                invalid_bundles.push(BenchmarkInvalidBundle {
+                    path: bundle_rel.clone(),
+                    error: format!(
+                        "source plan '{}' does not match candidate plan '{}'",
+                        bundle.request.executable.source_plan_id, candidate.plan_id
+                    ),
+                });
+                continue;
+            }
+
+            valid_runs += 1;
+            valid_bundles += 1;
+        }
+
+        candidates.push(BenchmarkCandidateStatus {
+            name: candidate.name.clone(),
+            benchmark_host: candidate.benchmark_host.clone(),
+            plan_id: candidate.plan_id.clone(),
+            expected_runs: comparison.bundles.len(),
+            valid_runs,
+            missing_bundles,
+            invalid_bundles,
+        });
+    }
+
+    let complete = kit.ready
+        && issues.is_empty()
+        && valid_bundles == expected_bundles
+        && candidates.iter().all(|candidate| {
+            candidate.missing_bundles.is_empty() && candidate.invalid_bundles.is_empty()
+        });
+
+    Ok(BenchmarkKitStatus {
+        benchmark_id: kit.benchmark_id,
+        kit_ready: kit.ready,
+        complete,
+        expected_bundles,
+        valid_bundles,
+        candidates,
+        issues,
+    })
+}
+
 fn materialize_benchmark_kit(
     kit: &BenchmarkExecutionKit,
     output_dir: &Path,
@@ -874,6 +1058,8 @@ fn render_benchmark_runbook(kit: &BenchmarkExecutionKit) -> String {
         }
     }
 
+    out.push_str("## Verify completion\n\n");
+    out.push_str("    meshfit benchmark-status . --require-complete\n\n");
     out.push_str("## Compare\n\n");
     out.push_str(
         "    meshfit compare-benchmarks comparison.yaml --markdown --require-publishable\n",
@@ -1072,7 +1258,7 @@ fn print_prediction(prediction: &Prediction) {
 
 fn print_help() {
     println!(
-        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--require-ready] [--write-dir DIR]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
+        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--require-ready] [--write-dir DIR]\n  meshfit benchmark-status <kit-dir> [--require-complete]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
     );
 }
 
