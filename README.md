@@ -339,6 +339,9 @@ Implemented now:
 # automatic local CPU/RAM + NVIDIA snapshot
 meshfit discover
 
+# optional stable logical node identity for containers / replaceable cloud hosts
+MESHFIT_NODE_ID=local-4090 meshfit discover
+
 # installed runtime identity
 meshfit runtimes
 

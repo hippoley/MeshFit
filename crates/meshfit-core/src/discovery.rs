@@ -28,9 +28,14 @@ pub struct LocalDiscovery {
 pub fn discover_local() -> LocalDiscovery {
     let architecture = env::consts::ARCH.to_string();
     let operating_system = env::consts::OS.to_string();
-    let hostname = env::var("HOSTNAME")
-        .or_else(|_| env::var("COMPUTERNAME"))
-        .unwrap_or_else(|_| "localhost".into());
+    let hostname = env::var("HOSTNAME").ok();
+    let computername = env::var("COMPUTERNAME").ok();
+    let node_override = env::var("MESHFIT_NODE_ID").ok();
+    let node_id = resolve_node_id(
+        node_override.as_deref(),
+        hostname.as_deref(),
+        computername.as_deref(),
+    );
 
     let ram_mib = discover_ram_mib();
     let cpu_model = discover_cpu_model();
@@ -45,7 +50,7 @@ pub fn discover_local() -> LocalDiscovery {
     };
 
     let local_fabric = match query_nvidia_topology() {
-        Ok(output) => parse_nvidia_topo_matrix(&output, &hostname),
+        Ok(output) => parse_nvidia_topo_matrix(&output, &node_id),
         Err(reason) => {
             warnings.push(reason);
             Vec::new()
@@ -75,7 +80,7 @@ pub fn discover_local() -> LocalDiscovery {
             devices,
         },
         node: HardwareNodeIR {
-            id: hostname,
+            id: node_id,
             site: "local".into(),
             ram_gb: ram_mib.unwrap_or(0) as f64 / 1024.0,
             accelerators,
@@ -84,6 +89,24 @@ pub fn discover_local() -> LocalDiscovery {
         local_fabric,
         warnings,
     }
+}
+
+pub fn resolve_node_id(
+    override_id: Option<&str>,
+    hostname: Option<&str>,
+    computername: Option<&str>,
+) -> String {
+    override_id
+        .map(str::trim)
+        .filter(|value| !value.is_empty())
+        .or_else(|| hostname.map(str::trim).filter(|value| !value.is_empty()))
+        .or_else(|| {
+            computername
+                .map(str::trim)
+                .filter(|value| !value.is_empty())
+        })
+        .unwrap_or("localhost")
+        .to_string()
 }
 
 fn query_nvidia_smi() -> Result<String, String> {
@@ -288,6 +311,32 @@ fn discover_cpu_model() -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn node_id_prefers_explicit_meshfit_override() {
+        assert_eq!(
+            resolve_node_id(
+                Some("  local-4090  "),
+                Some("docker-abc"),
+                Some("windows-host")
+            ),
+            "local-4090"
+        );
+    }
+
+    #[test]
+    fn node_id_falls_back_to_platform_hostname_then_localhost() {
+        assert_eq!(
+            resolve_node_id(None, Some("linux-host"), Some("windows-host")),
+            "linux-host"
+        );
+        assert_eq!(
+            resolve_node_id(None, None, Some("windows-host")),
+            "windows-host"
+        );
+        assert_eq!(resolve_node_id(Some("   "), Some("host-a"), None), "host-a");
+        assert_eq!(resolve_node_id(None, None, None), "localhost");
+    }
 
     #[test]
     fn parses_nvidia_csv_without_polluting_identity_with_free_memory() {

@@ -22,6 +22,8 @@ jobs:
       - run: cargo test --workspace
       - run: cargo build --workspace --release
       - run: cargo run -p meshfit -- discover
+      - run: MESHFIT_NODE_ID=node-ci cargo run -p meshfit -- discover > /tmp/meshfit-discover-node-id.yaml
+      - run: grep -q 'node-ci' /tmp/meshfit-discover-node-id.yaml
       - run: cargo run -p meshfit -- runtimes
       - run: cargo run -p meshfit -- inspect-model examples/model-artifact-demo.bin demo gguf q4_k_m test
       - run: cargo run -p meshfit -- inspect-model examples/model-artifact-demo.bin qwen-72b-class-q4 gguf q4_k_m test > /tmp/meshfit-model-identity.yaml
