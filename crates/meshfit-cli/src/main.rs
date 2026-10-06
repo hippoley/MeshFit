@@ -2865,7 +2865,9 @@ fn render_benchmark_runbook(kit: &BenchmarkExecutionKit) -> String {
         out.push_str(&format!("export MESHFIT_NODE_ID={}\n", shell_quote(host)));
         out.push_str("# If this host stores the same immutable model at another path:\n");
         out.push_str("# export MESHFIT_MODEL_PATH=/data/models/model.gguf\n\n");
-        out.push_str("# Audit this physical host and every assigned candidate before any runtime starts.\n");
+        out.push_str(
+            "# Audit this physical host and every assigned candidate before any runtime starts.\n",
+        );
         out.push_str("meshfit benchmark-host-check . --current-host --require-ready\n\n");
         out.push_str("# Inspect the exact execution plan.\n");
         out.push_str("meshfit benchmark-run-host . --current-host --resume --dry-run\n\n");
