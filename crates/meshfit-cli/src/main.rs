@@ -738,7 +738,6 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 
-
 fn materialize_benchmark_kit(
     kit: &BenchmarkExecutionKit,
     output_dir: &Path,
@@ -747,8 +746,7 @@ fn materialize_benchmark_kit(
     model_identity_raw: &str,
 ) -> Result<PathBuf, String> {
     let inputs_dir = output_dir.join("inputs");
-    fs::create_dir_all(&inputs_dir)
-        .map_err(|e| format!("create {}: {e}", inputs_dir.display()))?;
+    fs::create_dir_all(&inputs_dir).map_err(|e| format!("create {}: {e}", inputs_dir.display()))?;
 
     fs::write(inputs_dir.join("snapshot.yaml"), snapshot_raw)
         .map_err(|e| format!("write snapshot input: {e}"))?;
@@ -799,8 +797,7 @@ fn materialize_benchmark_kit(
     }
 
     let kit_yaml = serde_yaml::to_string(&localized).map_err(|e| e.to_string())?;
-    fs::write(output_dir.join("kit.yaml"), kit_yaml)
-        .map_err(|e| format!("write kit.yaml: {e}"))?;
+    fs::write(output_dir.join("kit.yaml"), kit_yaml).map_err(|e| format!("write kit.yaml: {e}"))?;
 
     let comparison_yaml =
         serde_yaml::to_string(&localized.comparison_manifest).map_err(|e| e.to_string())?;
