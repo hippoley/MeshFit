@@ -301,15 +301,15 @@ fn run_against_child(
         waves.push(wave);
     }
 
-    let unix_seconds = SystemTime::now()
+    let unix_millis = SystemTime::now()
         .duration_since(UNIX_EPOCH)
         .map_err(|e| format!("system clock error: {e}"))?
-        .as_secs();
+        .as_millis();
 
     let benchmark_id = format!(
         "{}-{}",
         sanitize_id(&request.executable.source_plan_id),
-        unix_seconds
+        unix_millis
     );
 
     Ok(BenchmarkBundle {
@@ -321,7 +321,7 @@ fn run_against_child(
             source: "meshfit-local-runner".into(),
             source_url: None,
             commit: meshfit_source_commit(),
-            captured_at: Some(format!("unix:{unix_seconds}")),
+            captured_at: Some(format!("unix_ms:{unix_millis}")),
         },
     })
 }
