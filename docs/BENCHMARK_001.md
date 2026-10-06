@@ -305,3 +305,6 @@ Hub/runtime-resolved model identifiers are reported as `runtime_resolved_unverif
 Existing result bundles are a hard failure by default. Use `--allow-existing` only when intentionally resuming an experiment without overwriting those files.
 
 A normal preflight always emits the diagnostic report. `--require-ready` turns any hard issue into a non-zero exit code for scripts and runbooks.
+
+
+The `--host` option follows the same logical-node contract as `benchmark-preflight`: use it when the snapshot node ID intentionally differs from the operating-system hostname. Real execution still requires runtime/model readiness; `--host` does not bypass those checks.
