@@ -293,10 +293,17 @@ fn run_against_child(
         provenance: BenchmarkProvenance {
             source: "meshfit-local-runner".into(),
             source_url: None,
-            commit: None,
+            commit: meshfit_source_commit(),
             captured_at: Some(format!("unix:{unix_seconds}")),
         },
     })
+}
+
+fn meshfit_source_commit() -> Option<String> {
+    option_env!("MESHFIT_GIT_COMMIT")
+        .map(str::trim)
+        .filter(|commit| !commit.is_empty())
+        .map(str::to_string)
 }
 
 fn wait_for_health(request: &BenchmarkRequestIR, child: &mut Child) -> Result<(), String> {
@@ -628,6 +635,15 @@ mod tests {
         });
 
         assert!(has_non_empty_content_delta(&value));
+    }
+
+    #[test]
+    fn build_commit_is_not_invented_at_runtime() {
+        let commit = meshfit_source_commit();
+        if let Some(commit) = commit {
+            assert!((7..=64).contains(&commit.len()));
+            assert!(commit.chars().all(|ch| ch.is_ascii_hexdigit()));
+        }
     }
 
     #[test]
