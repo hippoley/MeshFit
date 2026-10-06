@@ -3224,26 +3224,27 @@ mod tests {
 
     #[test]
     fn benchmark_plan_selection_keeps_three_strategies_distinct() {
-        let plan = |id: &str,
-                    placement: PlacementKind,
-                    nodes: Vec<&str>,
-                    relative_compute: f64|
-         -> PlanIR {
+        fn plan(
+            id: &str,
+            placement: PlacementKind,
+            nodes: Vec<&str>,
+            relative_compute: f64,
+        ) -> PlanIR {
             PlanIR {
-            id: id.into(),
-            placement,
-            runtime: "vllm".into(),
-            nodes: nodes.into_iter().map(str::to_string).collect(),
-            accelerators: vec![],
-            required_memory_gb: 64.0,
-            accelerator_memory_gb: 80.0,
-            relative_compute,
-            hourly_cost_usd: 1.0,
-            memory_headroom_gb: 16.0,
-            communication: None,
-            assumptions: vec![],
+                id: id.into(),
+                placement,
+                runtime: "vllm".into(),
+                nodes: nodes.into_iter().map(str::to_string).collect(),
+                accelerators: vec![],
+                required_memory_gb: 64.0,
+                accelerator_memory_gb: 80.0,
+                relative_compute,
+                hourly_cost_usd: 1.0,
+                memory_headroom_gb: 16.0,
+                communication: None,
+                assumptions: vec![],
+            }
         }
-        };
 
         let report = PlacementReport {
             model: "benchmark-fixture".into(),
