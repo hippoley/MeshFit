@@ -68,7 +68,9 @@ This emits:
 
 If these resolve to overlapping plan IDs, the output carries a warning. That cluster/workload cannot support a publishable three-strategy Benchmark 001 without choosing a different discriminating setup.
 
-Then compile and execute each selected plan with the same model artifact and BenchmarkConfig, retaining every raw bundle. Finally create a comparison manifest:
+Then compile and execute each selected plan with the same model artifact and BenchmarkConfig, retaining every raw bundle. `benchmark-auto` now defaults to at least 10 measured requests per run (rounded up to a whole concurrency wave), so two independent runs can satisfy the 20-sample publication floor. Override with `--measured-requests N` when needed.
+
+Finally create a comparison manifest:
 
 
 ```yaml
