@@ -388,6 +388,7 @@ mod tests {
             relative_compute: 10.0,
             hourly_cost_usd: 0.0,
             memory_headroom_gb: 40.0,
+            communication: None,
             assumptions: vec![],
         }
     }
