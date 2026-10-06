@@ -1043,7 +1043,7 @@ fn run() -> Result<(), String> {
         "compile-snapshot" => {
             let snapshot_path = args
                 .get(2)
-                .ok_or_else(|| "usage: meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers] [--listen-port N] [--listen-port N]".to_string())?;
+                .ok_or_else(|| "usage: meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers] [--listen-port N] [--listen-port N] [--listen-port N]".to_string())?;
             let target_path = args
                 .get(3)
                 .ok_or_else(|| "missing target.yaml".to_string())?;
@@ -1637,6 +1637,14 @@ fn load_benchmark_execution_kit(kit_dir: &Path) -> Result<BenchmarkExecutionKit,
     serde_yaml::from_str(&raw).map_err(|e| format!("parse {}: {e}", kit_path.display()))
 }
 
+fn executable_contract_matches(
+    executable: &ExecutablePlanIR,
+    model_path: &str,
+    listen_port: u16,
+) -> bool {
+    executable.model_source == model_path && executable.service.port == listen_port
+}
+
 fn executable_matches_contract(
     executable_path: &Path,
     model_path: &str,
@@ -1649,7 +1657,7 @@ fn executable_matches_contract(
         .map_err(|e| format!("read {}: {e}", executable_path.display()))?;
     let executable: ExecutablePlanIR = serde_yaml::from_str(&raw)
         .map_err(|e| format!("parse {}: {e}", executable_path.display()))?;
-    Ok(executable.model_source == model_path && executable.service.port == listen_port)
+    Ok(executable_contract_matches(&executable, model_path, listen_port))
 }
 
 fn inspect_model_path_for_host(
@@ -2912,6 +2920,30 @@ mod tests {
         assert!(error.contains("not present in kit.yaml"));
 
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn executable_contract_requires_matching_model_path_and_port() {
+        let raw = include_str!("../../../examples/compile-vllm.yaml");
+        let mut request: CompileRequest = serde_yaml::from_str(raw).unwrap();
+        request.listen_port = 19011;
+        let executable = compile_plan(&request).unwrap();
+
+        assert!(executable_contract_matches(
+            &executable,
+            &request.model_path,
+            19011
+        ));
+        assert!(!executable_contract_matches(
+            &executable,
+            &request.model_path,
+            19012
+        ));
+        assert!(!executable_contract_matches(
+            &executable,
+            "other-model",
+            19011
+        ));
     }
 
     #[test]
