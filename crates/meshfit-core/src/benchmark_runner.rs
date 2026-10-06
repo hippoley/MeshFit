@@ -417,11 +417,6 @@ fn run_concurrent_wave(
         ));
     }
 
-    for measurement in &mut measurements {
-        measurement.peak_vram_gb = peaks.peak_vram_gb;
-        measurement.peak_ram_gb = peaks.peak_ram_gb;
-    }
-
     let output_tokens = measurements
         .iter()
         .map(|measurement| measurement.output_tokens)
@@ -539,8 +534,6 @@ fn run_streaming_request(request: &BenchmarkRequestIR) -> Result<RequestMeasurem
         ttft_ms,
         total_ms,
         output_tokens,
-        peak_vram_gb: None,
-        peak_ram_gb: None,
     })
 }
 
@@ -923,7 +916,7 @@ HTTPServer(("127.0.0.1", {port}), Handler).serve_forever()
         );
         assert!(bundle.provenance.commit.is_some());
         assert_eq!(bundle.measurements[0].output_tokens, Some(2));
-        assert!(bundle.measurements[0].peak_ram_gb.is_some());
+        assert!(bundle.waves[0].peak_ram_gb.is_some());
         assert!(bundle.measurements[0].ttft_ms > 0.0);
         assert!(bundle.measurements[0].total_ms >= bundle.measurements[0].ttft_ms);
     }
