@@ -75,7 +75,7 @@ MeshFit's roadmap is ordered by the shortest path to a real closed loop.
 - [x] memory calibration contract + CLI — PlanIR required-memory vs observed peak-VRAM error/correction ratios; synthetic CI Reality Verified on runs #877/#900; real GPU repeated calibration pending
 - [x] exact-identity performance calibration contract — plan/fingerprint/context/concurrency/BenchmarkConfig hard-bound; TTFT/decode error reporting CI Reality Verified on run #956
 - [ ] latency / throughput model
-- [ ] cost model
+- [x] declared marginal cost estimation contract — PlanIR hourly cost + explicit predicted output tok/s + modeled communication egress → $/1M output tokens; synthetic full-stack CI Reality Verified on run #1010; full TCO and observed-cost calibration pending
 - [x] estimate vs observed error — VRAM plus exact-identity p95 TTFT / mean decode throughput error contracts, direction-aware optimistic error and conservative correction ratios; synthetic full-stack CI Reality Verified on runs #877/#900/#956; real GPU performance calibration pending
 - [ ] bounded evidence transfer
 
