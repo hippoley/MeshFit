@@ -1649,9 +1649,10 @@ fn inspect_benchmark_worklist(
             }
 
             let command = format!(
-                "meshfit benchmark-run-one . {} {}",
+                "meshfit benchmark-run-one . {} {} --host {}",
                 shell_quote(&candidate.name),
-                run_number
+                run_number,
+                shell_quote(&candidate.benchmark_host)
             );
             host.slots.push(BenchmarkWorkSlot {
                 candidate: candidate.name.clone(),
