@@ -99,7 +99,6 @@ struct BenchmarkExecutionComparisonCandidate {
     bundles: Vec<String>,
 }
 
-
 #[derive(Debug, Serialize)]
 struct BenchmarkKitStatus {
     benchmark_id: String,
@@ -783,11 +782,10 @@ fn run() -> Result<(), String> {
     Ok(())
 }
 
-
 fn inspect_benchmark_kit(kit_dir: &Path) -> Result<BenchmarkKitStatus, String> {
     let kit_path = kit_dir.join("kit.yaml");
-    let raw = fs::read_to_string(&kit_path)
-        .map_err(|e| format!("read {}: {e}", kit_path.display()))?;
+    let raw =
+        fs::read_to_string(&kit_path).map_err(|e| format!("read {}: {e}", kit_path.display()))?;
     let kit: BenchmarkExecutionKit =
         serde_yaml::from_str(&raw).map_err(|e| format!("parse {}: {e}", kit_path.display()))?;
 
@@ -1328,10 +1326,7 @@ mod tests {
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_nanos();
-        std::env::temp_dir().join(format!(
-            "meshfit-{label}-{}-{nonce}",
-            std::process::id()
-        ))
+        std::env::temp_dir().join(format!("meshfit-{label}-{}-{nonce}", std::process::id()))
     }
 
     #[test]
@@ -1365,11 +1360,7 @@ mod tests {
             serde_yaml::to_string(&status_test_kit()).unwrap(),
         )
         .unwrap();
-        fs::write(
-            dir.join("results/meshfit/run-01.yaml"),
-            "not-valid-yaml: [",
-        )
-        .unwrap();
+        fs::write(dir.join("results/meshfit/run-01.yaml"), "not-valid-yaml: [").unwrap();
 
         let status = inspect_benchmark_kit(&dir).unwrap();
         assert!(!status.complete);
