@@ -202,6 +202,7 @@ struct BenchmarkMemoryCalibrationReport {
     context_tokens: u32,
     concurrency: u32,
     model_id: String,
+    execution_fingerprint: String,
     missing_bundles: Vec<String>,
     calibration: meshfit_core::MemoryCalibrationSummary,
 }
@@ -2088,6 +2089,15 @@ fn calibrate_benchmark_candidate_memory(
     let expected_model_identity: ModelArtifactIdentity =
         serde_yaml::from_str(&model_identity_raw)
             .map_err(|e| format!("parse {}: {e}", model_identity_path.display()))?;
+    let expected_hardware = snapshot
+        .hardware_identities
+        .get(&candidate.benchmark_host)
+        .ok_or_else(|| {
+            format!(
+                "frozen snapshot has no hardware identity for candidate host '{}'",
+                candidate.benchmark_host
+            )
+        })?;
 
     let scenario = target
         .clone()
@@ -2107,6 +2117,7 @@ fn calibrate_benchmark_candidate_memory(
 
     let mut bundles = Vec::new();
     let mut missing_bundles = Vec::new();
+    let mut execution_fingerprint: Option<String> = None;
     for bundle_rel in &comparison.bundles {
         let bundle_path = kit_dir.join(bundle_rel);
         if !bundle_path.is_file() {
@@ -2167,6 +2178,26 @@ fn calibrate_benchmark_candidate_memory(
                 kit.concurrency
             ));
         }
+        if &bundle.request.identity.hardware != expected_hardware {
+            return Err(format!(
+                "bundle '{}' hardware identity does not match frozen snapshot host '{}'",
+                bundle_path.display(),
+                candidate.benchmark_host
+            ));
+        }
+
+        let fingerprint = bundle.request.identity.fingerprint();
+        if let Some(expected_fingerprint) = execution_fingerprint.as_deref() {
+            if fingerprint != expected_fingerprint {
+                return Err(format!(
+                    "bundle '{}' execution identity fingerprint differs from earlier calibration runs",
+                    bundle_path.display()
+                ));
+            }
+        } else {
+            execution_fingerprint = Some(fingerprint);
+        }
+
         bundles.push(bundle);
     }
 
@@ -2187,6 +2218,8 @@ fn calibrate_benchmark_candidate_memory(
     }
 
     let calibration = calibrate_plan_memory(&plan, &bundles)?;
+    let execution_fingerprint = execution_fingerprint
+        .ok_or_else(|| "memory calibration has no execution fingerprint".to_string())?;
     Ok(BenchmarkMemoryCalibrationReport {
         benchmark_id: kit.benchmark_id,
         candidate: candidate.name.clone(),
@@ -2196,6 +2229,7 @@ fn calibrate_benchmark_candidate_memory(
         context_tokens: target.workload.context_tokens,
         concurrency: kit.concurrency,
         model_id: target.model.id.clone(),
+        execution_fingerprint,
         missing_bundles,
         calibration,
     })
