@@ -591,7 +591,9 @@ pub fn parse_vm_stat_available_mib(raw: &str) -> Option<u64> {
 
     let mut pages = 0_u64;
     for label in ["Pages free", "Pages inactive", "Pages speculative"] {
-        let line = raw.lines().find(|line| line.trim_start().starts_with(label))?;
+        let line = raw
+            .lines()
+            .find(|line| line.trim_start().starts_with(label))?;
         let count = line
             .split(':')
             .nth(1)?
