@@ -99,7 +99,32 @@ The kit fixes:
 - benchmark commands;
 - the final comparison-manifest skeleton.
 
-The kit exposes a top-level `ready` boolean. Every candidate is compiler-preflighted before a command is emitted. Unsupported plans are marked `compile_ready: false` with the compiler error instead of receiving a command that is known to fail. The kit also validates that the model identity matches the target model and carries an artifact hash or revision.
+The kit exposes a top-level `ready` boolean. Every candidate is compiler-preflighted before a command is emitted. To materialize a self-contained experiment control directory (without copying the model weights), use:
+
+```bash
+meshfit benchmark-kit \
+  cluster.yaml \
+  target.yaml \
+  <meshfit-plan-id> \
+  <model-path> \
+  model-identity.yaml \
+  --write-dir benchmark-001
+```
+
+This writes `kit.yaml`, `comparison.yaml`, `RUNBOOK.md`, an `inputs/` snapshot of the small control files, and per-strategy `artifacts/` + `results/` directories. Commands in the materialized kit are rewritten to run from that directory. Local model paths are canonicalized instead of copying large weights; model hub identifiers are preserved as-is.
+
+During real execution, inspect progress at any time:
+
+```bash
+meshfit benchmark-status benchmark-001
+
+# final gate before comparison
+meshfit benchmark-status benchmark-001 --require-complete
+```
+
+The status command reports each candidate's `benchmark_host`, expected/valid run counts, missing bundle paths, and invalid bundles. Existing bundle files are parsed and validated, and their `source_plan_id` must match the candidate plan; a merely present file does not count as a completed run.
+
+Every candidate is compiler-preflighted before a command is emitted. Unsupported plans are marked `compile_ready: false` with the compiler error instead of receiving a command that is known to fail. The kit also validates that the model identity matches the target model and carries an artifact hash or revision.
 
 Then compile and execute each selected plan with the same model artifact and BenchmarkConfig, retaining every raw bundle. `benchmark-auto` defaults to at least 10 measured requests per run, so two independent runs can satisfy the 20-sample publication floor. Override with `--measured-requests N` when needed.
 
@@ -236,28 +261,3 @@ The stability metric follows the selected comparison objective:
 Results above the 20% CV limit remain available as provisional diagnostics but must not be labeled PUBLISHABLE or used as a MeshFit performance claim.
 
 Comparison output also reports TTFT standard deviation/CV, decode-rate standard deviation, and run-level objective CV.
-
-
-## Best-baseline headline
-
-Benchmark 001 reports one directly understandable comparison in addition to oracle regret:
-
-```text
-MeshFit vs best baseline = relative improvement under the selected objective
-```
-
-For lower-is-better objectives such as p95 TTFT:
-
-```text
-improvement = (baseline - MeshFit) / baseline
-```
-
-For higher-is-better objectives such as decode tokens/s:
-
-```text
-improvement = (MeshFit - baseline) / baseline
-```
-
-Positive values mean MeshFit is better; negative values mean it is worse.
-
-The report includes the selected best baseline name and objective value. A publishable comparison may surface this delta as a headline. A non-publishable comparison must label it provisional and explicitly prohibit using it as a MeshFit performance claim.
