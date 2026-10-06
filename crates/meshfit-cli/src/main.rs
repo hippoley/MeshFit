@@ -828,9 +828,7 @@ fn run() -> Result<(), String> {
             let explicit_host = option_value(&args[3..], "--host")?.map(str::to_string);
             let current_host = args.iter().any(|arg| arg == "--current-host");
             if explicit_host.is_some() == current_host {
-                return Err(
-                    "exactly one of --host NODE or --current-host is required".to_string(),
-                );
+                return Err("exactly one of --host NODE or --current-host is required".to_string());
             }
             let host = explicit_host.unwrap_or_else(|| discover_local().node.id);
             let model_path_override = option_value(&args[3..], "--model-path")?.map(str::to_string);
