@@ -64,6 +64,12 @@ pub struct CandidateBenchmarkSummary {
     pub estimated_cost_per_million_output_tokens_usd: Option<f64>,
     pub objective_value: f64,
     #[serde(default)]
+    pub run_objective_mean: Option<f64>,
+    #[serde(default)]
+    pub run_objective_ci95_lower: Option<f64>,
+    #[serde(default)]
+    pub run_objective_ci95_upper: Option<f64>,
+    #[serde(default)]
     pub run_objective_cv: Option<f64>,
     pub regret_fraction: f64,
 }
@@ -83,6 +89,10 @@ pub struct BenchmarkComparisonReport {
     pub best_baseline_objective_value: f64,
     pub best_baseline_regret_fraction: f64,
     pub meshfit_improvement_vs_best_baseline_fraction: f64,
+    #[serde(default)]
+    pub meshfit_improvement_ci95_lower_fraction: Option<f64>,
+    #[serde(default)]
+    pub meshfit_improvement_ci95_upper_fraction: Option<f64>,
     #[serde(default)]
     pub regret_reduction_vs_best_baseline_fraction: Option<f64>,
     pub candidates: Vec<CandidateBenchmarkSummary>,
@@ -106,6 +116,17 @@ impl BenchmarkComparisonReport {
                 self.meshfit_improvement_vs_best_baseline_fraction.abs() * 100.0
             )
         };
+        let improvement_interval = match (
+            self.meshfit_improvement_ci95_lower_fraction,
+            self.meshfit_improvement_ci95_upper_fraction,
+        ) {
+            (Some(lower), Some(upper)) => format!(
+                " · **run-level 95% interval:** [{:.1}%, {:.1}%]",
+                lower * 100.0,
+                upper * 100.0
+            ),
+            _ => String::new(),
+        };
 
         let mut out = String::new();
         out.push_str(&format!("## {}\n\n", self.benchmark_id));
@@ -114,9 +135,10 @@ impl BenchmarkComparisonReport {
                 "**Evidence status:** PUBLISHABLE · independent repeated runs verified\n\n",
             );
             out.push_str(&format!(
-                "**MeshFit vs best baseline ({}): {}** · **placement regret:** {:.1}% · **baseline regret:** {:.1}% · **regret reduction:** {}\n\n",
+                "**MeshFit vs best baseline ({}): {}**{} · **placement regret:** {:.1}% · **baseline regret:** {:.1}% · **regret reduction:** {}\n\n",
                 self.best_baseline_candidate,
                 improvement_label,
+                improvement_interval,
                 self.meshfit_regret_fraction * 100.0,
                 self.best_baseline_regret_fraction * 100.0,
                 regret_reduction
@@ -127,8 +149,8 @@ impl BenchmarkComparisonReport {
                 self.evidence_status
             ));
             out.push_str(&format!(
-                "Provisional comparison only. MeshFit vs best baseline ({}): {}. Do not publish this delta as a MeshFit performance claim.\n\n",
-                self.best_baseline_candidate, improvement_label
+                "Provisional comparison only. MeshFit vs best baseline ({}): {}{}. Do not publish this delta as a MeshFit performance claim.\n\n",
+                self.best_baseline_candidate, improvement_label, improvement_interval
             ));
         }
         out.push_str(
@@ -268,6 +290,13 @@ pub fn compare_benchmarks(
         best_baseline_objective_value,
         request.objective,
     )?;
+    let improvement_interval = conservative_improvement_interval(
+        meshfit.run_objective_ci95_lower,
+        meshfit.run_objective_ci95_upper,
+        best_baseline.run_objective_ci95_lower,
+        best_baseline.run_objective_ci95_upper,
+        request.objective,
+    );
 
     let regret_reduction = if best_baseline_regret > 0.0 {
         Some((best_baseline_regret - meshfit_regret_fraction) / best_baseline_regret)
@@ -289,6 +318,8 @@ pub fn compare_benchmarks(
         best_baseline_objective_value,
         best_baseline_regret_fraction: best_baseline_regret,
         meshfit_improvement_vs_best_baseline_fraction,
+        meshfit_improvement_ci95_lower_fraction: improvement_interval.map(|(lower, _)| lower),
+        meshfit_improvement_ci95_upper_fraction: improvement_interval.map(|(_, upper)| upper),
         regret_reduction_vs_best_baseline_fraction: regret_reduction,
         candidates: summaries,
     })
@@ -522,6 +553,8 @@ fn summarize_candidate(
         .filter_map(|bundle| bundle_objective_value(bundle, objective))
         .collect::<Vec<_>>();
     let run_objective_cv = coefficient_of_variation(&run_objective_values);
+    let run_objective_mean = mean(&run_objective_values);
+    let run_objective_interval = log_student_t_interval_95(&run_objective_values);
     let wave_throughput = candidate
         .bundles
         .iter()
@@ -597,6 +630,9 @@ fn summarize_candidate(
         hourly_cost_usd: candidate.hourly_cost_usd,
         estimated_cost_per_million_output_tokens_usd: estimated_cost,
         objective_value,
+        run_objective_mean,
+        run_objective_ci95_lower: run_objective_interval.map(|(lower, _)| lower),
+        run_objective_ci95_upper: run_objective_interval.map(|(_, upper)| upper),
         run_objective_cv,
         regret_fraction: 0.0,
     })
@@ -655,6 +691,73 @@ fn coefficient_of_variation(values: &[f64]) -> Option<f64> {
     }
 
     Some(standard_deviation(values)? / mean.abs())
+}
+
+fn student_t_critical_95(degrees_of_freedom: usize) -> f64 {
+    const T: [f64; 30] = [
+        12.706, 4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262, 2.228,
+        2.201, 2.179, 2.160, 2.145, 2.131, 2.120, 2.110, 2.101, 2.093, 2.086,
+        2.080, 2.074, 2.069, 2.064, 2.060, 2.056, 2.052, 2.048, 2.045, 2.042,
+    ];
+
+    if degrees_of_freedom == 0 {
+        f64::INFINITY
+    } else if degrees_of_freedom <= T.len() {
+        T[degrees_of_freedom - 1]
+    } else {
+        1.96
+    }
+}
+
+fn log_student_t_interval_95(values: &[f64]) -> Option<(f64, f64)> {
+    if values.len() < 2 || values.iter().any(|value| *value <= 0.0 || !value.is_finite()) {
+        return None;
+    }
+
+    let logs = values.iter().map(|value| value.ln()).collect::<Vec<_>>();
+    let log_mean = mean(&logs)?;
+    let log_stddev = standard_deviation(&logs)?;
+    let critical = student_t_critical_95(logs.len() - 1);
+    let margin = critical * log_stddev / (logs.len() as f64).sqrt();
+
+    Some(((log_mean - margin).exp(), (log_mean + margin).exp()))
+}
+
+fn conservative_improvement_interval(
+    meshfit_lower: Option<f64>,
+    meshfit_upper: Option<f64>,
+    baseline_lower: Option<f64>,
+    baseline_upper: Option<f64>,
+    objective: ComparisonObjective,
+) -> Option<(f64, f64)> {
+    let (meshfit_lower, meshfit_upper, baseline_lower, baseline_upper) = (
+        meshfit_lower?,
+        meshfit_upper?,
+        baseline_lower?,
+        baseline_upper?,
+    );
+
+    if meshfit_lower <= 0.0
+        || meshfit_upper <= 0.0
+        || baseline_lower <= 0.0
+        || baseline_upper <= 0.0
+    {
+        return None;
+    }
+
+    let (lower, upper) = if objective.lower_is_better() {
+        (
+            1.0 - meshfit_upper / baseline_lower,
+            1.0 - meshfit_lower / baseline_upper,
+        )
+    } else {
+        (
+            meshfit_lower / baseline_upper - 1.0,
+            meshfit_upper / baseline_lower - 1.0,
+        )
+    };
+
+    Some((lower.min(upper), lower.max(upper)))
 }
 
 fn percentile(values: &[f64], quantile: f64) -> Result<f64, String> {
@@ -745,6 +848,8 @@ mod tests {
             best_baseline_objective_value: 125.0,
             best_baseline_regret_fraction: 0.25,
             meshfit_improvement_vs_best_baseline_fraction: 0.20,
+            meshfit_improvement_ci95_lower_fraction: Some(0.10),
+            meshfit_improvement_ci95_upper_fraction: Some(0.30),
             regret_reduction_vs_best_baseline_fraction: Some(1.0),
             candidates: vec![CandidateBenchmarkSummary {
                 name: "meshfit".into(),
@@ -764,6 +869,9 @@ mod tests {
                 hourly_cost_usd: Some(1.0),
                 estimated_cost_per_million_output_tokens_usd: Some(6.944),
                 objective_value: 100.0,
+                run_objective_mean: Some(100.0),
+                run_objective_ci95_lower: Some(90.0),
+                run_objective_ci95_upper: Some(110.0),
                 run_objective_cv: Some(0.05),
                 regret_fraction: 0.0,
             }],
@@ -771,6 +879,7 @@ mod tests {
 
         let markdown = report.to_markdown();
         assert!(markdown.contains("MeshFit vs best baseline (heuristic): 20.0% better"));
+        assert!(markdown.contains("run-level 95% interval: [10.0%, 30.0%]"));
         assert!(markdown.contains("| meshfit | topology-aware | 2 | 20 |"));
         assert!(markdown.contains("Observed oracle: **meshfit**"));
     }
@@ -794,6 +903,39 @@ mod tests {
     #[test]
     fn publication_stability_threshold_is_explicit() {
         assert_eq!(MAX_RUN_OBJECTIVE_CV_FOR_PUBLICATION, 0.20);
+    }
+
+    #[test]
+    fn log_student_t_interval_is_positive_and_widens_for_two_runs() {
+        let interval = log_student_t_interval_95(&[100.0, 110.0]).unwrap();
+        assert!(interval.0 > 0.0);
+        assert!(interval.0 < 100.0);
+        assert!(interval.1 > 110.0);
+    }
+
+    #[test]
+    fn conservative_improvement_interval_uses_worst_case_bounds() {
+        let lower_better = conservative_improvement_interval(
+            Some(80.0),
+            Some(100.0),
+            Some(100.0),
+            Some(120.0),
+            ComparisonObjective::P95TtftMs,
+        )
+        .unwrap();
+        assert!((lower_better.0 - 0.0).abs() < 1e-12);
+        assert!((lower_better.1 - (1.0 - 80.0 / 120.0)).abs() < 1e-12);
+
+        let higher_better = conservative_improvement_interval(
+            Some(100.0),
+            Some(120.0),
+            Some(80.0),
+            Some(100.0),
+            ComparisonObjective::MeanDecodeTokensPerSecond,
+        )
+        .unwrap();
+        assert!((higher_better.0 - 0.0).abs() < 1e-12);
+        assert!((higher_better.1 - 0.5).abs() < 1e-12);
     }
 
     #[test]
