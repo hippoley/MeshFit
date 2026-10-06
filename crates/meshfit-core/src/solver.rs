@@ -478,12 +478,17 @@ fn enumerate_two_node_tp(
                 relative_compute: accelerator_a.relative_compute + accelerator_b.relative_compute,
                 hourly_cost_usd: a.hourly_cost_usd + b.hourly_cost_usd,
                 memory_headroom_gb: bottleneck_headroom,
+                communication: Some(communication.clone()),
                 assumptions: memory_assumptions(
                     context,
                     vec![
                         format!(
                             "cross-node TP uses explicit devices over measured {:.1}Gbps / {:.1}ms fabric",
                             bandwidth_gbps, latency_ms
+                        ),
+                        format!(
+                            "analytical TP communication tax {:.3}ms/token is within the {:.3}ms/token workload budget",
+                            communication.total_ms_per_token, communication_budget_ms
                         ),
                         format!(
                             "cross-node TP uses {:.1}GB equal structural shards and is gated by the weaker device",
