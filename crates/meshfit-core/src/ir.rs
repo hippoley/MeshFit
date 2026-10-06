@@ -202,7 +202,9 @@ pub enum TpCommunicationModelIR {
 impl TpCommunicationModelIR {
     pub fn base_bytes_per_token(&self) -> f64 {
         match self {
-            Self::BytesPerToken { bytes_per_token, .. } => *bytes_per_token as f64,
+            Self::BytesPerToken {
+                bytes_per_token, ..
+            } => *bytes_per_token as f64,
             Self::Transformer {
                 layers,
                 hidden_size,
