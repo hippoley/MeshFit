@@ -323,19 +323,6 @@ fn run() -> Result<(), String> {
             let target: PlacementTargetIR = serde_yaml::from_str(&target_raw)
                 .map_err(|e| format!("parse {target_path}: {e}"))?;
 
-            if model_identity.model_id != target.model.id {
-                return Err(format!(
-                    "model identity '{}' does not match target model '{}'",
-                    model_identity.model_id, target.model.id
-                ));
-            }
-            if model_identity.artifact_sha256.is_none() && model_identity.revision.is_none() {
-                return Err(
-                    "model identity must include artifact_sha256 or revision for Benchmark 001"
-                        .to_string(),
-                );
-            }
-
             let report = solve(
                 &target
                     .clone()
@@ -396,6 +383,19 @@ fn run() -> Result<(), String> {
                 .map_err(|e| format!("parse {snapshot_path}: {e}"))?;
             let target: PlacementTargetIR = serde_yaml::from_str(&target_raw)
                 .map_err(|e| format!("parse {target_path}: {e}"))?;
+
+            if model_identity.model_id != target.model.id {
+                return Err(format!(
+                    "model identity '{}' does not match target model '{}'",
+                    model_identity.model_id, target.model.id
+                ));
+            }
+            if model_identity.artifact_sha256.is_none() && model_identity.revision.is_none() {
+                return Err(
+                    "model identity must include artifact_sha256 or revision for Benchmark 001"
+                        .to_string(),
+                );
+            }
 
             let report = solve(
                 &target
