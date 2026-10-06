@@ -621,10 +621,12 @@ fn discover_apple_silicon_accelerator(
         .ok()
         .filter(|value| !value.trim().is_empty())
         .unwrap_or_else(|| "Apple Silicon".to_string());
-    let free_memory_mib = query_vm_stat()
-        .ok()
-        .and_then(|raw| parse_vm_stat_available_mib(&raw))
-        .map(|available| available.min(memory_mib));
+    let vm_stat = query_vm_stat()?;
+    let free_memory_mib = parse_vm_stat_available_mib(&vm_stat)
+        .map(|available| available.min(memory_mib))
+        .ok_or_else(|| {
+            "Apple unified-memory availability could not be derived from vm_stat".to_string()
+        })?;
 
     Ok(Some(DiscoveredAccelerator {
         identity: DeviceIdentity {
@@ -634,7 +636,7 @@ fn discover_apple_silicon_accelerator(
             memory_mib,
             driver_version: None,
         },
-        free_memory_mib,
+        free_memory_mib: Some(free_memory_mib),
     }))
 }
 
