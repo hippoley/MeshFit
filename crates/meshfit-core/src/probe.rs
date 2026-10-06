@@ -115,7 +115,7 @@ pub fn parse_ping_summary(raw: &str) -> Option<(f64, f64)> {
     })?;
 
     let (_, values) = line.split_once('=')?;
-    let values = values.trim().split_whitespace().next()?;
+    let values = values.split_whitespace().next()?;
     let parts: Vec<_> = values.split('/').collect();
     if parts.len() < 4 {
         return None;
