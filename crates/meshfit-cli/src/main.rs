@@ -2174,6 +2174,7 @@ fn build_benchmark_proof_receipt(kit_dir: &Path) -> Result<BenchmarkProofReceipt
         ("snapshot", kit.snapshot.clone()),
         ("target", kit.target.clone()),
         ("model_identity", kit.model_identity.clone()),
+        ("prompt", "inputs/prompt.txt".to_string()),
     ];
     let mut inputs = Vec::new();
     for (role, rel) in input_specs {
@@ -4098,7 +4099,7 @@ fn print_prediction(prediction: &Prediction) {
 
 fn print_help() {
     println!(
-        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit calibrate-performance <bundle.yaml> [bundle.yaml ...] [--predicted-p95-ttft-ms N] [--predicted-decode-tps N]\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--listen-port N] [--require-ready] [--write-dir DIR]\n  meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--host NODE] [--model-path PATH] [--dry-run] [--overwrite]\n  meshfit benchmark-run-candidate <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  meshfit benchmark-host-check <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--require-ready]\n  meshfit benchmark-run-host <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  env MESHFIT_MODEL_PATH may provide the host-local model path when --model-path is omitted\n  meshfit benchmark-worklist <kit-dir> [--host NODE | --current-host] [--pending-only]\n  meshfit benchmark-status <kit-dir> [--require-complete]\n  meshfit benchmark-finalize <kit-dir> [--markdown] [--require-publishable]\n  meshfit benchmark-proof <kit-dir> [--require-publishable]\n  meshfit benchmark-preflight <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--allow-existing] [--require-ready]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
+        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT|--prompt-file PATH] [--max-tokens N] [--warmup-requests N] [--request-timeout-ms N] [--startup-timeout-ms N]\n  meshfit benchmark-local <request.yaml>\n  meshfit calibrate-performance <bundle.yaml> [bundle.yaml ...] [--predicted-p95-ttft-ms N] [--predicted-decode-tps N]\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--listen-port N] [--prompt TEXT|--prompt-file PATH] [--max-tokens N] [--warmup-requests N] [--measured-requests N] [--request-timeout-ms N] [--startup-timeout-ms N] [--require-ready] [--write-dir DIR]\n  meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--host NODE] [--model-path PATH] [--dry-run] [--overwrite]\n  meshfit benchmark-run-candidate <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  meshfit benchmark-host-check <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--require-ready]\n  meshfit benchmark-run-host <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  env MESHFIT_MODEL_PATH may provide the host-local model path when --model-path is omitted\n  meshfit benchmark-worklist <kit-dir> [--host NODE | --current-host] [--pending-only]\n  meshfit benchmark-status <kit-dir> [--require-complete]\n  meshfit benchmark-finalize <kit-dir> [--markdown] [--require-publishable]\n  meshfit benchmark-proof <kit-dir> [--require-publishable]\n  meshfit benchmark-preflight <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--allow-existing] [--require-ready]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
     );
 }
 
@@ -4490,6 +4491,7 @@ mod tests {
             serde_yaml::to_string(&expected_model).unwrap(),
         )
         .unwrap();
+        fs::write(dir.join("inputs/prompt.txt"), default_benchmark_prompt()).unwrap();
 
         let kit = BenchmarkExecutionKit {
             benchmark_id: "benchmark-001-proof-test".into(),
@@ -4500,6 +4502,11 @@ mod tests {
             model_identity: "inputs/model-identity.yaml".into(),
             concurrency: 1,
             measured_requests_per_run: 2,
+            prompt: default_benchmark_prompt(),
+            max_tokens: default_benchmark_max_tokens(),
+            warmup_requests: default_benchmark_warmup_requests(),
+            request_timeout_ms: default_benchmark_request_timeout_ms(),
+            startup_timeout_ms: default_benchmark_startup_timeout_ms(),
             runs_per_candidate: 1,
             listen_port: BENCHMARK_LISTEN_PORT,
             candidates: vec![
@@ -4567,7 +4574,7 @@ mod tests {
         assert_eq!(receipt.expected_bundles, 2);
         assert_eq!(receipt.valid_bundles, 2);
         assert!(!receipt.evidence_publishable);
-        assert_eq!(receipt.inputs.len(), 5);
+        assert_eq!(receipt.inputs.len(), 6);
         assert_eq!(receipt.candidates.len(), 2);
         assert!(receipt
             .candidates
@@ -4633,6 +4640,11 @@ mod tests {
             model_identity: "inputs/model-identity.yaml".into(),
             concurrency: 1,
             measured_requests_per_run: 10,
+            prompt: default_benchmark_prompt(),
+            max_tokens: default_benchmark_max_tokens(),
+            warmup_requests: default_benchmark_warmup_requests(),
+            request_timeout_ms: default_benchmark_request_timeout_ms(),
+            startup_timeout_ms: default_benchmark_startup_timeout_ms(),
             runs_per_candidate: 1,
             listen_port: BENCHMARK_LISTEN_PORT,
             candidates: vec![BenchmarkExecutionCandidate {
