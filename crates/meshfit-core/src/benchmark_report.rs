@@ -64,6 +64,14 @@ pub struct CandidateBenchmarkSummary {
     pub estimated_cost_per_million_output_tokens_usd: Option<f64>,
     pub objective_value: f64,
     #[serde(default)]
+    pub run_objective_mean: Option<f64>,
+    #[serde(default)]
+    pub run_objective_geometric_mean: Option<f64>,
+    #[serde(default)]
+    pub run_objective_ci95_lower: Option<f64>,
+    #[serde(default)]
+    pub run_objective_ci95_upper: Option<f64>,
+    #[serde(default)]
     pub run_objective_cv: Option<f64>,
     pub regret_fraction: f64,
 }
@@ -74,6 +82,10 @@ pub struct BenchmarkComparisonReport {
     pub objective: ComparisonObjective,
     pub publishable: bool,
     pub evidence_status: String,
+    #[serde(default)]
+    pub performance_claim_publishable: bool,
+    #[serde(default)]
+    pub performance_claim_status: String,
     pub oracle_candidate: String,
     pub meshfit_candidate: String,
     pub oracle_objective_value: f64,
@@ -83,6 +95,10 @@ pub struct BenchmarkComparisonReport {
     pub best_baseline_objective_value: f64,
     pub best_baseline_regret_fraction: f64,
     pub meshfit_improvement_vs_best_baseline_fraction: f64,
+    #[serde(default)]
+    pub meshfit_improvement_ci95_lower_fraction: Option<f64>,
+    #[serde(default)]
+    pub meshfit_improvement_ci95_upper_fraction: Option<f64>,
     #[serde(default)]
     pub regret_reduction_vs_best_baseline_fraction: Option<f64>,
     pub candidates: Vec<CandidateBenchmarkSummary>,
@@ -106,6 +122,17 @@ impl BenchmarkComparisonReport {
                 self.meshfit_improvement_vs_best_baseline_fraction.abs() * 100.0
             )
         };
+        let improvement_interval = match (
+            self.meshfit_improvement_ci95_lower_fraction,
+            self.meshfit_improvement_ci95_upper_fraction,
+        ) {
+            (Some(lower), Some(upper)) => format!(
+                " · **conservative improvement interval (derived from candidate run-level 95% intervals):** [{:.1}%, {:.1}%]",
+                lower * 100.0,
+                upper * 100.0
+            ),
+            _ => " · **conservative improvement interval:** unavailable (<2 independent runs per compared candidate)".to_string(),
+        };
 
         let mut out = String::new();
         out.push_str(&format!("## {}\n\n", self.benchmark_id));
@@ -113,22 +140,33 @@ impl BenchmarkComparisonReport {
             out.push_str(
                 "**Evidence status:** PUBLISHABLE · independent repeated runs verified\n\n",
             );
-            out.push_str(&format!(
-                "**MeshFit vs best baseline ({}): {}** · **placement regret:** {:.1}% · **baseline regret:** {:.1}% · **regret reduction:** {}\n\n",
-                self.best_baseline_candidate,
-                improvement_label,
-                self.meshfit_regret_fraction * 100.0,
-                self.best_baseline_regret_fraction * 100.0,
-                regret_reduction
-            ));
+            if self.performance_claim_publishable {
+                out.push_str(&format!(
+                    "**MeshFit vs best baseline ({}): {}**{} · **placement regret:** {:.1}% · **baseline regret:** {:.1}% · **regret reduction:** {}\n\n",
+                    self.best_baseline_candidate,
+                    improvement_label,
+                    improvement_interval,
+                    self.meshfit_regret_fraction * 100.0,
+                    self.best_baseline_regret_fraction * 100.0,
+                    regret_reduction
+                ));
+            } else {
+                out.push_str(&format!(
+                    "**Performance claim:** NOT ESTABLISHED · {}\n\nPoint estimate only. MeshFit vs best baseline ({}): {}{}. Do not publish this delta as a demonstrated MeshFit advantage.\n\n",
+                    self.performance_claim_status,
+                    self.best_baseline_candidate,
+                    improvement_label,
+                    improvement_interval
+                ));
+            }
         } else {
             out.push_str(&format!(
                 "**Evidence status:** NOT PUBLISHABLE · {}\n\n",
                 self.evidence_status
             ));
             out.push_str(&format!(
-                "Provisional comparison only. MeshFit vs best baseline ({}): {}. Do not publish this delta as a MeshFit performance claim.\n\n",
-                self.best_baseline_candidate, improvement_label
+                "Provisional comparison only. MeshFit vs best baseline ({}): {}{}. Do not publish this delta as a MeshFit performance claim.\n\n",
+                self.best_baseline_candidate, improvement_label, improvement_interval
             ));
         }
         out.push_str(
@@ -268,6 +306,25 @@ pub fn compare_benchmarks(
         best_baseline_objective_value,
         request.objective,
     )?;
+    let improvement_interval = conservative_improvement_interval(
+        meshfit.run_objective_ci95_lower,
+        meshfit.run_objective_ci95_upper,
+        best_baseline.run_objective_ci95_lower,
+        best_baseline.run_objective_ci95_upper,
+        request.objective,
+    );
+
+    let performance_claim_publishable =
+        performance_claim_publishable(publishable, improvement_interval);
+    let performance_claim_status = if !publishable {
+        "benchmark evidence is not publishable".to_string()
+    } else if improvement_interval.is_none() {
+        "run-level uncertainty interval is unavailable".to_string()
+    } else if performance_claim_publishable {
+        "conservative improvement interval remains above zero".to_string()
+    } else {
+        "conservative improvement interval includes zero or worse outcomes".to_string()
+    };
 
     let regret_reduction = if best_baseline_regret > 0.0 {
         Some((best_baseline_regret - meshfit_regret_fraction) / best_baseline_regret)
@@ -280,6 +337,8 @@ pub fn compare_benchmarks(
         objective: request.objective,
         publishable,
         evidence_status,
+        performance_claim_publishable,
+        performance_claim_status,
         oracle_candidate: summaries[oracle_idx].name.clone(),
         meshfit_candidate: request.meshfit_candidate.clone(),
         oracle_objective_value: oracle_value,
@@ -289,6 +348,8 @@ pub fn compare_benchmarks(
         best_baseline_objective_value,
         best_baseline_regret_fraction: best_baseline_regret,
         meshfit_improvement_vs_best_baseline_fraction,
+        meshfit_improvement_ci95_lower_fraction: improvement_interval.map(|(lower, _)| lower),
+        meshfit_improvement_ci95_upper_fraction: improvement_interval.map(|(_, upper)| upper),
         regret_reduction_vs_best_baseline_fraction: regret_reduction,
         candidates: summaries,
     })
@@ -521,6 +582,9 @@ fn summarize_candidate(
         .iter()
         .filter_map(|bundle| bundle_objective_value(bundle, objective))
         .collect::<Vec<_>>();
+    let run_objective_mean = mean(&run_objective_values);
+    let run_objective_geometric_mean = geometric_mean(&run_objective_values);
+    let run_objective_interval = log_student_t_interval_95(&run_objective_values);
     let run_objective_cv = coefficient_of_variation(&run_objective_values);
     let wave_throughput = candidate
         .bundles
@@ -597,6 +661,10 @@ fn summarize_candidate(
         hourly_cost_usd: candidate.hourly_cost_usd,
         estimated_cost_per_million_output_tokens_usd: estimated_cost,
         objective_value,
+        run_objective_mean,
+        run_objective_geometric_mean,
+        run_objective_ci95_lower: run_objective_interval.map(|(lower, _)| lower),
+        run_objective_ci95_upper: run_objective_interval.map(|(_, upper)| upper),
         run_objective_cv,
         regret_fraction: 0.0,
     })
@@ -648,6 +716,18 @@ fn standard_deviation(values: &[f64]) -> Option<f64> {
     Some(variance.sqrt())
 }
 
+fn geometric_mean(values: &[f64]) -> Option<f64> {
+    if values.is_empty()
+        || values
+            .iter()
+            .any(|value| *value <= 0.0 || !value.is_finite())
+    {
+        return None;
+    }
+
+    Some((values.iter().map(|value| value.ln()).sum::<f64>() / values.len() as f64).exp())
+}
+
 fn coefficient_of_variation(values: &[f64]) -> Option<f64> {
     let mean = mean(values)?;
     if mean == 0.0 {
@@ -655,6 +735,87 @@ fn coefficient_of_variation(values: &[f64]) -> Option<f64> {
     }
 
     Some(standard_deviation(values)? / mean.abs())
+}
+
+fn student_t_critical_95(degrees_of_freedom: usize) -> f64 {
+    const T: [f64; 30] = [
+        12.706, 4.303, 3.182, 2.776, 2.571, 2.447, 2.365, 2.306, 2.262, 2.228, 2.201, 2.179, 2.160,
+        2.145, 2.131, 2.120, 2.110, 2.101, 2.093, 2.086, 2.080, 2.074, 2.069, 2.064, 2.060, 2.056,
+        2.052, 2.048, 2.045, 2.042,
+    ];
+
+    if degrees_of_freedom == 0 {
+        f64::INFINITY
+    } else if degrees_of_freedom <= T.len() {
+        T[degrees_of_freedom - 1]
+    } else {
+        2.042
+    }
+}
+
+fn log_student_t_interval_95(values: &[f64]) -> Option<(f64, f64)> {
+    if values.len() < 2
+        || values
+            .iter()
+            .any(|value| *value <= 0.0 || !value.is_finite())
+    {
+        return None;
+    }
+
+    let logs = values.iter().map(|value| value.ln()).collect::<Vec<_>>();
+    let log_mean = mean(&logs)?;
+    let log_stddev = standard_deviation(&logs)?;
+    let critical = student_t_critical_95(logs.len() - 1);
+    let margin = critical * log_stddev / (logs.len() as f64).sqrt();
+
+    Some(((log_mean - margin).exp(), (log_mean + margin).exp()))
+}
+
+fn performance_claim_publishable(
+    evidence_publishable: bool,
+    improvement_interval: Option<(f64, f64)>,
+) -> bool {
+    evidence_publishable
+        && improvement_interval
+            .map(|(lower, _)| lower > 0.0)
+            .unwrap_or(false)
+}
+
+fn conservative_improvement_interval(
+    meshfit_lower: Option<f64>,
+    meshfit_upper: Option<f64>,
+    baseline_lower: Option<f64>,
+    baseline_upper: Option<f64>,
+    objective: ComparisonObjective,
+) -> Option<(f64, f64)> {
+    let (meshfit_lower, meshfit_upper, baseline_lower, baseline_upper) = (
+        meshfit_lower?,
+        meshfit_upper?,
+        baseline_lower?,
+        baseline_upper?,
+    );
+
+    if meshfit_lower <= 0.0
+        || meshfit_upper <= 0.0
+        || baseline_lower <= 0.0
+        || baseline_upper <= 0.0
+    {
+        return None;
+    }
+
+    let (lower, upper) = if objective.lower_is_better() {
+        (
+            1.0 - meshfit_upper / baseline_lower,
+            1.0 - meshfit_lower / baseline_upper,
+        )
+    } else {
+        (
+            meshfit_lower / baseline_upper - 1.0,
+            meshfit_upper / baseline_lower - 1.0,
+        )
+    };
+
+    Some((lower.min(upper), lower.max(upper)))
 }
 
 fn percentile(values: &[f64], quantile: f64) -> Result<f64, String> {
@@ -736,6 +897,8 @@ mod tests {
             objective: ComparisonObjective::P95TtftMs,
             publishable: true,
             evidence_status: "independent repeated benchmark bundles verified".into(),
+            performance_claim_publishable: true,
+            performance_claim_status: "conservative improvement interval remains above zero".into(),
             oracle_candidate: "meshfit".into(),
             meshfit_candidate: "meshfit".into(),
             oracle_objective_value: 100.0,
@@ -745,6 +908,8 @@ mod tests {
             best_baseline_objective_value: 125.0,
             best_baseline_regret_fraction: 0.25,
             meshfit_improvement_vs_best_baseline_fraction: 0.20,
+            meshfit_improvement_ci95_lower_fraction: Some(0.10),
+            meshfit_improvement_ci95_upper_fraction: Some(0.30),
             regret_reduction_vs_best_baseline_fraction: Some(1.0),
             candidates: vec![CandidateBenchmarkSummary {
                 name: "meshfit".into(),
@@ -764,6 +929,10 @@ mod tests {
                 hourly_cost_usd: Some(1.0),
                 estimated_cost_per_million_output_tokens_usd: Some(6.944),
                 objective_value: 100.0,
+                run_objective_mean: Some(100.0),
+                run_objective_geometric_mean: Some(99.9),
+                run_objective_ci95_lower: Some(95.0),
+                run_objective_ci95_upper: Some(105.0),
                 run_objective_cv: Some(0.05),
                 regret_fraction: 0.0,
             }],
@@ -771,8 +940,87 @@ mod tests {
 
         let markdown = report.to_markdown();
         assert!(markdown.contains("MeshFit vs best baseline (heuristic): 20.0% better"));
+        assert!(markdown.contains("conservative improvement interval"));
         assert!(markdown.contains("| meshfit | topology-aware | 2 | 20 |"));
         assert!(markdown.contains("Observed oracle: **meshfit**"));
+    }
+
+    #[test]
+    fn geometric_mean_matches_log_space_center() {
+        let values = vec![100.0, 400.0];
+        let geometric = geometric_mean(&values).unwrap();
+        let (lower, upper) = log_student_t_interval_95(&values).unwrap();
+
+        assert!((geometric - 200.0).abs() < 1e-12);
+        assert!((geometric.ln() - ((lower.ln() + upper.ln()) / 2.0)).abs() < 1e-12);
+        assert_ne!(geometric, mean(&values).unwrap());
+    }
+
+    #[test]
+    fn log_student_t_interval_is_positive_and_widens_for_two_runs() {
+        let interval = log_student_t_interval_95(&[100.0, 110.0]).unwrap();
+        assert!(interval.0 > 0.0);
+        assert!(interval.0 < 100.0);
+        assert!(interval.1 > 110.0);
+    }
+
+    #[test]
+    fn performance_claim_gate_requires_strictly_positive_interval() {
+        assert!(performance_claim_publishable(true, Some((0.01, 0.20))));
+        assert!(!performance_claim_publishable(true, Some((0.0, 0.20))));
+        assert!(!performance_claim_publishable(true, Some((-0.05, 0.20))));
+        assert!(!performance_claim_publishable(false, Some((0.10, 0.30))));
+        assert!(!performance_claim_publishable(true, None));
+    }
+
+    #[test]
+    fn higher_and_lower_objectives_produce_positive_advantage_bounds_consistently() {
+        let lower_better = conservative_improvement_interval(
+            Some(80.0),
+            Some(90.0),
+            Some(100.0),
+            Some(110.0),
+            ComparisonObjective::P95TtftMs,
+        )
+        .unwrap();
+        let higher_better = conservative_improvement_interval(
+            Some(110.0),
+            Some(120.0),
+            Some(90.0),
+            Some(100.0),
+            ComparisonObjective::MeanDecodeTokensPerSecond,
+        )
+        .unwrap();
+
+        assert!(lower_better.0 > 0.0);
+        assert!(higher_better.0 > 0.0);
+        assert!(performance_claim_publishable(true, Some(lower_better)));
+        assert!(performance_claim_publishable(true, Some(higher_better)));
+    }
+
+    #[test]
+    fn conservative_improvement_interval_uses_worst_case_bounds() {
+        let lower_better = conservative_improvement_interval(
+            Some(80.0),
+            Some(100.0),
+            Some(100.0),
+            Some(120.0),
+            ComparisonObjective::P95TtftMs,
+        )
+        .unwrap();
+        assert!((lower_better.0 - 0.0).abs() < 1e-12);
+        assert!((lower_better.1 - (1.0 - 80.0 / 120.0)).abs() < 1e-12);
+
+        let higher_better = conservative_improvement_interval(
+            Some(100.0),
+            Some(120.0),
+            Some(80.0),
+            Some(100.0),
+            ComparisonObjective::MeanDecodeTokensPerSecond,
+        )
+        .unwrap();
+        assert!((higher_better.0 - 0.0).abs() < 1e-12);
+        assert!((higher_better.1 - 0.5).abs() < 1e-12);
     }
 
     #[test]
