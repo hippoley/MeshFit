@@ -1713,6 +1713,26 @@ fn run() -> Result<(), String> {
                 )?;
 
                 for run_number in &plan.pending_runs {
+                    let preflight = inspect_benchmark_preflight(
+                        kit_dir,
+                        candidate_name,
+                        declared_host,
+                        Some(&plan.model_path),
+                        true,
+                    )?;
+                    if !preflight.ready {
+                        return Err(format!(
+                            "Benchmark 001 preflight became invalid before candidate '{}' run {}: {}",
+                            candidate_name,
+                            run_number,
+                            if preflight.issues.is_empty() {
+                                "unknown preflight failure".to_string()
+                            } else {
+                                preflight.issues.join(" ")
+                            }
+                        ));
+                    }
+
                     execute_benchmark_run_one_prevalidated(
                         kit_dir,
                         candidate_name,
