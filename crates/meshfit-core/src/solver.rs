@@ -1,9 +1,9 @@
 use std::collections::{HashMap, HashSet};
 
 use crate::ir::{
-    AcceleratorBackend, AcceleratorIR, AcceleratorRefIR, CommunicationEstimateIR, ExclusionIR,
-    InfrastructureIR, ModelIR, PlacementKind, PlacementReport, PlanIR, RejectionIR, RuntimeIR,
-    ScenarioIR, WorkloadIR,
+    AcceleratorBackend, AcceleratorIR, AcceleratorRefIR, CommunicationEstimateIR, EvidenceGapIR,
+    EvidenceGapKind, ExclusionIR, InfrastructureIR, ModelIR, PlacementKind, PlacementReport, PlanIR,
+    RejectionIR, RuntimeIR, ScenarioIR, WorkloadIR,
 };
 
 const TP_EFFECTIVE_BANDWIDTH_FACTOR: f64 = 0.70;
@@ -18,6 +18,7 @@ struct PlacementContext<'a> {
 pub fn solve(scenario: &ScenarioIR) -> PlacementReport {
     let mut feasible = Vec::new();
     let mut rejected = Vec::new();
+    let mut evidence_gaps = Vec::new();
     let context = PlacementContext {
         model: &scenario.model,
         workload: &scenario.workload,
@@ -32,6 +33,7 @@ pub fn solve(scenario: &ScenarioIR) -> PlacementReport {
             runtime,
             &mut feasible,
             &mut rejected,
+            &mut evidence_gaps,
         );
         enumerate_two_node_tp(
             &scenario.infrastructure,
@@ -39,6 +41,7 @@ pub fn solve(scenario: &ScenarioIR) -> PlacementReport {
             runtime,
             &mut feasible,
             &mut rejected,
+            &mut evidence_gaps,
         );
     }
 
@@ -50,6 +53,7 @@ pub fn solve(scenario: &ScenarioIR) -> PlacementReport {
         feasible,
         pareto,
         rejected,
+        evidence_gaps,
         excluded_nodes,
     }
 }
@@ -66,6 +70,7 @@ fn enumerate_single_node(
     runtime: &RuntimeIR,
     feasible: &mut Vec<PlanIR>,
     rejected: &mut Vec<RejectionIR>,
+    evidence_gaps: &mut Vec<EvidenceGapIR>,
 ) {
     let model = context.model;
     let required = context.required_memory_gb;
@@ -174,6 +179,7 @@ fn enumerate_single_node(
                 runtime,
                 feasible,
                 rejected,
+                evidence_gaps,
             );
         }
 
@@ -200,6 +206,7 @@ fn enumerate_local_tp(
     runtime: &RuntimeIR,
     feasible: &mut Vec<PlanIR>,
     rejected: &mut Vec<RejectionIR>,
+    evidence_gaps: &mut Vec<EvidenceGapIR>,
 ) {
     let required = context.required_memory_gb;
     let mut by_backend: HashMap<AcceleratorBackend, Vec<&AcceleratorIR>> = HashMap::new();
@@ -261,8 +268,27 @@ fn enumerate_local_tp(
         });
 
         if let Some((left, right)) = missing_link {
+            let candidate = format!("{}@{}:{:?}", runtime.id, node_id, backend);
+            evidence_gaps.push(EvidenceGapIR {
+                kind: EvidenceGapKind::DiscoverLocalFabric,
+                candidate: candidate.clone(),
+                nodes: vec![node_id.to_string()],
+                accelerators: vec![
+                    AcceleratorRefIR {
+                        node: node_id.to_string(),
+                        accelerator: left.clone(),
+                        backend,
+                    },
+                    AcceleratorRefIR {
+                        node: node_id.to_string(),
+                        accelerator: right.clone(),
+                        backend,
+                    },
+                ],
+                missing_fields: vec!["local_fabric_path".into()],
+            });
             rejected.push(RejectionIR {
-                candidate: format!("{}@{}:{:?}", runtime.id, node_id, backend),
+                candidate,
                 code: "missing_local_fabric".into(),
                 reason: format!(
                     "local TP requires a discovered accelerator path between {node_id}/{left} and {node_id}/{right}"
@@ -342,6 +368,7 @@ fn enumerate_two_node_tp(
     runtime: &RuntimeIR,
     feasible: &mut Vec<PlanIR>,
     rejected: &mut Vec<RejectionIR>,
+    evidence_gaps: &mut Vec<EvidenceGapIR>,
 ) {
     let model = context.model;
     let required = context.required_memory_gb;
@@ -356,6 +383,13 @@ fn enumerate_two_node_tp(
             let candidate = format!("{}@{}+{}", runtime.id, a.id, b.id);
 
             let Some(link) = infra.node_link(&a.id, &b.id) else {
+                evidence_gaps.push(EvidenceGapIR {
+                    kind: EvidenceGapKind::DiscoverPeerLink,
+                    candidate: candidate.clone(),
+                    nodes: vec![a.id.clone(), b.id.clone()],
+                    accelerators: vec![],
+                    missing_fields: vec!["peer_link".into()],
+                });
                 rejected.push(RejectionIR {
                     candidate,
                     code: "missing_link".into(),
@@ -366,6 +400,20 @@ fn enumerate_two_node_tp(
 
             let (Some(latency_ms), Some(bandwidth_gbps)) = (link.latency_ms, link.bandwidth_gbps)
             else {
+                let mut missing_fields = Vec::new();
+                if link.latency_ms.is_none() {
+                    missing_fields.push("latency_ms".into());
+                }
+                if link.bandwidth_gbps.is_none() {
+                    missing_fields.push("bandwidth_gbps".into());
+                }
+                evidence_gaps.push(EvidenceGapIR {
+                    kind: EvidenceGapKind::MeasurePeerLink,
+                    candidate: candidate.clone(),
+                    nodes: vec![a.id.clone(), b.id.clone()],
+                    accelerators: vec![],
+                    missing_fields,
+                });
                 rejected.push(RejectionIR {
                     candidate,
                     code: "unmeasured_link".into(),
@@ -386,6 +434,13 @@ fn enumerate_two_node_tp(
             };
 
             let Some(communication_profile) = &model.tp_communication_model else {
+                evidence_gaps.push(EvidenceGapIR {
+                    kind: EvidenceGapKind::SupplyTpCommunicationProfile,
+                    candidate: candidate.clone(),
+                    nodes: vec![a.id.clone(), b.id.clone()],
+                    accelerators: vec![],
+                    missing_fields: vec!["model.tp_communication_model".into()],
+                });
                 rejected.push(RejectionIR {
                     candidate,
                     code: "missing_tp_communication_profile".into(),
@@ -396,6 +451,13 @@ fn enumerate_two_node_tp(
 
             let Some(communication_budget_ms) = context.workload.max_tp_communication_ms_per_token
             else {
+                evidence_gaps.push(EvidenceGapIR {
+                    kind: EvidenceGapKind::SupplyTpCommunicationBudget,
+                    candidate: candidate.clone(),
+                    nodes: vec![a.id.clone(), b.id.clone()],
+                    accelerators: vec![],
+                    missing_fields: vec!["workload.max_tp_communication_ms_per_token".into()],
+                });
                 rejected.push(RejectionIR {
                     candidate,
                     code: "missing_tp_communication_budget".into(),
