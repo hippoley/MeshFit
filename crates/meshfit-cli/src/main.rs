@@ -914,9 +914,19 @@ fn benchmark_peer_evidence_check_at(
                         "{from_node}<->{to_node} peer evidence has no measured RTT"
                     ));
                 }
+                if measurement.bandwidth_forward_gbps.is_none() {
+                    pair_issues.push(format!(
+                        "{from_node}<->{to_node} peer evidence has no measured forward bandwidth"
+                    ));
+                }
+                if measurement.bandwidth_reverse_gbps.is_none() {
+                    pair_issues.push(format!(
+                        "{from_node}<->{to_node} peer evidence has no measured reverse bandwidth"
+                    ));
+                }
                 if measurement.bandwidth_gbps.is_none() {
                     pair_issues.push(format!(
-                        "{from_node}<->{to_node} peer evidence has no measured bandwidth"
+                        "{from_node}<->{to_node} peer evidence has no conservative effective bandwidth"
                     ));
                 }
                 let age_seconds = measurement.captured_at_unix_ms.map(|captured_at| {
@@ -4817,6 +4827,8 @@ mod tests {
             latency_ms,
             jitter_ms: Some(0.03),
             bandwidth_gbps,
+            bandwidth_forward_gbps: bandwidth_gbps,
+            bandwidth_reverse_gbps: bandwidth_gbps,
             source: Some("meshfit-peer-probe".into()),
             captured_at_unix_ms,
         }
@@ -4880,7 +4892,35 @@ mod tests {
         assert!(check
             .issues
             .iter()
-            .any(|issue| issue.contains("no measured bandwidth")));
+            .any(|issue| issue.contains("no measured forward bandwidth")));
+        assert!(check
+            .issues
+            .iter()
+            .any(|issue| issue.contains("no measured reverse bandwidth")));
+        assert!(check
+            .issues
+            .iter()
+            .any(|issue| issue.contains("no conservative effective bandwidth")));
+    }
+
+    #[test]
+    fn cross_node_candidate_rejects_legacy_single_direction_bandwidth() {
+        let mut legacy = peer_measurement(Some(0.42), Some(21.8), Some(1_700_000_000_000));
+        legacy.bandwidth_forward_gbps = None;
+        legacy.bandwidth_reverse_gbps = None;
+        let snapshot = peer_evidence_snapshot(vec![legacy]);
+        let nodes = vec!["node-a".to_string(), "node-b".to_string()];
+        let check = benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_010_000);
+
+        assert!(!check.ready);
+        assert!(check
+            .issues
+            .iter()
+            .any(|issue| issue.contains("no measured forward bandwidth")));
+        assert!(check
+            .issues
+            .iter()
+            .any(|issue| issue.contains("no measured reverse bandwidth")));
     }
 
     #[test]

@@ -36,6 +36,10 @@ pub struct PeerMeasurementEvidence {
     #[serde(default)]
     pub bandwidth_gbps: Option<f64>,
     #[serde(default)]
+    pub bandwidth_forward_gbps: Option<f64>,
+    #[serde(default)]
+    pub bandwidth_reverse_gbps: Option<f64>,
+    #[serde(default)]
     pub source: Option<String>,
     #[serde(default)]
     pub captured_at_unix_ms: Option<u128>,
@@ -128,6 +132,8 @@ impl InfrastructureSnapshot {
             latency_ms: probe.latency_ms,
             jitter_ms: probe.jitter_ms,
             bandwidth_gbps: probe.bandwidth_gbps,
+            bandwidth_forward_gbps: probe.bandwidth_forward_gbps,
+            bandwidth_reverse_gbps: probe.bandwidth_reverse_gbps,
             source: probe.source.clone(),
             captured_at_unix_ms: probe.captured_at_unix_ms,
         });
@@ -190,6 +196,8 @@ mod tests {
                     latency_ms: Some(0.42),
                     jitter_ms: Some(0.03),
                     bandwidth_gbps: Some(21.8),
+                    bandwidth_forward_gbps: Some(24.1),
+                    bandwidth_reverse_gbps: Some(21.8),
                     source: Some("meshfit-peer-probe".into()),
                     captured_at_unix_ms: Some(1_700_000_000_000),
                     warnings: vec![],
@@ -210,6 +218,14 @@ mod tests {
         );
         assert_eq!(link.bandwidth_gbps, Some(21.8));
         assert_eq!(snapshot.peer_measurements.len(), 1);
+        assert_eq!(
+            snapshot.peer_measurements[0].bandwidth_forward_gbps,
+            Some(24.1)
+        );
+        assert_eq!(
+            snapshot.peer_measurements[0].bandwidth_reverse_gbps,
+            Some(21.8)
+        );
         assert_eq!(
             snapshot.peer_measurements[0].source.as_deref(),
             Some("meshfit-peer-probe")
