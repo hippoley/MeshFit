@@ -283,6 +283,26 @@ struct BenchmarkModelPathCheck {
 }
 
 #[derive(Debug, Serialize)]
+struct BenchmarkPeerMeasurementStatus {
+    from_node: String,
+    to_node: String,
+    ready: bool,
+    source: Option<String>,
+    latency_ms: Option<f64>,
+    bandwidth_gbps: Option<f64>,
+    age_seconds: Option<u64>,
+    issues: Vec<String>,
+}
+
+#[derive(Debug)]
+struct BenchmarkPeerEvidenceCheck {
+    ready: bool,
+    measurements: Vec<BenchmarkPeerMeasurementStatus>,
+    issues: Vec<String>,
+    warnings: Vec<String>,
+}
+
+#[derive(Debug, Serialize)]
 struct BenchmarkPreflight {
     benchmark_id: String,
     candidate: String,
@@ -300,6 +320,8 @@ struct BenchmarkPreflight {
     model_artifact_verified: bool,
     listen_port: u16,
     listen_port_available: bool,
+    peer_measurements_ready: bool,
+    peer_measurements: Vec<BenchmarkPeerMeasurementStatus>,
     existing_bundles: Vec<String>,
     issues: Vec<String>,
     warnings: Vec<String>,
@@ -497,6 +519,147 @@ fn inspect_benchmark_host_attestation(
     };
 
     benchmark_hardware_profile_attestation(expected, &local.hardware_identity)
+}
+
+fn benchmark_peer_evidence_check_at(
+    snapshot: &InfrastructureSnapshot,
+    nodes: &[String],
+    now_unix_ms: u128,
+) -> BenchmarkPeerEvidenceCheck {
+    if nodes.len() <= 1 {
+        return BenchmarkPeerEvidenceCheck {
+            ready: true,
+            measurements: Vec::new(),
+            issues: Vec::new(),
+            warnings: Vec::new(),
+        };
+    }
+
+    let mut measurements = Vec::new();
+    let mut issues = Vec::new();
+    let mut warnings = Vec::new();
+
+    for left_index in 0..nodes.len() {
+        for right_index in (left_index + 1)..nodes.len() {
+            let from_node = &nodes[left_index];
+            let to_node = &nodes[right_index];
+            let evidence = snapshot
+                .peer_measurements
+                .iter()
+                .filter(|measurement| {
+                    (measurement.from_node == *from_node && measurement.to_node == *to_node)
+                        || (measurement.from_node == *to_node
+                            && measurement.to_node == *from_node)
+                })
+                .max_by_key(|measurement| measurement.captured_at_unix_ms.unwrap_or(0));
+
+            let mut pair_issues = Vec::new();
+            let (source, latency_ms, bandwidth_gbps, age_seconds) =
+                if let Some(measurement) = evidence {
+                    if measurement.source.as_deref() != Some("meshfit-peer-probe") {
+                        pair_issues.push(format!(
+                            "{from_node}<->{to_node} peer evidence source is {:?}; expected meshfit-peer-probe",
+                            measurement.source
+                        ));
+                    }
+                    if measurement.latency_ms.is_none() {
+                        pair_issues.push(format!(
+                            "{from_node}<->{to_node} peer evidence has no measured RTT"
+                        ));
+                    }
+                    if measurement.bandwidth_gbps.is_none() {
+                        pair_issues.push(format!(
+                            "{from_node}<->{to_node} peer evidence has no measured bandwidth"
+                        ));
+                    }
+                    let age_seconds = measurement.captured_at_unix_ms.map(|captured_at| {
+                        if captured_at > now_unix_ms.saturating_add(60_000) {
+                            warnings.push(format!(
+                                "{from_node}<->{to_node} peer measurement timestamp is in the future by more than 60 seconds"
+                            ));
+                        }
+                        now_unix_ms.saturating_sub(captured_at) / 1_000
+                    });
+                    if measurement.captured_at_unix_ms.is_none() {
+                        pair_issues.push(format!(
+                            "{from_node}<->{to_node} peer evidence has no capture timestamp"
+                        ));
+                    }
+                    (
+                        measurement.source.clone(),
+                        measurement.latency_ms,
+                        measurement.bandwidth_gbps,
+                        age_seconds.map(|age| age.min(u64::MAX as u128) as u64),
+                    )
+                } else {
+                    pair_issues.push(format!(
+                        "{from_node}<->{to_node} has no peer measurement provenance in the snapshot"
+                    ));
+                    (None, None, None, None)
+                };
+
+            issues.extend(pair_issues.iter().cloned());
+            measurements.push(BenchmarkPeerMeasurementStatus {
+                from_node: from_node.clone(),
+                to_node: to_node.clone(),
+                ready: pair_issues.is_empty(),
+                source,
+                latency_ms,
+                bandwidth_gbps,
+                age_seconds,
+                issues: pair_issues,
+            });
+        }
+    }
+
+    BenchmarkPeerEvidenceCheck {
+        ready: issues.is_empty(),
+        measurements,
+        issues,
+        warnings,
+    }
+}
+
+fn inspect_benchmark_peer_evidence(
+    kit_dir: &Path,
+    kit: &BenchmarkExecutionKit,
+    candidate: &BenchmarkExecutionCandidate,
+) -> BenchmarkPeerEvidenceCheck {
+    let snapshot_path = kit_dir.join(&kit.snapshot);
+    let raw = match fs::read_to_string(&snapshot_path) {
+        Ok(raw) => raw,
+        Err(error) => {
+            return BenchmarkPeerEvidenceCheck {
+                ready: false,
+                measurements: Vec::new(),
+                issues: vec![format!(
+                    "cannot verify peer measurements because snapshot '{}' could not be read: {error}",
+                    snapshot_path.display()
+                )],
+                warnings: Vec::new(),
+            };
+        }
+    };
+    let snapshot: InfrastructureSnapshot = match serde_yaml::from_str(&raw) {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            return BenchmarkPeerEvidenceCheck {
+                ready: false,
+                measurements: Vec::new(),
+                issues: vec![format!(
+                    "cannot verify peer measurements because snapshot '{}' is invalid: {error}",
+                    snapshot_path.display()
+                )],
+                warnings: Vec::new(),
+            };
+        }
+    };
+    let now_unix_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|duration| duration.as_millis())
+        .unwrap_or(0);
+    benchmark_peer_evidence_check_at(&snapshot, &candidate.nodes, now_unix_ms)
 }
 
 fn benchmark_model_path_override(args: &[String]) -> Result<Option<String>, String> {
@@ -2470,6 +2633,7 @@ fn inspect_benchmark_preflight(
     let host_match = observed_host == candidate.benchmark_host;
     let hardware_attestation =
         inspect_benchmark_host_attestation(kit_dir, &kit, &candidate.benchmark_host, &local);
+    let peer_evidence = inspect_benchmark_peer_evidence(kit_dir, &kit, candidate);
     let runtime_discovery = discover_runtimes();
     let runtime_found = runtime_discovery
         .runtimes
@@ -2513,8 +2677,10 @@ fn inspect_benchmark_preflight(
         ));
     }
     issues.extend(hardware_attestation.issues.clone());
+    issues.extend(peer_evidence.issues.clone());
     let mut warnings = model_check.warnings.clone();
     warnings.extend(hardware_attestation.warnings.clone());
+    warnings.extend(peer_evidence.warnings.clone());
     warnings.extend(local.warnings);
     warnings.extend(runtime_discovery.warnings);
 
@@ -2535,6 +2701,8 @@ fn inspect_benchmark_preflight(
         model_artifact_verified: model_check.verified,
         listen_port: kit.listen_port,
         listen_port_available,
+        peer_measurements_ready: peer_evidence.ready,
+        peer_measurements: peer_evidence.measurements,
         existing_bundles,
         issues,
         warnings,
