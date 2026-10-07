@@ -3286,7 +3286,6 @@ fn load_expected_benchmark_model(
     serde_yaml::from_str(&raw).map_err(|e| format!("parse {}: {e}", identity_path.display()))
 }
 
-
 fn load_expected_benchmark_request_contract(
     kit_dir: &Path,
     kit: &BenchmarkExecutionKit,
