@@ -133,6 +133,20 @@ edge, `bandwidth_gbps` is the slower of the two measured directions. If either
 direction cannot be measured, effective bandwidth is omitted so readiness fails
 closed instead of treating one direction as representative of both.
 
+Before measuring, confirm the participating hosts agree on UTC closely enough
+for the freshness contract. Peer probe timestamps are generated on the source
+host and later evaluated against the executing host's clock; evidence more than
+60 seconds in the future is rejected. On each host, record:
+
+```bash
+date -u +%s
+```
+
+Compare the values while the hosts are otherwise idle. If the observed skew is
+material (use 30 seconds as the campaign stop threshold), repair host/provider
+clock synchronization before taking any peer measurements. Do not weaken the
+future-timestamp gate to accommodate a bad clock.
+
 Before measuring, prepare every participating host to receive peer probes over
 the experiment's private network. `meshfit probe --bandwidth` uses ping for RTT
 and iperf3 for throughput; iperf3 therefore needs a server on the peer.
@@ -264,11 +278,47 @@ meshfit benchmark-kit \
 Keep this directory immutable except for generated runtime artifacts and declared
 `results/` slots. Do not regenerate the kit independently on each host.
 
+Before distributing the kit, freeze the control-plane files that every real host
+must see identically:
+
+```bash
+(
+  cd benchmark-001
+  command -v sha256sum
+  sha256sum \
+    kit.yaml \
+    comparison.yaml \
+    inputs/snapshot.yaml \
+    inputs/target.yaml \
+    inputs/model-identity.yaml \
+    inputs/prompt.txt \
+    > CONTROL.sha256
+)
+```
+
+Do not include `artifacts/` or `results/` in this manifest: those are
+intentionally generated during execution. Retain `CONTROL.sha256` with the
+coordinator kit and copy it unchanged with the kit to every benchmark host.
+
 ### 7. Gate every real machine before launch
 
 Place the same materialized kit on each benchmark host, preserving its contents.
-Set the stable logical ID and, when necessary, the local path to the same model
-bytes:
+Before MeshFit reads any control-plane input on that host, verify the coordinator
+digest:
+
+```bash
+(
+  cd benchmark-001
+  sha256sum -c CONTROL.sha256
+)
+```
+
+Any mismatch is a transport/control-plane failure: replace the host copy from the
+coordinator's frozen kit. Do not regenerate or hand-edit the mismatching file on
+the benchmark host.
+
+Then set the stable logical ID and, when necessary, the local path to the same
+model bytes:
 
 ```bash
 export MESHFIT_NODE_ID=node-a
@@ -396,6 +446,8 @@ following occurs:
 
 - a real accelerator still has zero or missing `relative_compute`;
 - a required peer link lacks measured provenance;
+- participating host clocks differ by more than the campaign's 30-second pre-probe threshold;
+- a benchmark host fails `CONTROL.sha256` verification;
 - hardware or local topology no longer matches the frozen snapshot;
 - the model SHA-256 differs between hosts;
 - the selected runtime is unavailable on its assigned host;
