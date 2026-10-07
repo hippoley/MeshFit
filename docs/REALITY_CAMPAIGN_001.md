@@ -124,7 +124,14 @@ inference throughput measurements.
 
 For every host pair that may participate in a distributed placement, capture a
 real peer probe from the experiment environment. Preserve the probe YAML,
-including source, timestamp, RTT, and measured bandwidth.
+including source, timestamp, RTT, both directional bandwidth measurements, and
+the conservative effective bandwidth.
+
+`meshfit probe --bandwidth` measures both client-to-peer and peer-to-client
+throughput. Because the current planner models a node link as an undirected
+edge, `bandwidth_gbps` is the slower of the two measured directions. If either
+direction cannot be measured, effective bandwidth is omitted so readiness fails
+closed instead of treating one direction as representative of both.
 
 Example:
 
