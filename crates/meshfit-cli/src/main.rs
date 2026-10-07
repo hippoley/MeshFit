@@ -1918,24 +1918,23 @@ fn inspect_benchmark_run_one_plan(
 
 fn validate_existing_candidate_bundle(
     bundle_path: &Path,
-    expected_plan_id: &str,
+    candidate: &BenchmarkExecutionCandidate,
+    expected_hardware: &HardwareIdentity,
+    expected_model: &ModelArtifactIdentity,
+    expected_listen_port: u16,
 ) -> Result<(), String> {
     let raw = fs::read_to_string(bundle_path)
         .map_err(|e| format!("read existing bundle {}: {e}", bundle_path.display()))?;
     let bundle: BenchmarkBundle = serde_yaml::from_str(&raw)
         .map_err(|e| format!("parse existing bundle {}: {e}", bundle_path.display()))?;
-    bundle
-        .validate()
-        .map_err(|e| format!("invalid existing bundle {}: {e}", bundle_path.display()))?;
-    if bundle.request.executable.source_plan_id != expected_plan_id {
-        return Err(format!(
-            "existing bundle '{}' belongs to plan '{}' instead of expected plan '{}'",
-            bundle_path.display(),
-            bundle.request.executable.source_plan_id,
-            expected_plan_id
-        ));
-    }
-    Ok(())
+    validate_benchmark_bundle_for_candidate(
+        &bundle,
+        candidate,
+        expected_hardware,
+        expected_model,
+        expected_listen_port,
+    )
+    .map_err(|e| format!("invalid existing bundle {}: {e}", bundle_path.display()))
 }
 
 fn plan_benchmark_candidate_runs(
@@ -1971,6 +1970,15 @@ fn plan_benchmark_candidate_runs(
         model_path_override,
         true,
     )?;
+    let resume_contract = if resume {
+        Some((
+            load_expected_benchmark_hardware(kit_dir, &kit, &candidate.benchmark_host)?,
+            load_expected_benchmark_model(kit_dir, &kit)?,
+        ))
+    } else {
+        None
+    };
+
     let mut existing_valid_runs = Vec::new();
     let mut pending_runs = Vec::new();
 
@@ -1986,7 +1994,16 @@ fn plan_benchmark_candidate_runs(
             continue;
         }
         if resume {
-            validate_existing_candidate_bundle(&bundle_path, &candidate.plan_id)?;
+            let (expected_hardware, expected_model) = resume_contract
+                .as_ref()
+                .ok_or_else(|| "resume evidence contract is unavailable".to_string())?;
+            validate_existing_candidate_bundle(
+                &bundle_path,
+                candidate,
+                expected_hardware,
+                expected_model,
+                kit.listen_port,
+            )?;
             existing_valid_runs.push(run_number);
             continue;
         }
