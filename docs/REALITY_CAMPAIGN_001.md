@@ -77,6 +77,65 @@ gate.
 Use one campaign ID and keep every generated file under one evidence directory.
 Do not edit generated BenchmarkBundle files by hand.
 
+### 0. Freeze one MeshFit executable for the campaign
+
+Do not independently build MeshFit on the paid benchmark hosts. Build one
+release executable from one clean source revision, record its commit, and
+distribute those exact bytes to every host.
+
+For the current primary Lambda matrix, build on an x86_64 Linux environment
+whose userspace ABI is compatible with the benchmark hosts. Do not build the
+campaign binary on macOS or Windows and then copy it to Linux. A different CPU
+architecture is a different campaign artifact.
+
+Before building, fail closed on the builder architecture and require the tracked
+workspace to match `HEAD`; also reject untracked Rust source under `crates/`:
+
+```bash
+test "$(uname -s)" = "Linux"
+test "$(uname -m)" = "x86_64"
+git diff --quiet HEAD --
+test -z "$(git ls-files --others --exclude-standard -- crates)"
+
+mkdir -p campaign-bin
+git rev-parse HEAD > campaign-bin/meshfit-source-commit.txt
+cargo build --release -p meshfit
+cp target/release/meshfit campaign-bin/meshfit
+
+(
+  cd campaign-bin
+  sha256sum meshfit > meshfit.sha256
+  sha256sum -c meshfit.sha256
+)
+```
+
+Keep `campaign-bin/meshfit`, `meshfit.sha256`, and
+`meshfit-source-commit.txt` with the campaign evidence. Copy the same
+`campaign-bin/` directory to every benchmark host. Before discovery or any
+benchmark command on each host:
+
+```bash
+(
+  cd campaign-bin
+  sha256sum -c meshfit.sha256
+)
+
+export PATH="$PWD/campaign-bin:$PATH"
+command -v meshfit
+```
+
+Do not rebuild the binary separately on node-a/node-b/node-c. If the frozen
+binary cannot run on one host, record that compatibility failure and fix the
+campaign environment; compiling a host-specific binary changes the software
+artifact being compared. If a fallback provider changes the campaign
+architecture (for example, to ARM64), rebuild and freeze a new campaign artifact
+before any benchmark evidence is collected.
+
+The bundle runner also records the build-time MeshFit Git commit. Final
+publishability requires one source commit across every candidate/run, so the
+binary SHA gate is an early transport/build check and the provenance gate is
+the final evidence check.
+
 ### 1. Discover every real host
 
 On each machine, give MeshFit a stable logical node ID and capture both hardware
@@ -472,6 +531,7 @@ best run.
 Abort the campaign and fix reality instead of relaxing a gate if any of the
 following occurs:
 
+- a benchmark host does not match the frozen `campaign-bin/meshfit` SHA-256;
 - a real accelerator still has zero or missing `relative_compute`;
 - a required peer link lacks measured provenance;
 - participating host clocks differ by more than the campaign's 30-second pre-probe threshold;
