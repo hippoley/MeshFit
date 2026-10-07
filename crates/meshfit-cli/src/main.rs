@@ -5,6 +5,7 @@ use std::{
 };
 
 use serde::{Deserialize, Serialize};
+use sha2::{Digest, Sha256};
 
 use meshfit_core::{
     calibrate_plan_memory, calibrate_plan_performance, compare_benchmarks, compile_plan,
@@ -189,6 +190,49 @@ struct BenchmarkCandidateStatus {
 struct BenchmarkInvalidBundle {
     path: String,
     error: String,
+}
+
+
+#[derive(Debug, Serialize)]
+struct BenchmarkProofReceipt {
+    schema: String,
+    benchmark_id: String,
+    kit_complete: bool,
+    expected_bundles: usize,
+    valid_bundles: usize,
+    evidence_publishable: bool,
+    evidence_status: String,
+    inputs: Vec<BenchmarkProofInput>,
+    candidates: Vec<BenchmarkProofCandidate>,
+    report: BenchmarkComparisonReport,
+}
+
+#[derive(Debug, Serialize)]
+struct BenchmarkProofInput {
+    role: String,
+    path: String,
+    sha256: String,
+}
+
+#[derive(Debug, Serialize)]
+struct BenchmarkProofCandidate {
+    name: String,
+    plan_id: String,
+    benchmark_host: String,
+    runtime: String,
+    bundles: Vec<BenchmarkProofBundle>,
+}
+
+#[derive(Debug, Serialize)]
+struct BenchmarkProofBundle {
+    path: String,
+    sha256: String,
+    benchmark_id: String,
+    source_plan_id: String,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    source_commit: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    captured_at: Option<String>,
 }
 
 #[derive(Debug)]
@@ -1259,6 +1303,25 @@ fn run() -> Result<(), String> {
                 print!("{yaml}");
             }
         }
+
+        "benchmark-proof" => {
+            let kit_dir = args.get(2).ok_or_else(|| {
+                "usage: meshfit benchmark-proof <kit-dir> [--require-publishable]".to_string()
+            })?;
+            let receipt = build_benchmark_proof_receipt(Path::new(kit_dir))?;
+
+            if args.iter().any(|arg| arg == "--require-publishable")
+                && !receipt.evidence_publishable
+            {
+                return Err(format!(
+                    "Benchmark 001 evidence is not publishable: {}",
+                    receipt.evidence_status
+                ));
+            }
+
+            let yaml = serde_yaml::to_string(&receipt).map_err(|e| e.to_string())?;
+            print!("{yaml}");
+        }
         "compare-benchmarks" => {
             let manifest_path = args.get(2).ok_or_else(|| {
                 "usage: meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]"
@@ -1581,6 +1644,105 @@ fn finalize_benchmark_kit(kit_dir: &Path) -> Result<BenchmarkComparisonReport, S
     }
 
     load_benchmark_comparison_report(&kit_dir.join("comparison.yaml"))
+}
+
+
+fn sha256_hex(bytes: &[u8]) -> String {
+    format!("{:x}", Sha256::digest(bytes))
+}
+
+fn build_benchmark_proof_receipt(kit_dir: &Path) -> Result<BenchmarkProofReceipt, String> {
+    let status = inspect_benchmark_kit(kit_dir)?;
+    if !status.complete {
+        return Err(format!(
+            "Benchmark 001 proof requires a complete kit: {}/{} valid bundles",
+            status.valid_bundles, status.expected_bundles
+        ));
+    }
+
+    let kit = load_benchmark_execution_kit(kit_dir)?;
+    let report = finalize_benchmark_kit(kit_dir)?;
+
+    let input_specs = [
+        ("kit", "kit.yaml".to_string()),
+        ("comparison", "comparison.yaml".to_string()),
+        ("snapshot", kit.snapshot.clone()),
+        ("target", kit.target.clone()),
+        ("model_identity", kit.model_identity.clone()),
+    ];
+    let mut inputs = Vec::new();
+    for (role, rel) in input_specs {
+        let path = kit_dir.join(&rel);
+        let bytes =
+            fs::read(&path).map_err(|e| format!("read proof input {}: {e}", path.display()))?;
+        inputs.push(BenchmarkProofInput {
+            role: role.to_string(),
+            path: rel,
+            sha256: sha256_hex(&bytes),
+        });
+    }
+
+    let mut candidates = Vec::new();
+    for candidate in &kit.candidates {
+        let comparison = kit
+            .comparison_manifest
+            .candidates
+            .iter()
+            .find(|item| item.name == candidate.name)
+            .ok_or_else(|| {
+                format!(
+                    "candidate '{}' is missing from comparison manifest",
+                    candidate.name
+                )
+            })?;
+
+        let mut bundles = Vec::new();
+        for bundle_rel in &comparison.bundles {
+            let path = kit_dir.join(bundle_rel);
+            let bytes = fs::read(&path)
+                .map_err(|e| format!("read proof bundle {}: {e}", path.display()))?;
+            let bundle: BenchmarkBundle = serde_yaml::from_slice(&bytes)
+                .map_err(|e| format!("parse proof bundle {}: {e}", path.display()))?;
+            bundle.validate()?;
+
+            if bundle.request.executable.source_plan_id != candidate.plan_id {
+                return Err(format!(
+                    "proof bundle '{}' source plan '{}' does not match candidate plan '{}'",
+                    bundle_rel, bundle.request.executable.source_plan_id, candidate.plan_id
+                ));
+            }
+
+            bundles.push(BenchmarkProofBundle {
+                path: bundle_rel.clone(),
+                sha256: sha256_hex(&bytes),
+                benchmark_id: bundle.benchmark_id,
+                source_plan_id: bundle.request.executable.source_plan_id,
+                source_commit: bundle.provenance.commit,
+                captured_at: bundle.provenance.captured_at,
+            });
+        }
+
+        candidates.push(BenchmarkProofCandidate {
+            name: candidate.name.clone(),
+            plan_id: candidate.plan_id.clone(),
+            benchmark_host: candidate.benchmark_host.clone(),
+            runtime: candidate.runtime.clone(),
+            bundles,
+        });
+    }
+
+    Ok(BenchmarkProofReceipt {
+        schema: "meshfit.benchmark-proof/v1".to_string(),
+        benchmark_id: kit.benchmark_id,
+        kit_complete: status.complete,
+        expected_bundles: status.expected_bundles,
+        valid_bundles: status.valid_bundles,
+        evidence_publishable: report.publishable,
+        evidence_status: report.evidence_status.clone(),
+        inputs,
+        candidates,
+        report,
+    })
 }
 
 fn benchmark_execution_lock_target(listen_port: u16) -> PathBuf {
@@ -3025,6 +3187,7 @@ fn render_benchmark_runbook(kit: &BenchmarkExecutionKit) -> String {
     out.push_str("```bash\n");
     out.push_str("meshfit benchmark-status . --require-complete\n");
     out.push_str("meshfit benchmark-finalize . --markdown --require-publishable\n");
+    out.push_str("meshfit benchmark-proof . --require-publishable > benchmark-proof.yaml\n");
     out.push_str("```\n\n");
 
     out.push_str("## Low-level comparison\n\n");
@@ -3243,7 +3406,7 @@ fn print_prediction(prediction: &Prediction) {
 
 fn print_help() {
     println!(
-        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit calibrate-performance <bundle.yaml> [bundle.yaml ...] [--predicted-p95-ttft-ms N] [--predicted-decode-tps N]\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--listen-port N] [--require-ready] [--write-dir DIR]\n  meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--host NODE] [--model-path PATH] [--dry-run] [--overwrite]\n  meshfit benchmark-run-candidate <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  meshfit benchmark-host-check <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--require-ready]\n  meshfit benchmark-run-host <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  env MESHFIT_MODEL_PATH may provide the host-local model path when --model-path is omitted\n  meshfit benchmark-worklist <kit-dir> [--host NODE | --current-host] [--pending-only]\n  meshfit benchmark-status <kit-dir> [--require-complete]\n  meshfit benchmark-finalize <kit-dir> [--markdown] [--require-publishable]\n  meshfit benchmark-preflight <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--allow-existing] [--require-ready]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
+        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit calibrate-performance <bundle.yaml> [bundle.yaml ...] [--predicted-p95-ttft-ms N] [--predicted-decode-tps N]\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--listen-port N] [--require-ready] [--write-dir DIR]\n  meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--host NODE] [--model-path PATH] [--dry-run] [--overwrite]\n  meshfit benchmark-run-candidate <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  meshfit benchmark-host-check <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--require-ready]\n  meshfit benchmark-run-host <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  env MESHFIT_MODEL_PATH may provide the host-local model path when --model-path is omitted\n  meshfit benchmark-worklist <kit-dir> [--host NODE | --current-host] [--pending-only]\n  meshfit benchmark-status <kit-dir> [--require-complete]\n  meshfit benchmark-finalize <kit-dir> [--markdown] [--require-publishable]\n  meshfit benchmark-proof <kit-dir> [--require-publishable]\n  meshfit benchmark-preflight <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--allow-existing] [--require-ready]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
     );
 }
 
