@@ -360,7 +360,7 @@ README headline
 Benchmark 001 is complete only when:
 
 - [ ] at least 3 real heterogeneous machines are discovered;
-- [ ] relevant links are measured with `meshfit-peer-probe` provenance, RTT, bandwidth, and capture timestamps;
+- [ ] relevant links are measured with `meshfit-peer-probe` provenance, RTT, forward + reverse bandwidth, conservative effective bandwidth, and capture timestamps;
 - [ ] one immutable model artifact is used by every candidate;
 - [ ] all 3 strategies above are executable;
 - [ ] every candidate has at least 2 independent real runs and at least 20 measured samples;
