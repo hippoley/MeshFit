@@ -2192,13 +2192,16 @@ fn inspect_benchmark_run_one_plan(
 
 fn validate_existing_candidate_bundle(
     bundle_path: &Path,
-    contract: &BenchmarkBundleContract,
+    kit_dir: &Path,
+    kit: &BenchmarkExecutionKit,
+    candidate: &BenchmarkExecutionCandidate,
 ) -> Result<(), String> {
     let raw = fs::read_to_string(bundle_path)
         .map_err(|e| format!("read existing bundle {}: {e}", bundle_path.display()))?;
     let bundle: BenchmarkBundle = serde_yaml::from_str(&raw)
         .map_err(|e| format!("parse existing bundle {}: {e}", bundle_path.display()))?;
-    validate_benchmark_bundle_contract(&bundle, contract)
+    let contract = load_benchmark_bundle_contract(kit_dir, kit, candidate)?;
+    validate_benchmark_bundle_contract(&bundle, &contract)
         .map_err(|e| format!("invalid existing bundle {}: {e}", bundle_path.display()))
 }
 
@@ -2235,7 +2238,6 @@ fn plan_benchmark_candidate_runs(
         model_path_override,
         true,
     )?;
-    let evidence_contract = load_benchmark_bundle_contract(kit_dir, &kit, candidate)?;
     let mut existing_valid_runs = Vec::new();
     let mut pending_runs = Vec::new();
 
@@ -2251,7 +2253,7 @@ fn plan_benchmark_candidate_runs(
             continue;
         }
         if resume {
-            validate_existing_candidate_bundle(&bundle_path, &evidence_contract)?;
+            validate_existing_candidate_bundle(&bundle_path, kit_dir, &kit, candidate)?;
             existing_valid_runs.push(run_number);
             continue;
         }
@@ -2984,8 +2986,6 @@ fn inspect_benchmark_worklist(
             continue;
         }
 
-        let evidence_contract = load_benchmark_bundle_contract(kit_dir, &kit, candidate)?;
-
         let comparison = kit
             .comparison_manifest
             .candidates
@@ -3002,7 +3002,8 @@ fn inspect_benchmark_worklist(
             let run_number = index + 1;
             let bundle_path = kit_dir.join(bundle_rel);
             let lock_path = PathBuf::from(format!("{}.lock", bundle_path.display()));
-            let (state, error) = inspect_work_slot(&bundle_path, &evidence_contract, &lock_path);
+            let (state, error) =
+                inspect_work_slot(&bundle_path, kit_dir, &kit, candidate, &lock_path);
 
             let host = hosts
                 .entry(candidate.benchmark_host.clone())
@@ -3077,7 +3078,9 @@ fn inspect_benchmark_worklist(
 
 fn inspect_work_slot(
     bundle_path: &Path,
-    contract: &BenchmarkBundleContract,
+    kit_dir: &Path,
+    kit: &BenchmarkExecutionKit,
+    candidate: &BenchmarkExecutionCandidate,
     lock_path: &Path,
 ) -> (&'static str, Option<String>) {
     if bundle_path.is_file() {
@@ -3089,7 +3092,11 @@ fn inspect_work_slot(
             Ok(bundle) => bundle,
             Err(error) => return ("invalid", Some(format!("parse failed: {error}"))),
         };
-        if let Err(error) = validate_benchmark_bundle_contract(&bundle, contract) {
+        let contract = match load_benchmark_bundle_contract(kit_dir, kit, candidate) {
+            Ok(contract) => contract,
+            Err(error) => return ("invalid", Some(format!("evidence contract: {error}"))),
+        };
+        if let Err(error) = validate_benchmark_bundle_contract(&bundle, &contract) {
             return ("invalid", Some(error));
         }
         return ("valid", None);
@@ -3124,26 +3131,6 @@ fn inspect_benchmark_kit(kit_dir: &Path) -> Result<BenchmarkKitStatus, String> {
     }
 
     for candidate in &kit.candidates {
-        let evidence_contract = match load_benchmark_bundle_contract(kit_dir, &kit, candidate) {
-            Ok(contract) => contract,
-            Err(error) => {
-                issues.push(format!(
-                    "candidate '{}' evidence contract is invalid: {error}",
-                    candidate.name
-                ));
-                candidates.push(BenchmarkCandidateStatus {
-                    name: candidate.name.clone(),
-                    benchmark_host: candidate.benchmark_host.clone(),
-                    plan_id: candidate.plan_id.clone(),
-                    expected_runs: 0,
-                    valid_runs: 0,
-                    missing_bundles: Vec::new(),
-                    invalid_bundles: Vec::new(),
-                });
-                continue;
-            }
-        };
-
         if !candidate.compile_ready {
             issues.push(format!(
                 "candidate '{}' is not compiler-ready{}",
@@ -3213,6 +3200,17 @@ fn inspect_benchmark_kit(kit_dir: &Path) -> Result<BenchmarkKitStatus, String> {
                 }
             };
 
+            let evidence_contract =
+                match load_benchmark_bundle_contract(kit_dir, &kit, candidate) {
+                    Ok(contract) => contract,
+                    Err(error) => {
+                        invalid_bundles.push(BenchmarkInvalidBundle {
+                            path: bundle_rel.clone(),
+                            error: format!("evidence contract: {error}"),
+                        });
+                        continue;
+                    }
+                };
             if let Err(error) =
                 validate_benchmark_bundle_contract(&bundle, &evidence_contract)
             {
