@@ -15,10 +15,15 @@ struct PlacementContext<'a> {
     kv_cache_gb: f64,
 }
 
+#[derive(Default)]
+struct PlacementOutput {
+    feasible: Vec<PlanIR>,
+    rejected: Vec<RejectionIR>,
+    evidence_gaps: Vec<EvidenceGapIR>,
+}
+
 pub fn solve(scenario: &ScenarioIR) -> PlacementReport {
-    let mut feasible = Vec::new();
-    let mut rejected = Vec::new();
-    let mut evidence_gaps = Vec::new();
+    let mut output = PlacementOutput::default();
     let context = PlacementContext {
         model: &scenario.model,
         workload: &scenario.workload,
@@ -31,9 +36,7 @@ pub fn solve(scenario: &ScenarioIR) -> PlacementReport {
             &scenario.infrastructure,
             &context,
             runtime,
-            &mut feasible,
-            &mut rejected,
-            &mut evidence_gaps,
+            &mut output,
         );
         enumerate_two_node_tp(
             &scenario.infrastructure,
@@ -45,15 +48,15 @@ pub fn solve(scenario: &ScenarioIR) -> PlacementReport {
         );
     }
 
-    let pareto = pareto_frontier(&feasible);
+    let pareto = pareto_frontier(&output.feasible);
     let excluded_nodes = explain_exclusions(&scenario.infrastructure, &pareto);
 
     PlacementReport {
         model: scenario.model.id.clone(),
-        feasible,
+        feasible: output.feasible,
         pareto,
-        rejected,
-        evidence_gaps,
+        rejected: output.rejected,
+        evidence_gaps: output.evidence_gaps,
         excluded_nodes,
     }
 }
@@ -68,9 +71,7 @@ fn enumerate_single_node(
     infra: &InfrastructureIR,
     context: &PlacementContext<'_>,
     runtime: &RuntimeIR,
-    feasible: &mut Vec<PlanIR>,
-    rejected: &mut Vec<RejectionIR>,
-    evidence_gaps: &mut Vec<EvidenceGapIR>,
+    output: &mut PlacementOutput,
 ) {
     let model = context.model;
     let required = context.required_memory_gb;
@@ -82,7 +83,7 @@ fn enumerate_single_node(
             .collect();
 
         if compatible.is_empty() {
-            rejected.push(RejectionIR {
+            output.rejected.push(RejectionIR {
                 candidate: format!("{}@{}", runtime.id, node.id),
                 code: "no_compatible_accelerator".into(),
                 reason: format!(
@@ -100,7 +101,7 @@ fn enumerate_single_node(
 
             if usable >= required {
                 any_single_fit = true;
-                feasible.push(PlanIR {
+                output.feasible.push(PlanIR {
                     id: format!(
                         "{}:{}:{}:{:?}",
                         node.id,
@@ -133,7 +134,7 @@ fn enumerate_single_node(
             } else if runtime.supports_cpu_offload {
                 let capacity = usable + node.ram_gb * 0.75;
                 if capacity >= required {
-                    feasible.push(PlanIR {
+                    output.feasible.push(PlanIR {
                         id: format!(
                             "{}:{}:{}:{:?}",
                             node.id,
@@ -177,16 +178,14 @@ fn enumerate_single_node(
                 &compatible,
                 context,
                 runtime,
-                feasible,
-                rejected,
-                evidence_gaps,
+                output,
             );
         }
 
         if !feasible.iter().any(|plan| {
             plan.runtime == runtime.id && plan.nodes.len() == 1 && plan.nodes[0] == node.id
         }) {
-            rejected.push(RejectionIR {
+            output.rejected.push(RejectionIR {
                 candidate: format!("{}@{}", runtime.id, node.id),
                 code: "insufficient_memory".into(),
                 reason: format!(
@@ -204,9 +203,7 @@ fn enumerate_local_tp(
     compatible: &[&AcceleratorIR],
     context: &PlacementContext<'_>,
     runtime: &RuntimeIR,
-    feasible: &mut Vec<PlanIR>,
-    rejected: &mut Vec<RejectionIR>,
-    evidence_gaps: &mut Vec<EvidenceGapIR>,
+    output: &mut PlacementOutput,
 ) {
     let required = context.required_memory_gb;
     let mut by_backend: HashMap<AcceleratorBackend, Vec<&AcceleratorIR>> = HashMap::new();
@@ -243,7 +240,7 @@ fn enumerate_local_tp(
         });
 
         let Some(selected) = selected else {
-            rejected.push(RejectionIR {
+            output.rejected.push(RejectionIR {
                 candidate: format!("{}@{}:{:?}", runtime.id, node_id, backend),
                 code: "tp_shard_does_not_fit".into(),
                 reason: format!(
@@ -269,7 +266,7 @@ fn enumerate_local_tp(
 
         if let Some((left, right)) = missing_link {
             let candidate = format!("{}@{}:{:?}", runtime.id, node_id, backend);
-            evidence_gaps.push(EvidenceGapIR {
+            output.evidence_gaps.push(EvidenceGapIR {
                 kind: EvidenceGapKind::DiscoverLocalFabric,
                 candidate: candidate.clone(),
                 nodes: vec![node_id.to_string()],
@@ -287,7 +284,7 @@ fn enumerate_local_tp(
                 ],
                 missing_fields: vec!["local_fabric_path".into()],
             });
-            rejected.push(RejectionIR {
+            output.rejected.push(RejectionIR {
                 candidate,
                 code: "missing_local_fabric".into(),
                 reason: format!(
@@ -317,7 +314,7 @@ fn enumerate_local_tp(
             .map(|accelerator| accelerator.relative_compute)
             .sum();
 
-        feasible.push(PlanIR {
+        output.feasible.push(PlanIR {
             id: format!(
                 "{}:{}:{}:{:?}",
                 node_id,
@@ -366,9 +363,7 @@ fn enumerate_two_node_tp(
     infra: &InfrastructureIR,
     context: &PlacementContext<'_>,
     runtime: &RuntimeIR,
-    feasible: &mut Vec<PlanIR>,
-    rejected: &mut Vec<RejectionIR>,
-    evidence_gaps: &mut Vec<EvidenceGapIR>,
+    output: &mut PlacementOutput,
 ) {
     let model = context.model;
     let required = context.required_memory_gb;
@@ -383,14 +378,14 @@ fn enumerate_two_node_tp(
             let candidate = format!("{}@{}+{}", runtime.id, a.id, b.id);
 
             let Some(link) = infra.node_link(&a.id, &b.id) else {
-                evidence_gaps.push(EvidenceGapIR {
+                output.evidence_gaps.push(EvidenceGapIR {
                     kind: EvidenceGapKind::DiscoverPeerLink,
                     candidate: candidate.clone(),
                     nodes: vec![a.id.clone(), b.id.clone()],
                     accelerators: vec![],
                     missing_fields: vec!["peer_link".into()],
                 });
-                rejected.push(RejectionIR {
+                output.rejected.push(RejectionIR {
                     candidate,
                     code: "missing_link".into(),
                     reason: "no discovered node-level fabric edge between nodes".into(),
@@ -407,14 +402,14 @@ fn enumerate_two_node_tp(
                 if link.bandwidth_gbps.is_none() {
                     missing_fields.push("bandwidth_gbps".into());
                 }
-                evidence_gaps.push(EvidenceGapIR {
+                output.evidence_gaps.push(EvidenceGapIR {
                     kind: EvidenceGapKind::MeasurePeerLink,
                     candidate: candidate.clone(),
                     nodes: vec![a.id.clone(), b.id.clone()],
                     accelerators: vec![],
                     missing_fields,
                 });
-                rejected.push(RejectionIR {
+                output.rejected.push(RejectionIR {
                     candidate,
                     code: "unmeasured_link".into(),
                     reason: "fabric relation is known but bandwidth/latency have not been measured"
@@ -425,7 +420,7 @@ fn enumerate_two_node_tp(
 
             let pair = best_cross_node_pair(a, b, model, runtime);
             let Some((accelerator_a, accelerator_b)) = pair else {
-                rejected.push(RejectionIR {
+                output.rejected.push(RejectionIR {
                     candidate,
                     code: "cross_node_backend_mismatch".into(),
                     reason: "no matching runtime/model-compatible accelerator backend exists across both nodes".into(),
@@ -434,14 +429,14 @@ fn enumerate_two_node_tp(
             };
 
             let Some(communication_profile) = &model.tp_communication_model else {
-                evidence_gaps.push(EvidenceGapIR {
+                output.evidence_gaps.push(EvidenceGapIR {
                     kind: EvidenceGapKind::SupplyTpCommunicationProfile,
                     candidate: candidate.clone(),
                     nodes: vec![a.id.clone(), b.id.clone()],
                     accelerators: vec![],
                     missing_fields: vec!["model.tp_communication_model".into()],
                 });
-                rejected.push(RejectionIR {
+                output.rejected.push(RejectionIR {
                     candidate,
                     code: "missing_tp_communication_profile".into(),
                     reason: "cross-node TP requires an explicit model communication profile; MeshFit will not infer one silently".into(),
@@ -451,14 +446,14 @@ fn enumerate_two_node_tp(
 
             let Some(communication_budget_ms) = context.workload.max_tp_communication_ms_per_token
             else {
-                evidence_gaps.push(EvidenceGapIR {
+                output.evidence_gaps.push(EvidenceGapIR {
                     kind: EvidenceGapKind::SupplyTpCommunicationBudget,
                     candidate: candidate.clone(),
                     nodes: vec![a.id.clone(), b.id.clone()],
                     accelerators: vec![],
                     missing_fields: vec!["workload.max_tp_communication_ms_per_token".into()],
                 });
-                rejected.push(RejectionIR {
+                output.rejected.push(RejectionIR {
                     candidate,
                     code: "missing_tp_communication_budget".into(),
                     reason: "cross-node TP requires a workload communication budget in ms/token before it can be admitted".into(),
@@ -475,7 +470,7 @@ fn enumerate_two_node_tp(
             );
 
             if communication.total_ms_per_token > communication_budget_ms {
-                rejected.push(RejectionIR {
+                output.rejected.push(RejectionIR {
                     candidate,
                     code: "tp_communication_budget_exceeded".into(),
                     reason: format!(
@@ -497,7 +492,7 @@ fn enumerate_two_node_tp(
                 - shard_required;
 
             if bottleneck_headroom < 0.0 {
-                rejected.push(RejectionIR {
+                output.rejected.push(RejectionIR {
                     candidate,
                     code: "tp_shard_does_not_fit".into(),
                     reason: format!(
@@ -510,7 +505,7 @@ fn enumerate_two_node_tp(
                 continue;
             }
 
-            feasible.push(PlanIR {
+            output.feasible.push(PlanIR {
                 id: format!(
                     "{}/{}+{}/{}:{}:{:?}",
                     a.id,
