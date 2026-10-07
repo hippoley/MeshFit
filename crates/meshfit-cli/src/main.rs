@@ -638,7 +638,7 @@ fn benchmark_hardware_profile_attestation(
     observed: &HardwareIdentity,
 ) -> BenchmarkHostAttestation {
     let mut issues = Vec::new();
-    let warnings = Vec::new();
+    let mut warnings = Vec::new();
 
     if expected.architecture != observed.architecture {
         issues.push(format!(
@@ -923,7 +923,7 @@ fn benchmark_peer_evidence_check_at(
 
     let mut measurements = Vec::new();
     let mut issues = Vec::new();
-    let mut warnings = Vec::new();
+    let warnings = Vec::new();
 
     for left_index in 0..nodes.len() {
         for right_index in (left_index + 1)..nodes.len() {
