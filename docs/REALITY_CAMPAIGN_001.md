@@ -475,17 +475,24 @@ different hardware shape silently.
 Record the current hourly prices from the same authenticated response. Also
 cross-check them against the provider's public pricing page before launch.
 
-For the primary shape, the previously expected order of magnitude is:
+For the primary shape, the campaign tracker currently uses this public-price
+reference:
 
 ```text
-2 x A6000 48 GB + 1 x H100 PCIe 80 GB + 1 x B200 180 GB
+2 x A6000 48 GB = $2.18/hour
+1 x H100 PCIe 80 GB = $3.29/hour
+1 x B200 180 GB = $6.99/hour
+reference concurrent burn = $12.46/hour before tax/storage
+first-run GPU budget ceiling = $50
 ```
 
-Do not treat those prices as constants. Compute the actual campaign burn rate
-from `lambda-instance-types.json` and write it into the campaign notes before
-launch. Keep the existing Reality Campaign budget ceiling explicit; if the
-required instance types or expected wall-clock time would cross it, stop before
-provisioning.
+That reference implies roughly four hours of concurrent instance time before the
+GPU-only ceiling is reached. Do not treat the prices as constants. Compute the
+actual campaign burn rate from `lambda-instance-types.json`, write it into the
+campaign notes before launch, and derive the maximum allowed wall-clock time
+from the frozen $50 first-run ceiling. If the live prices, taxes/storage
+assumptions, or required wall-clock time would cross that ceiling, stop before
+provisioning rather than hoping to terminate in time.
 
 ### C. Launch exactly the frozen provider shape
 
