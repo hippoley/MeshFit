@@ -374,6 +374,7 @@ fn evidence_qualification(
             );
         };
         let plan_id = first_bundle.request.executable.source_plan_id.as_str();
+        let execution_fingerprint = first_bundle.request.identity.fingerprint();
 
         if !compared_plan_ids.insert(plan_id) {
             return (
@@ -448,6 +449,19 @@ fn evidence_qualification(
                         candidate.name,
                         plan_id,
                         bundle.request.executable.source_plan_id
+                    ),
+                );
+            }
+            let observed_fingerprint = bundle.request.identity.fingerprint();
+            if observed_fingerprint != execution_fingerprint {
+                return (
+                    false,
+                    format!(
+                        "candidate '{}' mixes execution identities across repeated runs: benchmark_id '{}' has fingerprint '{}' but the candidate is bound to '{}'",
+                        candidate.name,
+                        bundle.benchmark_id,
+                        observed_fingerprint,
+                        execution_fingerprint
                     ),
                 );
             }
@@ -959,6 +973,20 @@ mod tests {
         assert!(!publishable);
         assert!(status.contains("campaign is already bound to 'abc'"));
         assert!(status.contains("source commit 'def'"));
+    }
+
+    #[test]
+    fn publication_rejects_execution_identity_drift_within_candidate() {
+        let mut candidates = publishable_test_candidates(["abc", "abc", "abc", "abc"]);
+        candidates[0].bundles[1].request.identity.runtime.version = "different-version".into();
+
+        let (publishable, status) =
+            evidence_qualification(&candidates, ComparisonObjective::P95TtftMs);
+
+        assert!(!publishable);
+        assert!(status.contains("baseline"));
+        assert!(status.contains("mixes execution identities"));
+        assert!(status.contains("baseline-02"));
     }
 
     #[test]
