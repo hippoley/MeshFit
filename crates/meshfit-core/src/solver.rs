@@ -367,6 +367,7 @@ fn enumerate_two_node_tp(
     runtime: &RuntimeIR,
     feasible: &mut Vec<PlanIR>,
     rejected: &mut Vec<RejectionIR>,
+    evidence_gaps: &mut Vec<EvidenceGapIR>,
 ) {
     let model = context.model;
     let required = context.required_memory_gb;
@@ -1054,6 +1055,50 @@ mod tests {
         assert!(communication.synchronization_ms_per_token > 0.0);
         assert!(communication.total_ms_per_token < 2.0);
         assert_eq!(communication.confidence, "analytical_unvalidated");
+    }
+
+    #[test]
+    fn missing_peer_link_emits_structured_evidence_gap() {
+        let mut scenario = scenario();
+        scenario
+            .infrastructure
+            .links
+            .retain(|link| !matches!(
+                (&link.from, &link.to),
+                (
+                    crate::ir::FabricEndpointIR::Node { node: left },
+                    crate::ir::FabricEndpointIR::Node { node: right }
+                ) if (left == "local" && right == "remote")
+                    || (left == "remote" && right == "local")
+            ));
+
+        let report = solve(&scenario);
+        let gap = report
+            .evidence_gaps
+            .iter()
+            .find(|gap| gap.kind == EvidenceGapKind::DiscoverPeerLink)
+            .unwrap();
+
+        assert_eq!(gap.nodes, vec!["local".to_string(), "remote".to_string()]);
+        assert_eq!(gap.missing_fields, vec!["peer_link".to_string()]);
+    }
+
+    #[test]
+    fn structural_memory_failure_does_not_emit_evidence_gap() {
+        let mut scenario = scenario();
+        scenario.model.weight_memory_gb = 10_000.0;
+        scenario.model.kv_cache_gb = 0.0;
+        scenario.model.kv_cache_model = None;
+
+        let report = solve(&scenario);
+
+        assert!(report
+            .rejected
+            .iter()
+            .any(|rejection| rejection.code == "insufficient_memory"));
+        assert!(!report.evidence_gaps.iter().any(|gap| {
+            gap.candidate.contains("@local") && gap.kind == EvidenceGapKind::DiscoverPeerLink
+        }));
     }
 
     #[test]
