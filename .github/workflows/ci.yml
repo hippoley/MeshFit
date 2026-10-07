@@ -37,6 +37,8 @@ jobs:
       - run: 'grep -q "discover_peer_link" /tmp/meshfit-probe-plan.yaml'
       - run: 'grep -q "priority:" /tmp/meshfit-probe-plan.yaml'
       - run: 'grep -q "affected_candidates:" /tmp/meshfit-probe-plan.yaml'
+      - run: 'grep -q "targets:" /tmp/meshfit-probe-plan.yaml'
+      - run: 'grep -q "nodes:" /tmp/meshfit-probe-plan.yaml'
       - run: cargo run -p meshfit -- snapshot-manifest examples/snapshot-manifest.yaml > /tmp/meshfit-snapshot-manifest.yaml
       - run: cargo run -p meshfit -- plan-snapshot /tmp/meshfit-snapshot-manifest.yaml examples/placement-target.yaml
       - run: cargo run -p meshfit -- compile examples/compile-vllm.yaml > /tmp/meshfit-executable.yaml
