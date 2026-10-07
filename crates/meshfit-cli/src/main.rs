@@ -441,8 +441,7 @@ fn normalized_identity_local_topology(
         .links
         .iter()
         .filter_map(|link| {
-            let (from_node, from_accelerator) =
-                parse_topology_accelerator_endpoint(&link.from)?;
+            let (from_node, from_accelerator) = parse_topology_accelerator_endpoint(&link.from)?;
             let (to_node, to_accelerator) = parse_topology_accelerator_endpoint(&link.to)?;
             if from_node != host || to_node != host {
                 return None;
@@ -752,7 +751,10 @@ fn load_expected_benchmark_local_topology(
         .map_err(|e| format!("read {}: {e}", snapshot_path.display()))?;
     let snapshot: InfrastructureSnapshot = serde_yaml::from_str(&raw)
         .map_err(|e| format!("parse {}: {e}", snapshot_path.display()))?;
-    Ok(normalized_snapshot_local_topology(&snapshot, benchmark_host))
+    Ok(normalized_snapshot_local_topology(
+        &snapshot,
+        benchmark_host,
+    ))
 }
 
 fn benchmark_peer_evidence_check_at(
@@ -2353,11 +2355,7 @@ fn plan_benchmark_candidate_runs(
         Some((
             load_expected_benchmark_hardware(kit_dir, &kit, &candidate.benchmark_host)?,
             load_expected_benchmark_model(kit_dir, &kit)?,
-            load_expected_benchmark_local_topology(
-                kit_dir,
-                &kit,
-                &candidate.benchmark_host,
-            )?,
+            load_expected_benchmark_local_topology(kit_dir, &kit, &candidate.benchmark_host)?,
         ))
     } else {
         None
@@ -3199,8 +3197,10 @@ fn validate_benchmark_bundle_for_candidate(
         ));
     }
 
-    let observed_topology =
-        normalized_identity_local_topology(&bundle.request.identity.topology, &candidate.benchmark_host);
+    let observed_topology = normalized_identity_local_topology(
+        &bundle.request.identity.topology,
+        &candidate.benchmark_host,
+    );
     let topology_required = candidate.placement == Some(PlacementKind::TensorParallel)
         || bundle.request.executable.placement == PlacementKind::TensorParallel;
     let topology_attestation = benchmark_local_topology_attestation(
