@@ -237,6 +237,7 @@ meshfit benchmark-kit \
   /models/model.gguf \
   model-identity.yaml \
   --listen-port 18181 \
+  --max-peer-probe-age-seconds 1800 \
   --require-ready \
   --write-dir benchmark-001
 ```
@@ -262,6 +263,10 @@ meshfit benchmark-host-check benchmark-001 \
 This gate must validate the actual machine, not just the declared node name. It
 checks the snapshot hardware identity, local accelerator topology where required,
 runtime availability, model SHA-256, listen port, and the relevant peer evidence.
+Reality Campaign 001 freezes a 1800-second peer-probe freshness contract in
+`kit.yaml`; if any required cross-host measurement is older than that at
+preflight time, re-run the affected peer probe and rebuild the frozen snapshot
+and kit rather than executing against stale topology evidence.
 
 For TensorParallel candidates, local topology is part of the execution identity.
 A machine with the same GPU inventory but different NVLink/PCIe structure is not
