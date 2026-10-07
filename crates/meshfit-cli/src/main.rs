@@ -4074,6 +4074,55 @@ mod tests {
         let _ = fs::remove_dir_all(dir);
     }
 
+    fn benchmark_bundle_contract_fixture() -> (BenchmarkBundle, BenchmarkBundleContract) {
+        let bundle: BenchmarkBundle =
+            serde_yaml::from_str(include_str!("../../../examples/benchmark-bundle.yaml")).unwrap();
+        let contract = BenchmarkBundleContract {
+            plan_id: bundle.request.executable.source_plan_id.clone(),
+            runtime: bundle.request.executable.runtime.clone(),
+            listen_port: bundle.request.executable.service.port,
+            benchmark_host: "node-b".into(),
+            model_identity: bundle.request.identity.model.clone(),
+            hardware_identity: bundle.request.identity.hardware.clone(),
+        };
+        (bundle, contract)
+    }
+
+    #[test]
+    fn stored_bundle_contract_accepts_matching_execution_identity() {
+        let (bundle, contract) = benchmark_bundle_contract_fixture();
+        validate_benchmark_bundle_contract(&bundle, &contract).unwrap();
+    }
+
+    #[test]
+    fn stored_bundle_contract_rejects_wrong_hardware() {
+        let (mut bundle, contract) = benchmark_bundle_contract_fixture();
+        bundle.request.identity.hardware.devices.clear();
+
+        let error = validate_benchmark_bundle_contract(&bundle, &contract).unwrap_err();
+        assert!(error.contains("hardware identity does not match snapshot host"));
+        assert!(error.contains("accelerator count mismatch"));
+    }
+
+    #[test]
+    fn stored_bundle_contract_rejects_wrong_model_identity() {
+        let (mut bundle, contract) = benchmark_bundle_contract_fixture();
+        bundle.request.identity.model.quantization = "different-quant".into();
+
+        let error = validate_benchmark_bundle_contract(&bundle, &contract).unwrap_err();
+        assert!(error.contains("model identity does not match materialized model identity"));
+    }
+
+    #[test]
+    fn stored_bundle_contract_rejects_wrong_runtime_port() {
+        let (mut bundle, contract) = benchmark_bundle_contract_fixture();
+        bundle.request.executable.service.port += 1;
+
+        let error = validate_benchmark_bundle_contract(&bundle, &contract).unwrap_err();
+        assert!(error.contains("service port"));
+        assert!(error.contains("benchmark listen port"));
+    }
+
     #[test]
     fn benchmark_auto_defaults_to_at_least_ten_samples() {
         assert_eq!(default_measured_requests(1), 10);
@@ -4205,7 +4254,9 @@ mod tests {
         let bundle = dir.join("run-01.yaml");
         fs::write(&bundle, "not-valid-yaml: [").unwrap();
 
-        let error = validate_existing_candidate_bundle(&bundle, "plan-test").unwrap_err();
+        let kit = status_test_kit();
+        let error =
+            validate_existing_candidate_bundle(&bundle, &dir, &kit, &kit.candidates[0]).unwrap_err();
         assert!(error.contains("parse existing bundle"));
 
         let _ = fs::remove_dir_all(dir);
@@ -4436,19 +4487,22 @@ mod tests {
         let bundle_path = dir.join("run-01.yaml");
         let lock_path = PathBuf::from(format!("{}.lock", bundle_path.display()));
 
+        let kit = status_test_kit();
+        let candidate = &kit.candidates[0];
+
         assert_eq!(
-            inspect_work_slot(&bundle_path, "plan-test", &lock_path),
+            inspect_work_slot(&bundle_path, &dir, &kit, candidate, &lock_path),
             ("pending", None)
         );
 
         fs::write(&lock_path, "").unwrap();
-        let locked = inspect_work_slot(&bundle_path, "plan-test", &lock_path);
+        let locked = inspect_work_slot(&bundle_path, &dir, &kit, candidate, &lock_path);
         assert_eq!(locked.0, "locked");
         assert!(locked.1.unwrap().contains("may be stale"));
 
         fs::remove_file(&lock_path).unwrap();
         fs::write(&bundle_path, "not-valid-yaml: [").unwrap();
-        let invalid = inspect_work_slot(&bundle_path, "plan-test", &lock_path);
+        let invalid = inspect_work_slot(&bundle_path, &dir, &kit, candidate, &lock_path);
         assert_eq!(invalid.0, "invalid");
         assert!(invalid.1.unwrap().contains("parse failed"));
 
