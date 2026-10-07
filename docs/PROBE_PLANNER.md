@@ -37,3 +37,20 @@ This command first runs the normal solver and then derives recommendations from 
 ## Reality boundary
 
 This is the first v0.5 step. It ranks known missing-evidence classes; it does not yet estimate expected value of information or automatically execute probes. Those come only after this mapping is CI-verified and then validated on real ambiguous placements.
+
+
+## Structured evidence gaps
+
+Probe selection no longer derives execution targets by parsing rejection strings.
+
+The solver emits `PlacementReport.evidence_gaps` directly at the point where evidence is found missing. Each gap carries:
+
+- a typed `EvidenceGapKind`;
+- the affected candidate;
+- exact node IDs;
+- exact accelerator references when relevant;
+- the missing field names.
+
+The human-readable `RejectionIR` remains for diagnostics and backward compatibility. Probe recommendations consume `evidence_gaps`, preserve those typed targets, and use rejection codes only to summarize structural failures that are not probeable.
+
+This boundary is required before MeshFit can safely generate targeted network or compute probe execution specs.
