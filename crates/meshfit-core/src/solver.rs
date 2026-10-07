@@ -38,14 +38,7 @@ pub fn solve(scenario: &ScenarioIR) -> PlacementReport {
             runtime,
             &mut output,
         );
-        enumerate_two_node_tp(
-            &scenario.infrastructure,
-            &context,
-            runtime,
-            &mut feasible,
-            &mut rejected,
-            &mut evidence_gaps,
-        );
+        enumerate_two_node_tp(&scenario.infrastructure, &context, runtime, &mut output);
     }
 
     let pareto = pareto_frontier(&output.feasible);
@@ -182,7 +175,7 @@ fn enumerate_single_node(
             );
         }
 
-        if !feasible.iter().any(|plan| {
+        if !output.feasible.iter().any(|plan| {
             plan.runtime == runtime.id && plan.nodes.len() == 1 && plan.nodes[0] == node.id
         }) {
             output.rejected.push(RejectionIR {
