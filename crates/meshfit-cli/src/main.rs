@@ -3549,18 +3549,32 @@ fn select_benchmark_plans(
 }
 
 fn benchmark_plan_warnings(selected: &[(&str, &str, PlanIR)]) -> Vec<String> {
+    let mut warnings = Vec::new();
+
     let unique_ids = selected
         .iter()
         .map(|(_, _, plan)| plan.id.as_str())
         .collect::<std::collections::HashSet<_>>();
-    if unique_ids.len() == selected.len() {
-        Vec::new()
-    } else {
-        vec![
+    if unique_ids.len() != selected.len() {
+        warnings.push(
             "Benchmark 001 candidate plans overlap. A publishable comparison requires three distinct plan IDs; use a cluster/model workload with discriminating alternatives."
                 .to_string(),
-        ]
+        );
     }
+
+    let missing_compute = selected
+        .iter()
+        .filter(|(_, _, plan)| !plan.relative_compute.is_finite() || plan.relative_compute <= 0.0)
+        .map(|(name, _, plan)| format!("{name}={}", plan.relative_compute))
+        .collect::<Vec<_>>();
+    if !missing_compute.is_empty() {
+        warnings.push(format!(
+            "Benchmark 001 compute baseline is not defensible because selected plans lack positive relative_compute scores ({}). Supply a measured or explicitly sourced compute proxy before using --require-distinct/--require-ready.",
+            missing_compute.join(", ")
+        ));
+    }
+
+    warnings
 }
 
 fn baseline_plan_order(left: &PlanIR, right: &PlanIR) -> std::cmp::Ordering {
@@ -4122,6 +4136,34 @@ mod tests {
             .all(|bundle| bundle.sha256.len() == 64));
 
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn benchmark_plan_warnings_reject_missing_compute_scores() {
+        let plan = |id: &str, compute: f64| PlanIR {
+            id: id.into(),
+            placement: PlacementKind::SingleHost,
+            runtime: "vllm".into(),
+            nodes: vec![id.into()],
+            accelerators: vec![],
+            required_memory_gb: 64.0,
+            accelerator_memory_gb: 80.0,
+            relative_compute: compute,
+            hourly_cost_usd: 1.0,
+            memory_headroom_gb: 16.0,
+            communication: None,
+            assumptions: vec![],
+        };
+        let selected = vec![
+            ("single-best-node", "fixture", plan("single", 0.0)),
+            ("max-aggregate-compute", "fixture", plan("aggregate", 120.0)),
+            ("meshfit", "fixture", plan("meshfit", 100.0)),
+        ];
+
+        let warnings = benchmark_plan_warnings(&selected);
+        assert_eq!(warnings.len(), 1);
+        assert!(warnings[0].contains("lack positive relative_compute"));
+        assert!(warnings[0].contains("single-best-node=0"));
     }
 
     #[test]
