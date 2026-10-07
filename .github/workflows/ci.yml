@@ -29,6 +29,11 @@ jobs:
       - run: cargo run -p meshfit -- inspect-model examples/model-artifact-demo.bin qwen-72b-class-q4 gguf q4_k_m test > /tmp/meshfit-model-identity.yaml
       - run: cargo run -p meshfit -- snapshot examples/discovery-node-a.yaml examples/discovery-node-b.yaml examples/probe-a-b.yaml > /tmp/meshfit-snapshot.yaml
       - run: cargo run -p meshfit -- plan-snapshot /tmp/meshfit-snapshot.yaml examples/placement-target.yaml
+      - run: cargo run -p meshfit -- snapshot examples/discovery-node-a.yaml examples/discovery-node-b.yaml > /tmp/meshfit-unmeasured-snapshot.yaml
+      - run: cargo run -p meshfit -- recommend-probes /tmp/meshfit-unmeasured-snapshot.yaml examples/placement-target.yaml > /tmp/meshfit-probe-plan.yaml
+      - run: 'grep -q "discover_peer_link" /tmp/meshfit-probe-plan.yaml'
+      - run: 'grep -q "priority:" /tmp/meshfit-probe-plan.yaml'
+      - run: 'grep -q "affected_candidates:" /tmp/meshfit-probe-plan.yaml'
       - run: cargo run -p meshfit -- snapshot-manifest examples/snapshot-manifest.yaml > /tmp/meshfit-snapshot-manifest.yaml
       - run: cargo run -p meshfit -- plan-snapshot /tmp/meshfit-snapshot-manifest.yaml examples/placement-target.yaml
       - run: cargo run -p meshfit -- compile examples/compile-vllm.yaml > /tmp/meshfit-executable.yaml
