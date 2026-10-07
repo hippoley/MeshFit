@@ -5435,7 +5435,8 @@ mod tests {
             bundle.request.config = expected.config;
             let seed_measurements = bundle.measurements.clone();
             while bundle.measurements.len() < kit.measured_requests_per_run as usize {
-                let next = seed_measurements[bundle.measurements.len() % seed_measurements.len()].clone();
+                let next =
+                    seed_measurements[bundle.measurements.len() % seed_measurements.len()].clone();
                 bundle.measurements.push(next);
             }
             let seed_waves = bundle.waves.clone();
