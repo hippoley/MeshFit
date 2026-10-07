@@ -3969,6 +3969,7 @@ mod tests {
             measured_requests_per_run: 2,
             runs_per_candidate: 1,
             listen_port: BENCHMARK_LISTEN_PORT,
+            max_peer_probe_age_seconds: None,
             candidates: vec![
                 BenchmarkExecutionCandidate {
                     name: "baseline".into(),
