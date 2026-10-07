@@ -68,6 +68,7 @@ jobs:
       - run: grep -q 'benchmark-run-host . --current-host --resume --dry-run' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
       - run: grep -q 'benchmark-run-host . --current-host --resume' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
       - run: grep -q 'benchmark-finalize . --markdown --require-publishable' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
+      - run: grep -q 'benchmark-proof . --require-publishable' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
       - run: grep -q '## Recovery and debugging' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
       - run: test -f /tmp/meshfit-benchmark-001-materialized/inputs/snapshot.yaml
       - run: test -f /tmp/meshfit-benchmark-001-materialized/inputs/target.yaml
@@ -145,6 +146,7 @@ jobs:
       - run: '! cargo run -p meshfit -- benchmark-preflight /tmp/meshfit-benchmark-001-materialized meshfit --host node-b --require-ready'
       - run: '! cargo run -p meshfit -- benchmark-status /tmp/meshfit-benchmark-001-materialized --require-complete'
       - run: '! cargo run -p meshfit -- benchmark-finalize /tmp/meshfit-benchmark-001-materialized'
+      - run: '! cargo run -p meshfit -- benchmark-proof /tmp/meshfit-benchmark-001-materialized'
       - run: printf '[' > /tmp/meshfit-benchmark-001-materialized/results/meshfit/run-01.yaml
       - run: cargo run -p meshfit -- benchmark-status /tmp/meshfit-benchmark-001-materialized > /tmp/meshfit-benchmark-status-invalid.yaml
       - run: grep -q 'parse failed' /tmp/meshfit-benchmark-status-invalid.yaml
