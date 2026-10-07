@@ -2,23 +2,16 @@ use std::collections::{BTreeMap, BTreeSet};
 
 use serde::{Deserialize, Serialize};
 
-use crate::ir::PlacementReport;
+use crate::ir::{EvidenceGapIR, EvidenceGapKind, PlacementReport};
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
-#[serde(rename_all = "snake_case")]
-pub enum ProbeKind {
-    MeasurePeerLink,
-    DiscoverPeerLink,
-    DiscoverLocalFabric,
-    SupplyTpCommunicationProfile,
-    SupplyTpCommunicationBudget,
-}
+pub use crate::ir::EvidenceGapKind as ProbeKind;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct ProbeRecommendation {
     pub kind: ProbeKind,
     pub priority: u32,
     pub affected_candidates: Vec<String>,
+    pub targets: Vec<EvidenceGapIR>,
     pub evidence_gap: String,
     pub why_it_can_change_decision: String,
     pub suggested_action: String,
@@ -42,25 +35,39 @@ struct ProbeTemplate {
 
 pub fn recommend_probes(report: &PlacementReport) -> ProbePlan {
     let decision_blocked = report.feasible.is_empty();
-    let mut grouped: BTreeMap<ProbeKind, BTreeSet<String>> = BTreeMap::new();
-    let mut non_probe_rejections = BTreeSet::new();
+    let mut grouped: BTreeMap<EvidenceGapKind, Vec<EvidenceGapIR>> = BTreeMap::new();
 
-    for rejection in &report.rejected {
-        if let Some(kind) = probe_kind_for_rejection(&rejection.code) {
-            grouped
-                .entry(kind)
-                .or_default()
-                .insert(rejection.candidate.clone());
-        } else {
-            non_probe_rejections.insert(rejection.code.clone());
-        }
+    for gap in &report.evidence_gaps {
+        grouped.entry(gap.kind).or_default().push(gap.clone());
     }
+
+    let evidence_gap_candidates = report
+        .evidence_gaps
+        .iter()
+        .map(|gap| gap.candidate.as_str())
+        .collect::<BTreeSet<_>>();
+    let non_probe_rejections = report
+        .rejected
+        .iter()
+        .filter(|rejection| !evidence_gap_candidates.contains(rejection.candidate.as_str()))
+        .map(|rejection| rejection.code.clone())
+        .collect::<BTreeSet<_>>();
 
     let mut recommendations = grouped
         .into_iter()
-        .map(|(kind, candidates)| {
+        .map(|(kind, mut targets)| {
             let template = probe_template(kind);
-            let affected_candidates = candidates.into_iter().collect::<Vec<_>>();
+            targets.sort_by(|left, right| {
+                left.candidate
+                    .cmp(&right.candidate)
+                    .then_with(|| left.nodes.cmp(&right.nodes))
+            });
+            let affected_candidates = targets
+                .iter()
+                .map(|gap| gap.candidate.clone())
+                .collect::<BTreeSet<_>>()
+                .into_iter()
+                .collect::<Vec<_>>();
             let breadth_bonus = ((affected_candidates.len().saturating_sub(1)) as u32 * 5).min(20);
             let blocked_bonus = if decision_blocked { 10 } else { 0 };
 
@@ -68,6 +75,7 @@ pub fn recommend_probes(report: &PlacementReport) -> ProbePlan {
                 kind,
                 priority: template.base_priority + breadth_bonus + blocked_bonus,
                 affected_candidates,
+                targets,
                 evidence_gap: template.evidence_gap.into(),
                 why_it_can_change_decision: template.why.into(),
                 suggested_action: template.action.into(),
@@ -90,18 +98,7 @@ pub fn recommend_probes(report: &PlacementReport) -> ProbePlan {
     }
 }
 
-fn probe_kind_for_rejection(code: &str) -> Option<ProbeKind> {
-    match code {
-        "unmeasured_link" => Some(ProbeKind::MeasurePeerLink),
-        "missing_link" => Some(ProbeKind::DiscoverPeerLink),
-        "missing_local_fabric" => Some(ProbeKind::DiscoverLocalFabric),
-        "missing_tp_communication_profile" => Some(ProbeKind::SupplyTpCommunicationProfile),
-        "missing_tp_communication_budget" => Some(ProbeKind::SupplyTpCommunicationBudget),
-        _ => None,
-    }
-}
-
-fn probe_template(kind: ProbeKind) -> ProbeTemplate {
+fn probe_template(kind: EvidenceGapKind) -> ProbeTemplate {
     match kind {
         ProbeKind::MeasurePeerLink => ProbeTemplate {
             base_priority: 100,
@@ -139,9 +136,13 @@ fn probe_template(kind: ProbeKind) -> ProbeTemplate {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::ir::{PlacementReport, RejectionIR};
+    use crate::ir::{EvidenceGapIR, EvidenceGapKind, PlacementReport, RejectionIR};
 
-    fn report(rejections: Vec<(&str, &str)>, has_feasible: bool) -> PlacementReport {
+    fn report(
+        rejections: Vec<(&str, &str)>,
+        gaps: Vec<EvidenceGapIR>,
+        has_feasible: bool,
+    ) -> PlacementReport {
         let feasible = if has_feasible {
             vec![crate::ir::PlanIR {
                 id: "fallback".into(),
@@ -173,7 +174,18 @@ mod tests {
                     reason: code.into(),
                 })
                 .collect(),
+            evidence_gaps: gaps,
             excluded_nodes: vec![],
+        }
+    }
+
+    fn gap(kind: EvidenceGapKind, candidate: &str, nodes: &[&str]) -> EvidenceGapIR {
+        EvidenceGapIR {
+            kind,
+            candidate: candidate.into(),
+            nodes: nodes.iter().map(|node| (*node).to_string()).collect(),
+            accelerators: vec![],
+            missing_fields: vec!["test".into()],
         }
     }
 
@@ -185,6 +197,11 @@ mod tests {
                 ("vllm@a", "insufficient_memory"),
                 ("vllm@b", "tp_shard_does_not_fit"),
             ],
+            vec![gap(
+                EvidenceGapKind::MeasurePeerLink,
+                "vllm@a+b",
+                &["a", "b"],
+            )],
             false,
         ));
 
@@ -204,19 +221,45 @@ mod tests {
                 ("vllm@a+c", "unmeasured_link"),
                 ("vllm@a+d", "missing_tp_communication_budget"),
             ],
+            vec![
+                gap(EvidenceGapKind::MeasurePeerLink, "vllm@a+b", &["a", "b"]),
+                gap(EvidenceGapKind::MeasurePeerLink, "vllm@a+c", &["a", "c"]),
+                gap(
+                    EvidenceGapKind::SupplyTpCommunicationBudget,
+                    "vllm@a+d",
+                    &["a", "d"],
+                ),
+            ],
             false,
         ));
 
         assert_eq!(plan.recommendations.len(), 2);
         assert_eq!(plan.recommendations[0].kind, ProbeKind::MeasurePeerLink);
         assert_eq!(plan.recommendations[0].affected_candidates.len(), 2);
+        assert_eq!(plan.recommendations[0].targets[0].nodes[0], "a");
         assert!(plan.recommendations[0].priority > plan.recommendations[1].priority);
     }
 
     #[test]
     fn blocked_decision_gets_priority_boost() {
-        let blocked = recommend_probes(&report(vec![("vllm@a+b", "unmeasured_link")], false));
-        let not_blocked = recommend_probes(&report(vec![("vllm@a+b", "unmeasured_link")], true));
+        let blocked = recommend_probes(&report(
+            vec![("vllm@a+b", "unmeasured_link")],
+            vec![gap(
+                EvidenceGapKind::MeasurePeerLink,
+                "vllm@a+b",
+                &["a", "b"],
+            )],
+            false,
+        ));
+        let not_blocked = recommend_probes(&report(
+            vec![("vllm@a+b", "unmeasured_link")],
+            vec![gap(
+                EvidenceGapKind::MeasurePeerLink,
+                "vllm@a+b",
+                &["a", "b"],
+            )],
+            true,
+        ));
 
         assert_eq!(
             blocked.recommendations[0].priority,
