@@ -174,6 +174,19 @@ Most existing tools are excellent at one of these.
 
 MeshFit is trying to connect all three.
 
+### A placement is a claim, not just a recommendation
+
+For real-hardware evaluation, MeshFit treats a placement decision as something
+that should be reproducible and falsifiable. A publishable comparison binds the
+pre-benchmark plan, workload/request inputs, model artifact, hardware/topology,
+runtime identity, MeshFit source/binary identity, measured peer evidence, and
+repeated-run execution identity.
+
+That boundary is documented in the
+[Trace-to-Placement Contract](docs/TRACE_TO_PLACEMENT_CONTRACT.md), with
+[Reality Campaign 001](docs/REALITY_CAMPAIGN_001.md) as the first concrete
+conformance case.
+
 ---
 
 ## It sits above the runtimes
