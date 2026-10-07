@@ -19,13 +19,23 @@ python3 tools/compute_proxy.py \
   --size 8192 \
   --warmup 5 \
   --repeats 20 \
+  --max-cv 0.10 \
+  --require-stable \
   > compute-proxy-gpu0.json
 ```
 
 For multi-GPU hosts, run it once per physical GPU by changing `--device`.
 Do not run multiple probes concurrently on the same host.
 
-The JSON emits raw timings plus a median dense-GEMM TFLOPS value. Copy
+`--device` is a PyTorch logical CUDA index. If `CUDA_VISIBLE_DEVICES` is set,
+that index may be remapped relative to `nvidia-smi`. The evidence JSON records
+`CUDA_VISIBLE_DEVICES` and, when the PyTorch runtime exposes them, the device
+UUID / PCI bus identifier. Use those fields to bind the proxy evidence to the
+physical discovery record; never assume logical `cuda:0` means physical GPU 0.
+
+The JSON emits raw timings, per-sample TFLOPS, median/mean TFLOPS, sample
+standard deviation, CV, and a `stable` result. With `--require-stable`, the
+command exits non-zero when CV exceeds `--max-cv`. Copy
 `relative_compute` into the corresponding accelerator entry of the discovery
 YAML **without changing any other discovered identity field**, and retain the
 JSON next to the discovery/snapshot inputs.
@@ -39,7 +49,9 @@ aggregate-compute baseline.
 - Use one precision across the whole campaign. The default is BF16.
 - If any compared GPU cannot run that precision, choose another common precision
   and rerun **every** node. Never mix BF16 and FP16 scores.
-- Keep matrix size, warmup count, and repeat count identical.
+- Keep matrix size, warmup count, repeat count, and `max_cv` identical.
+- Use `--require-stable` for Reality Campaign evidence. Do not copy a score
+  from an output where `stable: false`.
 - Treat the score only as a baseline ordering proxy.
 - Do not present the GEMM TFLOPS result as inference throughput or as a MeshFit
   performance result.
