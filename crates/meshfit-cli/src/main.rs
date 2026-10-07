@@ -273,6 +273,7 @@ struct BenchmarkInvalidBundle {
 struct BenchmarkExpectedRequestContract {
     context_tokens: u32,
     concurrency: u32,
+    listen_port: u16,
     config: BenchmarkConfig,
 }
 
@@ -2438,7 +2439,6 @@ fn validate_existing_candidate_bundle(
     expected_model: &ModelArtifactIdentity,
     expected_local_topology: &[String],
     expected_request: &BenchmarkExpectedRequestContract,
-    expected_listen_port: u16,
 ) -> Result<(), String> {
     let raw = fs::read_to_string(bundle_path)
         .map_err(|e| format!("read existing bundle {}: {e}", bundle_path.display()))?;
@@ -2450,7 +2450,7 @@ fn validate_existing_candidate_bundle(
         expected_hardware,
         expected_model,
         expected_local_topology,
-        expected_listen_port,
+        expected_request.listen_port,
     )
     .and_then(|_| validate_benchmark_request_contract(&bundle, expected_request))
     .map_err(|e| format!("invalid existing bundle {}: {e}", bundle_path.display()))
@@ -2526,7 +2526,6 @@ fn plan_benchmark_candidate_runs(
                 expected_model,
                 expected_local_topology,
                 expected_request,
-                kit.listen_port,
             )?;
             existing_valid_runs.push(run_number);
             continue;
@@ -3299,6 +3298,7 @@ fn load_expected_benchmark_request_contract(
     Ok(BenchmarkExpectedRequestContract {
         context_tokens: target.workload.context_tokens,
         concurrency: kit.concurrency,
+        listen_port: kit.listen_port,
         config: BenchmarkConfig {
             prompt: kit.prompt.clone(),
             max_tokens: kit.max_tokens,
@@ -3484,7 +3484,6 @@ fn inspect_benchmark_worklist(
                 &expected_model,
                 &expected_local_topology,
                 &expected_request,
-                kit.listen_port,
                 &lock_path,
             );
 
@@ -3566,7 +3565,6 @@ fn inspect_work_slot(
     expected_model: &ModelArtifactIdentity,
     expected_local_topology: &[String],
     expected_request: &BenchmarkExpectedRequestContract,
-    expected_listen_port: u16,
     lock_path: &Path,
 ) -> (&'static str, Option<String>) {
     if bundle_path.is_file() {
@@ -3584,7 +3582,7 @@ fn inspect_work_slot(
             expected_hardware,
             expected_model,
             expected_local_topology,
-            expected_listen_port,
+            expected_request.listen_port,
         )
         .and_then(|_| validate_benchmark_request_contract(&bundle, expected_request))
         {
@@ -4855,6 +4853,7 @@ mod tests {
         BenchmarkExpectedRequestContract {
             context_tokens: bundle.request.context_tokens,
             concurrency: bundle.request.concurrency,
+            listen_port: bundle.request.executable.service.port,
             config: bundle.request.config.clone(),
         }
     }
@@ -4866,6 +4865,7 @@ mod tests {
         BenchmarkExpectedRequestContract {
             context_tokens: target.workload.context_tokens,
             concurrency: kit.concurrency,
+            listen_port: kit.listen_port,
             config: BenchmarkConfig {
                 prompt: kit.prompt,
                 max_tokens: kit.max_tokens,
@@ -5091,7 +5091,6 @@ mod tests {
             &status_expected_model(),
             &[],
             &status_expected_request(),
-            kit.listen_port,
         )
         .unwrap_err();
         assert!(error.contains("parse existing bundle"));
@@ -5363,7 +5362,6 @@ mod tests {
             &expected_model,
             &[],
             &expected_request,
-            kit.listen_port,
             &lock_path,
         );
         assert_eq!(locked.0, "locked");
@@ -5378,7 +5376,6 @@ mod tests {
             &expected_model,
             &[],
             &expected_request,
-            kit.listen_port,
             &lock_path,
         );
         assert_eq!(invalid.0, "invalid");
