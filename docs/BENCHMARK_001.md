@@ -168,6 +168,8 @@ MESHFIT_NODE_ID=node-b \
 
 The report includes the current machine's discovered hardware identity plus every assigned candidate's runtime availability, host match, hardware-profile match, model verification, warnings, and preflight issues. `--require-ready` exits non-zero if any assigned candidate is not safe to run.
 
+For any candidate spanning more than one node, readiness also requires peer-link measurement provenance for every participating node pair. The materialized snapshot must contain a `meshfit-peer-probe` record with measured RTT, measured bandwidth, and a capture timestamp. Preflight exposes each pair's source, values, measurement age, readiness, and issues. Single-host candidates do not require peer probes. MeshFit currently reports age without inventing a fixed expiration threshold; operators can see whether a topology measurement is old while the first real benchmark establishes a defensible freshness policy.
+
 For a real host, prefer configuring the local path once instead of repeating it on every command:
 
 ```bash
@@ -309,7 +311,7 @@ README headline
 Benchmark 001 is complete only when:
 
 - [ ] at least 3 real heterogeneous machines are discovered;
-- [ ] relevant links are measured;
+- [ ] relevant links are measured with `meshfit-peer-probe` provenance, RTT, bandwidth, and capture timestamps;
 - [ ] one immutable model artifact is used by every candidate;
 - [ ] all 3 strategies above are executable;
 - [ ] every candidate has at least 2 independent real runs and at least 20 measured samples;
