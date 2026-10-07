@@ -266,6 +266,37 @@ meshfit compare-benchmarks benchmark-001.yaml --require-publishable
 
 The comparison rejects mismatched model identity, context, concurrency, or any BenchmarkConfig field. A result is only marked publishable when each candidate has at least 2 independent bundles and 20 measured samples, every strategy maps to one stable plan ID, plan IDs are distinct across strategies, benchmark IDs are unique, runner provenance includes the MeshFit source commit, and capture timestamps are present.
 
+## Frozen request payload
+
+The execution kit freezes the **actual request workload**, not only placement metadata:
+
+- exact benchmark prompt text;
+- max output tokens;
+- warmup request count;
+- measured request count;
+- request/startup timeouts;
+- concurrency.
+
+For a real workload, prefer a prompt file so the payload is auditable and does not depend on shell quoting:
+
+```bash
+meshfit benchmark-kit \
+  cluster.yaml \
+  target.yaml \
+  <meshfit-plan-id> \
+  <model-path> \
+  model-identity.yaml \
+  --prompt-file workload.txt \
+  --max-tokens 256 \
+  --warmup-requests 2 \
+  --measured-requests 20 \
+  --write-dir benchmark-001
+```
+
+The prompt is embedded in `kit.yaml` and materialized again as `inputs/prompt.txt`. Real run-one/candidate/host execution reconstructs `BenchmarkConfig` from the kit fields, so all real execution paths use the same frozen payload. The proof receipt also binds the materialized prompt artifact by SHA-256.
+
+`target.workload.context_tokens` remains the planner/compiler **capacity** contract; MeshFit does not infer prompt token count from bytes or characters. If Benchmark 001 is intended to represent a 32K input workload, construct and verify `workload.txt` with the target model tokenizer first. The raw benchmark bundles retain the full `BenchmarkConfig`, and comparison rejects candidates whose configs differ.
+
 ## Proof receipt
 
 After a materialized Benchmark 001 kit is complete, emit one content-addressed receipt for the experiment:

@@ -25,6 +25,70 @@ fn default_benchmark_listen_port() -> u16 {
     BENCHMARK_LISTEN_PORT
 }
 
+fn default_benchmark_prompt() -> String {
+    "Explain MeshFit in one sentence.".to_string()
+}
+
+fn default_benchmark_max_tokens() -> u32 {
+    64
+}
+
+fn default_benchmark_warmup_requests() -> u32 {
+    1
+}
+
+fn default_benchmark_request_timeout_ms() -> u64 {
+    120_000
+}
+
+fn default_benchmark_startup_timeout_ms() -> u64 {
+    300_000
+}
+
+fn option_u32(args: &[String], option: &str, default: u32) -> Result<u32, String> {
+    option_value(args, option)?
+        .map(|value| {
+            value
+                .parse::<u32>()
+                .map_err(|e| format!("invalid {option} '{value}': {e}"))
+        })
+        .transpose()
+        .map(|value| value.unwrap_or(default))
+}
+
+fn option_u64(args: &[String], option: &str, default: u64) -> Result<u64, String> {
+    option_value(args, option)?
+        .map(|value| {
+            value
+                .parse::<u64>()
+                .map_err(|e| format!("invalid {option} '{value}': {e}"))
+        })
+        .transpose()
+        .map(|value| value.unwrap_or(default))
+}
+
+fn benchmark_prompt_from_args(args: &[String]) -> Result<String, String> {
+    let inline = option_value(args, "--prompt")?;
+    let file = option_value(args, "--prompt-file")?;
+    if inline.is_some() && file.is_some() {
+        return Err("--prompt and --prompt-file are mutually exclusive".to_string());
+    }
+
+    let prompt = match (inline, file) {
+        (Some(prompt), None) => prompt.to_string(),
+        (None, Some(path)) => fs::read_to_string(path)
+            .map_err(|e| format!("read benchmark prompt file '{path}': {e}"))?,
+        (None, None) => default_benchmark_prompt(),
+        (Some(_), Some(_)) => unreachable!(),
+    };
+
+    if prompt.trim().is_empty() {
+        return Err("benchmark prompt must not be empty".to_string());
+    }
+
+    Ok(prompt)
+}
+
 fn parse_benchmark_listen_port(args: &[String]) -> Result<u16, String> {
     let port = option_value(args, "--listen-port")?
         .map(|value| {
@@ -87,6 +151,16 @@ struct BenchmarkExecutionKit {
     model_identity: String,
     concurrency: u32,
     measured_requests_per_run: u32,
+    #[serde(default = "default_benchmark_prompt")]
+    prompt: String,
+    #[serde(default = "default_benchmark_max_tokens")]
+    max_tokens: u32,
+    #[serde(default = "default_benchmark_warmup_requests")]
+    warmup_requests: u32,
+    #[serde(default = "default_benchmark_request_timeout_ms")]
+    request_timeout_ms: u64,
+    #[serde(default = "default_benchmark_startup_timeout_ms")]
+    startup_timeout_ms: u64,
     runs_per_candidate: u32,
     #[serde(default = "default_benchmark_listen_port")]
     listen_port: u16,
@@ -1041,7 +1115,7 @@ fn run() -> Result<(), String> {
         }
         "benchmark-auto" => {
             let executable_path = args.get(2).ok_or_else(|| {
-                "usage: meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]"
+                "usage: meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT|--prompt-file PATH] [--max-tokens N] [--warmup-requests N] [--request-timeout-ms N] [--startup-timeout-ms N]"
                     .to_string()
             })?;
             let model_identity_path = args
@@ -1057,18 +1131,29 @@ fn run() -> Result<(), String> {
                 .transpose()?
                 .unwrap_or(1);
 
-            let prompt = option_value(&args[4..], "--prompt")?
-                .map(str::to_string)
-                .unwrap_or_else(|| "Explain MeshFit in one sentence.".to_string());
-
-            let measured_requests = option_value(&args[4..], "--measured-requests")?
-                .map(|value| {
-                    value
-                        .parse::<u32>()
-                        .map_err(|e| format!("invalid --measured-requests '{value}': {e}"))
-                })
-                .transpose()?
-                .unwrap_or_else(|| default_measured_requests(concurrency));
+            let prompt = benchmark_prompt_from_args(&args[4..])?;
+            let measured_requests = option_u32(
+                &args[4..],
+                "--measured-requests",
+                default_measured_requests(concurrency),
+            )?;
+            let max_tokens =
+                option_u32(&args[4..], "--max-tokens", default_benchmark_max_tokens())?;
+            let warmup_requests = option_u32(
+                &args[4..],
+                "--warmup-requests",
+                default_benchmark_warmup_requests(),
+            )?;
+            let request_timeout_ms = option_u64(
+                &args[4..],
+                "--request-timeout-ms",
+                default_benchmark_request_timeout_ms(),
+            )?;
+            let startup_timeout_ms = option_u64(
+                &args[4..],
+                "--startup-timeout-ms",
+                default_benchmark_startup_timeout_ms(),
+            )?;
 
             if measured_requests == 0 || measured_requests % concurrency != 0 {
                 return Err(format!(
@@ -1091,11 +1176,11 @@ fn run() -> Result<(), String> {
                 concurrency,
                 BenchmarkConfig {
                     prompt,
-                    max_tokens: 64,
-                    warmup_requests: 1,
+                    max_tokens,
+                    warmup_requests,
                     measured_requests,
-                    request_timeout_ms: 120_000,
-                    startup_timeout_ms: 300_000,
+                    request_timeout_ms,
+                    startup_timeout_ms,
                 },
             )?;
 
@@ -1165,7 +1250,7 @@ fn run() -> Result<(), String> {
         }
         "benchmark-kit" => {
             let snapshot_path = args.get(2).ok_or_else(|| {
-                "usage: meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--listen-port N] [--require-ready] [--write-dir DIR]"
+                "usage: meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--listen-port N] [--prompt TEXT|--prompt-file PATH] [--max-tokens N] [--warmup-requests N] [--measured-requests N] [--request-timeout-ms N] [--startup-timeout-ms N] [--require-ready] [--write-dir DIR]"
                     .to_string()
             })?;
             let target_path = args
@@ -1181,6 +1266,24 @@ fn run() -> Result<(), String> {
                 .get(6)
                 .ok_or_else(|| "missing model-identity.yaml".to_string())?;
             let listen_port = parse_benchmark_listen_port(&args[7..])?;
+            let prompt = benchmark_prompt_from_args(&args[7..])?;
+            let max_tokens =
+                option_u32(&args[7..], "--max-tokens", default_benchmark_max_tokens())?;
+            let warmup_requests = option_u32(
+                &args[7..],
+                "--warmup-requests",
+                default_benchmark_warmup_requests(),
+            )?;
+            let request_timeout_ms = option_u64(
+                &args[7..],
+                "--request-timeout-ms",
+                default_benchmark_request_timeout_ms(),
+            )?;
+            let startup_timeout_ms = option_u64(
+                &args[7..],
+                "--startup-timeout-ms",
+                default_benchmark_startup_timeout_ms(),
+            )?;
 
             let model_identity_raw = fs::read_to_string(model_identity_path)
                 .map_err(|e| format!("read {model_identity_path}: {e}"))?;
@@ -1219,7 +1322,22 @@ fn run() -> Result<(), String> {
             let mut warnings = benchmark_plan_warnings(&selected);
 
             let concurrency = target.workload.concurrency;
-            let measured_requests_per_run = default_measured_requests(concurrency);
+            let measured_requests_per_run = option_u32(
+                &args[7..],
+                "--measured-requests",
+                default_measured_requests(concurrency),
+            )?;
+            if measured_requests_per_run == 0 || measured_requests_per_run % concurrency != 0 {
+                return Err(format!(
+                    "--measured-requests must be greater than zero and divisible by concurrency ({concurrency})"
+                ));
+            }
+            if max_tokens == 0 {
+                return Err("--max-tokens must be greater than zero".to_string());
+            }
+            if request_timeout_ms == 0 || startup_timeout_ms == 0 {
+                return Err("benchmark timeout values must be greater than zero".to_string());
+            }
             let benchmark_id = "benchmark-001".to_string();
             let runs_per_candidate = 2_u32;
 
@@ -1260,11 +1378,16 @@ fn run() -> Result<(), String> {
                                 .iter()
                                 .map(|bundle| {
                                     format!(
-                                        "meshfit benchmark-auto {} {} --concurrency {} --measured-requests {} > {}",
+                                        "meshfit benchmark-auto {} {} --concurrency {} --measured-requests {} --prompt {} --max-tokens {} --warmup-requests {} --request-timeout-ms {} --startup-timeout-ms {} > {}",
                                         executable_path,
                                         model_identity_path,
                                         concurrency,
                                         measured_requests_per_run,
+                                        shell_quote(&prompt),
+                                        max_tokens,
+                                        warmup_requests,
+                                        request_timeout_ms,
+                                        startup_timeout_ms,
                                         bundle
                                     )
                                 })
@@ -1324,6 +1447,11 @@ fn run() -> Result<(), String> {
                 model_identity: model_identity_path.clone(),
                 concurrency,
                 measured_requests_per_run,
+                prompt,
+                max_tokens,
+                warmup_requests,
+                request_timeout_ms,
+                startup_timeout_ms,
                 runs_per_candidate,
                 listen_port,
                 candidates: execution_candidates,
@@ -2046,6 +2174,7 @@ fn build_benchmark_proof_receipt(kit_dir: &Path) -> Result<BenchmarkProofReceipt
         ("snapshot", kit.snapshot.clone()),
         ("target", kit.target.clone()),
         ("model_identity", kit.model_identity.clone()),
+        ("prompt", "inputs/prompt.txt".to_string()),
     ];
     let mut inputs = Vec::new();
     for (role, rel) in input_specs {
@@ -2642,12 +2771,12 @@ fn execute_benchmark_run_one_prevalidated(
         model_identity,
         kit.concurrency,
         BenchmarkConfig {
-            prompt: "Explain MeshFit in one sentence.".to_string(),
-            max_tokens: 64,
-            warmup_requests: 1,
+            prompt: kit.prompt.clone(),
+            max_tokens: kit.max_tokens,
+            warmup_requests: kit.warmup_requests,
             measured_requests: kit.measured_requests_per_run,
-            request_timeout_ms: 120_000,
-            startup_timeout_ms: 300_000,
+            request_timeout_ms: kit.request_timeout_ms,
+            startup_timeout_ms: kit.startup_timeout_ms,
         },
     )?;
     let bundle = run_local_benchmark(request)?;
@@ -3535,6 +3664,8 @@ fn materialize_benchmark_kit(
         .map_err(|e| format!("write target input: {e}"))?;
     fs::write(inputs_dir.join("model-identity.yaml"), model_identity_raw)
         .map_err(|e| format!("write model identity input: {e}"))?;
+    fs::write(inputs_dir.join("prompt.txt"), &kit.prompt)
+        .map_err(|e| format!("write benchmark prompt input: {e}"))?;
 
     let mut localized = kit.clone();
     localized.snapshot = "inputs/snapshot.yaml".to_string();
@@ -3566,11 +3697,16 @@ fn materialize_benchmark_kit(
                 .map(|run| {
                     let bundle = format!("{}/run-{run:02}.yaml", candidate.result_dir);
                     format!(
-                        "meshfit benchmark-auto {} {} --concurrency {} --measured-requests {} > {}",
+                        "meshfit benchmark-auto {} {} --concurrency {} --measured-requests {} --prompt-file {} --max-tokens {} --warmup-requests {} --request-timeout-ms {} --startup-timeout-ms {} > {}",
                         shell_quote(&candidate.executable_path),
                         shell_quote(&localized.model_identity),
                         localized.concurrency,
                         localized.measured_requests_per_run,
+                        shell_quote("inputs/prompt.txt"),
+                        localized.max_tokens,
+                        localized.warmup_requests,
+                        localized.request_timeout_ms,
+                        localized.startup_timeout_ms,
                         shell_quote(&bundle),
                     )
                 })
@@ -3620,16 +3756,24 @@ fn render_benchmark_runbook(kit: &BenchmarkExecutionKit) -> String {
     let mut out = String::new();
     out.push_str("# MeshFit Benchmark 001 Runbook\n\n");
     out.push_str(&format!(
-        "**Ready:** {}  \n**Concurrency:** {}  \n**Measured requests/run:** {}  \n**Runs/candidate:** {}  \n**Listen port:** {}\n\n",
+        "**Ready:** {}  \n**Concurrency:** {}  \n**Measured requests/run:** {}  \n**Warmup requests:** {}  \n**Max output tokens:** {}  \n**Request timeout:** {} ms  \n**Startup timeout:** {} ms  \n**Runs/candidate:** {}  \n**Listen port:** {}\n\n",
         kit.ready,
         kit.concurrency,
         kit.measured_requests_per_run,
+        kit.warmup_requests,
+        kit.max_tokens,
+        kit.request_timeout_ms,
+        kit.startup_timeout_ms,
         kit.runs_per_candidate,
         kit.listen_port
     ));
     out.push_str(&format!(
         "**Model source recorded by coordinator:** `{}`  \n",
         kit.model_path
+    ));
+    out.push_str(&format!(
+        "**Benchmark prompt bytes:** {}  \n**Materialized prompt:** `inputs/prompt.txt`  \n\n",
+        kit.prompt.len()
     ));
     out.push_str(
         "Run commands from this materialized directory. Each real machine should execute only the candidates assigned to its logical benchmark host.\n\n",
@@ -3955,7 +4099,7 @@ fn print_prediction(prediction: &Prediction) {
 
 fn print_help() {
     println!(
-        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit calibrate-performance <bundle.yaml> [bundle.yaml ...] [--predicted-p95-ttft-ms N] [--predicted-decode-tps N]\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--listen-port N] [--require-ready] [--write-dir DIR]\n  meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--host NODE] [--model-path PATH] [--dry-run] [--overwrite]\n  meshfit benchmark-run-candidate <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  meshfit benchmark-host-check <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--require-ready]\n  meshfit benchmark-run-host <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  env MESHFIT_MODEL_PATH may provide the host-local model path when --model-path is omitted\n  meshfit benchmark-worklist <kit-dir> [--host NODE | --current-host] [--pending-only]\n  meshfit benchmark-status <kit-dir> [--require-complete]\n  meshfit benchmark-finalize <kit-dir> [--markdown] [--require-publishable]\n  meshfit benchmark-proof <kit-dir> [--require-publishable]\n  meshfit benchmark-preflight <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--allow-existing] [--require-ready]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
+        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT|--prompt-file PATH] [--max-tokens N] [--warmup-requests N] [--request-timeout-ms N] [--startup-timeout-ms N]\n  meshfit benchmark-local <request.yaml>\n  meshfit calibrate-performance <bundle.yaml> [bundle.yaml ...] [--predicted-p95-ttft-ms N] [--predicted-decode-tps N]\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--listen-port N] [--prompt TEXT|--prompt-file PATH] [--max-tokens N] [--warmup-requests N] [--measured-requests N] [--request-timeout-ms N] [--startup-timeout-ms N] [--require-ready] [--write-dir DIR]\n  meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--host NODE] [--model-path PATH] [--dry-run] [--overwrite]\n  meshfit benchmark-run-candidate <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  meshfit benchmark-host-check <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--require-ready]\n  meshfit benchmark-run-host <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  env MESHFIT_MODEL_PATH may provide the host-local model path when --model-path is omitted\n  meshfit benchmark-worklist <kit-dir> [--host NODE | --current-host] [--pending-only]\n  meshfit benchmark-status <kit-dir> [--require-complete]\n  meshfit benchmark-finalize <kit-dir> [--markdown] [--require-publishable]\n  meshfit benchmark-proof <kit-dir> [--require-publishable]\n  meshfit benchmark-preflight <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--allow-existing] [--require-ready]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
     );
 }
 
@@ -4347,6 +4491,7 @@ mod tests {
             serde_yaml::to_string(&expected_model).unwrap(),
         )
         .unwrap();
+        fs::write(dir.join("inputs/prompt.txt"), default_benchmark_prompt()).unwrap();
 
         let kit = BenchmarkExecutionKit {
             benchmark_id: "benchmark-001-proof-test".into(),
@@ -4357,6 +4502,11 @@ mod tests {
             model_identity: "inputs/model-identity.yaml".into(),
             concurrency: 1,
             measured_requests_per_run: 2,
+            prompt: default_benchmark_prompt(),
+            max_tokens: default_benchmark_max_tokens(),
+            warmup_requests: default_benchmark_warmup_requests(),
+            request_timeout_ms: default_benchmark_request_timeout_ms(),
+            startup_timeout_ms: default_benchmark_startup_timeout_ms(),
             runs_per_candidate: 1,
             listen_port: BENCHMARK_LISTEN_PORT,
             candidates: vec![
@@ -4424,7 +4574,7 @@ mod tests {
         assert_eq!(receipt.expected_bundles, 2);
         assert_eq!(receipt.valid_bundles, 2);
         assert!(!receipt.evidence_publishable);
-        assert_eq!(receipt.inputs.len(), 5);
+        assert_eq!(receipt.inputs.len(), 6);
         assert_eq!(receipt.candidates.len(), 2);
         assert!(receipt
             .candidates
@@ -4464,6 +4614,25 @@ mod tests {
     }
 
     #[test]
+    fn benchmark_prompt_rejects_inline_and_file_together() {
+        let args = vec![
+            "--prompt".to_string(),
+            "inline".to_string(),
+            "--prompt-file".to_string(),
+            "workload.txt".to_string(),
+        ];
+        let error = benchmark_prompt_from_args(&args).unwrap_err();
+        assert!(error.contains("mutually exclusive"));
+    }
+
+    #[test]
+    fn benchmark_prompt_rejects_empty_inline_payload() {
+        let args = vec!["--prompt".to_string(), "   ".to_string()];
+        let error = benchmark_prompt_from_args(&args).unwrap_err();
+        assert!(error.contains("must not be empty"));
+    }
+
+    #[test]
     fn benchmark_auto_defaults_to_at_least_ten_samples() {
         assert_eq!(default_measured_requests(1), 10);
         assert_eq!(default_measured_requests(2), 10);
@@ -4490,6 +4659,11 @@ mod tests {
             model_identity: "inputs/model-identity.yaml".into(),
             concurrency: 1,
             measured_requests_per_run: 10,
+            prompt: default_benchmark_prompt(),
+            max_tokens: default_benchmark_max_tokens(),
+            warmup_requests: default_benchmark_warmup_requests(),
+            request_timeout_ms: default_benchmark_request_timeout_ms(),
+            startup_timeout_ms: default_benchmark_startup_timeout_ms(),
             runs_per_candidate: 1,
             listen_port: BENCHMARK_LISTEN_PORT,
             candidates: vec![BenchmarkExecutionCandidate {
