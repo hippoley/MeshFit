@@ -4817,6 +4817,8 @@ mod tests {
             latency_ms,
             jitter_ms: Some(0.03),
             bandwidth_gbps,
+            bandwidth_forward_gbps: bandwidth_gbps,
+            bandwidth_reverse_gbps: bandwidth_gbps,
             source: Some("meshfit-peer-probe".into()),
             captured_at_unix_ms,
         }
