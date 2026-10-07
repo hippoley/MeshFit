@@ -44,9 +44,9 @@ fn parse_benchmark_listen_port(args: &[String]) -> Result<u16, String> {
 fn parse_max_peer_probe_age_seconds(args: &[String]) -> Result<Option<u64>, String> {
     option_value(args, "--max-peer-probe-age-seconds")?
         .map(|value| {
-            let seconds = value.parse::<u64>().map_err(|e| {
-                format!("invalid --max-peer-probe-age-seconds '{value}': {e}")
-            })?;
+            let seconds = value
+                .parse::<u64>()
+                .map_err(|e| format!("invalid --max-peer-probe-age-seconds '{value}': {e}"))?;
             if seconds == 0 {
                 return Err("--max-peer-probe-age-seconds must be greater than zero".to_string());
             }
@@ -3886,8 +3886,7 @@ mod tests {
             Some(1_700_000_000_000),
         )]);
         let nodes = vec!["node-a".to_string(), "node-b".to_string()];
-        let check =
-            benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_060_000, None);
+        let check = benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_060_000, None);
 
         assert!(check.ready);
         assert!(check.issues.is_empty());
@@ -4308,15 +4307,9 @@ mod tests {
             "--max-peer-probe-age-seconds".to_string(),
             "1800".to_string(),
         ];
-        assert_eq!(
-            parse_max_peer_probe_age_seconds(&args).unwrap(),
-            Some(1800)
-        );
+        assert_eq!(parse_max_peer_probe_age_seconds(&args).unwrap(), Some(1800));
 
-        let zero = vec![
-            "--max-peer-probe-age-seconds".to_string(),
-            "0".to_string(),
-        ];
+        let zero = vec!["--max-peer-probe-age-seconds".to_string(), "0".to_string()];
         assert!(parse_max_peer_probe_age_seconds(&zero)
             .unwrap_err()
             .contains("greater than zero"));
