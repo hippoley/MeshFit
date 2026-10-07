@@ -3250,8 +3250,6 @@ fn inspect_benchmark_worklist(
         let expected_model = load_expected_benchmark_model(kit_dir, &kit)?;
         let expected_local_topology =
             load_expected_benchmark_local_topology(kit_dir, &kit, &candidate.benchmark_host)?;
-        let expected_local_topology =
-            load_expected_benchmark_local_topology(kit_dir, &kit, &candidate.benchmark_host)?;
 
         for (index, bundle_rel) in comparison.bundles.iter().enumerate() {
             let run_number = index + 1;
@@ -5009,6 +5007,7 @@ mod tests {
                 candidate,
                 &expected_hardware,
                 &expected_model,
+                &[],
                 kit.listen_port,
                 &lock_path,
             ),
@@ -5021,6 +5020,7 @@ mod tests {
             candidate,
             &expected_hardware,
             &expected_model,
+            &[],
             kit.listen_port,
             &lock_path,
         );
@@ -5034,6 +5034,7 @@ mod tests {
             candidate,
             &expected_hardware,
             &expected_model,
+            &[],
             kit.listen_port,
             &lock_path,
         );
