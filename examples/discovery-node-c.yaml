@@ -1,24 +1,24 @@
 hardware_identity:
-  architecture: arm64
-  operating_system: macos
-  cpu_model: Apple M3 Ultra
+  architecture: x86_64
+  operating_system: linux
+  cpu_model: AMD EPYC
   ram_mib: 131072
   devices:
-    - vendor: apple
-      model: M3 Ultra
-      backend: metal
-      memory_mib: 131072
-      driver_version: null
+    - vendor: nvidia
+      model: NVIDIA H200
+      backend: cuda
+      memory_mib: 143360
+      driver_version: '580.65'
 node:
   id: node-c
   site: office
   ram_gb: 128
   accelerators:
     - id: gpu0
-      backend: metal
-      memory_gb: 128
-      free_memory_gb: 110
-      relative_compute: 0
+      backend: cuda
+      memory_gb: 140
+      free_memory_gb: 136
+      relative_compute: 110
   hourly_cost_usd: 0
 local_fabric: []
 warnings: []

@@ -18,7 +18,7 @@ node:
       backend: cuda
       memory_gb: 80
       free_memory_gb: 78
-      relative_compute: 0
+      relative_compute: 100
   hourly_cost_usd: 0
 local_fabric: []
 warnings: []
