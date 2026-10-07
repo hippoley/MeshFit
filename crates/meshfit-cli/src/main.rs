@@ -914,9 +914,19 @@ fn benchmark_peer_evidence_check_at(
                         "{from_node}<->{to_node} peer evidence has no measured RTT"
                     ));
                 }
+                if measurement.bandwidth_forward_gbps.is_none() {
+                    pair_issues.push(format!(
+                        "{from_node}<->{to_node} peer evidence has no measured forward bandwidth"
+                    ));
+                }
+                if measurement.bandwidth_reverse_gbps.is_none() {
+                    pair_issues.push(format!(
+                        "{from_node}<->{to_node} peer evidence has no measured reverse bandwidth"
+                    ));
+                }
                 if measurement.bandwidth_gbps.is_none() {
                     pair_issues.push(format!(
-                        "{from_node}<->{to_node} peer evidence has no measured bandwidth"
+                        "{from_node}<->{to_node} peer evidence has no conservative effective bandwidth"
                     ));
                 }
                 let age_seconds = measurement.captured_at_unix_ms.map(|captured_at| {
