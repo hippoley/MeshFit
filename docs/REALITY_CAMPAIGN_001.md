@@ -246,15 +246,35 @@ all repeated runs. Do not replace a failed run with a hand-edited bundle.
 If all machines share the same writable experiment directory, no extra transport
 step is needed.
 
-If they do not share storage, copy only the generated files under the kit's
-declared `results/` paths back to the coordinator while preserving the exact
-relative paths. Use your normal authenticated file-transfer mechanism. The
-current main branch intentionally does not treat transport itself as a trust
-source; the coordinator re-parses and re-attests persisted bundles against the
-frozen plan, runtime, listen port, model identity, hardware identity, and local
-topology.
+If they do not share storage, do **not** copy arbitrary `results/` files into
+the coordinator kit. On each benchmark host, export only the result slots that
+the frozen kit assigned to that host:
 
-Do not overwrite a different existing bundle silently.
+```bash
+meshfit benchmark-export-host benchmark-001 --current-host
+```
+
+Transfer the generated host-evidence package with your normal authenticated
+file-transfer mechanism. Transport is not a trust source.
+
+On the coordinator, import the package into the coordinator's original frozen
+kit:
+
+```bash
+meshfit benchmark-import-host benchmark-001 <host-evidence.yaml>
+```
+
+The coordinator kit is the only slot whitelist. Import verifies the package
+SHA-256 and re-attests the submitted evidence against the frozen hardware,
+model, topology, runtime, listen port, plan, prompt, context, concurrency,
+`max_tokens`, warmup count, measured request count, and timeout contract
+**before writing any result file**.
+
+The import is package-atomic: every submitted slot must validate before any slot
+is written. Re-importing byte-equivalent evidence is idempotent. A different
+bundle in an already-populated slot is rejected rather than overwritten.
+Non-kit slots, path traversal, tampered packages, and request-contract drift must
+all fail closed.
 
 ### 11. Require completeness before looking for a headline
 
