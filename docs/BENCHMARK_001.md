@@ -170,6 +170,8 @@ The report includes the current machine's discovered hardware identity plus ever
 
 For any candidate spanning more than one node, readiness also requires peer-link measurement provenance for every participating node pair. The materialized snapshot must contain a `meshfit-peer-probe` record with measured RTT, measured bandwidth, and a capture timestamp. Preflight exposes each pair's source, values, measurement age, readiness, and issues. Single-host candidates do not require peer probes. MeshFit currently reports age without inventing a fixed expiration threshold; operators can see whether a topology measurement is old while the first real benchmark establishes a defensible freshness policy.
 
+MeshFit does not impose a hidden global TTL on peer measurements. A benchmark kit can freeze an explicit freshness contract with `--max-peer-probe-age-seconds N`. When set, the limit is serialized into `kit.yaml`, surfaced in preflight and the generated RUNBOOK, and any required peer measurement older than the declared limit becomes a hard readiness failure. Zero is rejected as ambiguous. Reality Campaign 001 uses 1800 seconds and requires re-probing plus snapshot/kit regeneration when that bound is exceeded.
+
 For a real host, prefer configuring the local path once instead of repeating it on every command:
 
 ```bash
