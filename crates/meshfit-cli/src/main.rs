@@ -5433,6 +5433,16 @@ mod tests {
             bundle.request.context_tokens = expected.context_tokens;
             bundle.request.concurrency = expected.concurrency;
             bundle.request.config = expected.config;
+            let seed_measurements = bundle.measurements.clone();
+            while bundle.measurements.len() < kit.measured_requests_per_run as usize {
+                let next = seed_measurements[bundle.measurements.len() % seed_measurements.len()].clone();
+                bundle.measurements.push(next);
+            }
+            let seed_waves = bundle.waves.clone();
+            while bundle.waves.len() < kit.measured_requests_per_run as usize {
+                let next = seed_waves[bundle.waves.len() % seed_waves.len()].clone();
+                bundle.waves.push(next);
+            }
             fs::write(
                 dir.join("results/meshfit/run-01.yaml"),
                 serde_yaml::to_string(&bundle).unwrap(),
