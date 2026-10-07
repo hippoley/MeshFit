@@ -83,13 +83,19 @@ On each machine, give MeshFit a stable logical node ID and capture discovery:
 
 ```bash
 export MESHFIT_NODE_ID=node-a
-meshfit discover > node-a.yaml
+meshfit discover > node-a.raw.yaml
+cp node-a.raw.yaml node-a.yaml
 ```
 
-Repeat for every host. Keep the raw discovery YAML unchanged except for the
-explicit `relative_compute` insertion described below. The hardware identity,
-accelerator inventory, local topology, driver metadata, and runtime discovery
-must remain machine-derived evidence.
+Repeat for every host. Treat `node-*.raw.yaml` as immutable machine-derived
+evidence. Insert `relative_compute` only into the working `node-*.yaml`
+copies used to build the coordinator snapshot. Never edit the raw discovery
+artifacts in place.
+
+The hardware identity, accelerator inventory, local topology, driver metadata,
+and runtime discovery fields in the working copies must remain byte-for-byte
+derived from their raw counterparts; only the explicitly documented
+`relative_compute` field may be added or changed.
 
 ### 2. Measure the compute-ordering proxy
 
@@ -109,9 +115,10 @@ python3 tools/compute_proxy.py \
 ```
 
 Copy only the resulting `relative_compute` value into the matching accelerator
-entry in that host's discovery YAML. Retain every proxy JSON beside the raw
-discovery inputs. These values rank compute baselines; they are not inference
-throughput measurements.
+entry in that host's working discovery YAML (for example `node-a.yaml`).
+Retain the corresponding immutable `node-a.raw.yaml` and every proxy JSON
+beside the snapshot inputs. These values rank compute baselines; they are not
+inference throughput measurements.
 
 ### 3. Measure every cross-host link used by candidate plans
 
