@@ -3978,11 +3978,33 @@ mod tests {
             serde_yaml::to_string(&meshfit).unwrap(),
         )
         .unwrap();
-        fs::write(dir.join("inputs/snapshot.yaml"), "snapshot: fixture\n").unwrap();
+        let mut hardware_identities = std::collections::BTreeMap::new();
+        hardware_identities.insert(
+            "node-a".to_string(),
+            baseline.request.identity.hardware.clone(),
+        );
+        hardware_identities.insert(
+            "node-b".to_string(),
+            meshfit.request.identity.hardware.clone(),
+        );
+        let snapshot = InfrastructureSnapshot {
+            infrastructure: meshfit_core::InfrastructureIR {
+                nodes: vec![],
+                links: vec![],
+            },
+            hardware_identities,
+            peer_measurements: vec![],
+            warnings: vec![],
+        };
+        fs::write(
+            dir.join("inputs/snapshot.yaml"),
+            serde_yaml::to_string(&snapshot).unwrap(),
+        )
+        .unwrap();
         fs::write(dir.join("inputs/target.yaml"), "target: fixture\n").unwrap();
         fs::write(
             dir.join("inputs/model-identity.yaml"),
-            "model_identity: fixture\n",
+            serde_yaml::to_string(&baseline.request.identity.model).unwrap(),
         )
         .unwrap();
 
