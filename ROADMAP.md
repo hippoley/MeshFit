@@ -38,6 +38,7 @@ MeshFit's roadmap is ordered by the shortest path to a real closed loop.
 - [x] runtime versions — vLLM / llama.cpp PATH discovery implemented
 - [x] RTT probe — implementation complete, probe provenance/timestamp captured, real peer validation pending
 - [x] optional bandwidth probe — `iperf3` client path implemented; cross-node Benchmark 001 now hard-gates on measured RTT + bandwidth + timestamp provenance, real peer validation pending
+- [x] explicit peer-probe freshness policy — Benchmark 001 can declare a max measurement age in the materialized kit; unset means diagnostic age only, declared stale evidence hard-fails
 - [x] merge discovered hosts + measured peer edges into one generated InfrastructureIR — 2-node and N-node manifest fixture E2E implemented, real multi-host validation pending
 
 ## 4. Execute and measure — v0.3
