@@ -3751,6 +3751,7 @@ mod tests {
             ],
             pareto: vec![],
             rejected: vec![],
+            evidence_gaps: vec![],
             excluded_nodes: vec![],
         };
 
