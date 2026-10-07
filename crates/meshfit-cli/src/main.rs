@@ -269,6 +269,13 @@ struct BenchmarkInvalidBundle {
     error: String,
 }
 
+#[derive(Debug, Clone)]
+struct BenchmarkExpectedRequestContract {
+    context_tokens: u32,
+    concurrency: u32,
+    config: BenchmarkConfig,
+}
+
 #[derive(Debug, Serialize)]
 struct BenchmarkProofReceipt {
     schema: String,
@@ -2430,6 +2437,7 @@ fn validate_existing_candidate_bundle(
     expected_hardware: &HardwareIdentity,
     expected_model: &ModelArtifactIdentity,
     expected_local_topology: &[String],
+    expected_request: &BenchmarkExpectedRequestContract,
     expected_listen_port: u16,
 ) -> Result<(), String> {
     let raw = fs::read_to_string(bundle_path)
@@ -2444,6 +2452,7 @@ fn validate_existing_candidate_bundle(
         expected_local_topology,
         expected_listen_port,
     )
+    .and_then(|_| validate_benchmark_request_contract(&bundle, expected_request))
     .map_err(|e| format!("invalid existing bundle {}: {e}", bundle_path.display()))
 }
 
@@ -2485,6 +2494,7 @@ fn plan_benchmark_candidate_runs(
             load_expected_benchmark_hardware(kit_dir, &kit, &candidate.benchmark_host)?,
             load_expected_benchmark_model(kit_dir, &kit)?,
             load_expected_benchmark_local_topology(kit_dir, &kit, &candidate.benchmark_host)?,
+            load_expected_benchmark_request_contract(kit_dir, &kit)?,
         ))
     } else {
         None
@@ -2505,7 +2515,12 @@ fn plan_benchmark_candidate_runs(
             continue;
         }
         if resume {
-            let (expected_hardware, expected_model, expected_local_topology) = resume_contract
+            let (
+                expected_hardware,
+                expected_model,
+                expected_local_topology,
+                expected_request,
+            ) = resume_contract
                 .as_ref()
                 .ok_or_else(|| "resume evidence contract is unavailable".to_string())?;
             validate_existing_candidate_bundle(
@@ -2514,6 +2529,7 @@ fn plan_benchmark_candidate_runs(
                 expected_hardware,
                 expected_model,
                 expected_local_topology,
+                expected_request,
                 kit.listen_port,
             )?;
             existing_valid_runs.push(run_number);
@@ -3272,6 +3288,87 @@ fn load_expected_benchmark_model(
     let raw = fs::read_to_string(&identity_path)
         .map_err(|e| format!("read {}: {e}", identity_path.display()))?;
     serde_yaml::from_str(&raw).map_err(|e| format!("parse {}: {e}", identity_path.display()))
+}
+
+
+fn load_expected_benchmark_request_contract(
+    kit_dir: &Path,
+    kit: &BenchmarkExecutionKit,
+) -> Result<BenchmarkExpectedRequestContract, String> {
+    let target_path = kit_dir.join(&kit.target);
+    let raw = fs::read_to_string(&target_path)
+        .map_err(|e| format!("read {}: {e}", target_path.display()))?;
+    let target: PlacementTargetIR = serde_yaml::from_str(&raw)
+        .map_err(|e| format!("parse {}: {e}", target_path.display()))?;
+
+    Ok(BenchmarkExpectedRequestContract {
+        context_tokens: target.workload.context_tokens,
+        concurrency: kit.concurrency,
+        config: BenchmarkConfig {
+            prompt: kit.prompt.clone(),
+            max_tokens: kit.max_tokens,
+            warmup_requests: kit.warmup_requests,
+            measured_requests: kit.measured_requests_per_run,
+            request_timeout_ms: kit.request_timeout_ms,
+            startup_timeout_ms: kit.startup_timeout_ms,
+        },
+    })
+}
+
+fn validate_benchmark_request_contract(
+    bundle: &BenchmarkBundle,
+    expected: &BenchmarkExpectedRequestContract,
+) -> Result<(), String> {
+    if bundle.request.context_tokens != expected.context_tokens {
+        return Err(format!(
+            "bundle context {} does not match kit target context {}",
+            bundle.request.context_tokens, expected.context_tokens
+        ));
+    }
+    if bundle.request.concurrency != expected.concurrency {
+        return Err(format!(
+            "bundle concurrency {} does not match kit concurrency {}",
+            bundle.request.concurrency, expected.concurrency
+        ));
+    }
+
+    let actual = &bundle.request.config;
+    let expected_config = &expected.config;
+    if actual.prompt != expected_config.prompt {
+        return Err("bundle prompt does not match frozen kit prompt".to_string());
+    }
+    if actual.max_tokens != expected_config.max_tokens {
+        return Err(format!(
+            "bundle max_tokens {} does not match kit {}",
+            actual.max_tokens, expected_config.max_tokens
+        ));
+    }
+    if actual.warmup_requests != expected_config.warmup_requests {
+        return Err(format!(
+            "bundle warmup_requests {} does not match kit {}",
+            actual.warmup_requests, expected_config.warmup_requests
+        ));
+    }
+    if actual.measured_requests != expected_config.measured_requests {
+        return Err(format!(
+            "bundle measured_requests {} does not match kit {}",
+            actual.measured_requests, expected_config.measured_requests
+        ));
+    }
+    if actual.request_timeout_ms != expected_config.request_timeout_ms {
+        return Err(format!(
+            "bundle request_timeout_ms {} does not match kit {}",
+            actual.request_timeout_ms, expected_config.request_timeout_ms
+        ));
+    }
+    if actual.startup_timeout_ms != expected_config.startup_timeout_ms {
+        return Err(format!(
+            "bundle startup_timeout_ms {} does not match kit {}",
+            actual.startup_timeout_ms, expected_config.startup_timeout_ms
+        ));
+    }
+
+    Ok(())
 }
 
 fn validate_benchmark_bundle_for_candidate(
