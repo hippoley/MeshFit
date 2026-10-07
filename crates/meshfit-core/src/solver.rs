@@ -1059,6 +1059,61 @@ mod tests {
     }
 
     #[test]
+    fn missing_peer_link_emits_structured_gap_with_real_nodes() {
+        let mut scenario = scenario();
+        scenario.infrastructure.links.retain(|link| {
+            !matches!(
+                (&link.from, &link.to),
+                (
+                    crate::ir::FabricEndpointIR::Node { node: left },
+                    crate::ir::FabricEndpointIR::Node { node: right }
+                ) if (left == "local" && right == "remote")
+                    || (left == "remote" && right == "local")
+            )
+        });
+
+        let report = solve(&scenario);
+        let gap = report
+            .evidence_gaps
+            .iter()
+            .find(|gap| gap.kind == EvidenceGapKind::DiscoverPeerLink)
+            .unwrap();
+
+        assert_eq!(gap.nodes, vec!["local".to_string(), "remote".to_string()]);
+        assert_eq!(gap.missing_fields, vec!["peer_link".to_string()]);
+    }
+
+    #[test]
+    fn unmeasured_link_records_exact_missing_metrics() {
+        let mut scenario = scenario();
+        let link = scenario
+            .infrastructure
+            .links
+            .iter_mut()
+            .find(|link| matches!(
+                (&link.from, &link.to),
+                (
+                    crate::ir::FabricEndpointIR::Node { node: left },
+                    crate::ir::FabricEndpointIR::Node { node: right }
+                ) if (left == "local" && right == "remote")
+                    || (left == "remote" && right == "local")
+            ))
+            .unwrap();
+        link.bandwidth_gbps = None;
+        link.latency_ms = Some(0.5);
+
+        let report = solve(&scenario);
+        let gap = report
+            .evidence_gaps
+            .iter()
+            .find(|gap| gap.kind == EvidenceGapKind::MeasurePeerLink)
+            .unwrap();
+
+        assert_eq!(gap.nodes, vec!["local".to_string(), "remote".to_string()]);
+        assert_eq!(gap.missing_fields, vec!["bandwidth_gbps".to_string()]);
+    }
+
+    #[test]
     fn slow_wan_pair_is_rejected_for_tp() {
         let report = solve(&scenario());
         assert!(report
