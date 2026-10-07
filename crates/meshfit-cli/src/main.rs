@@ -3582,6 +3582,137 @@ mod tests {
     }
 
     #[test]
+    fn benchmark_proof_sha256_is_content_addressed() {
+        assert_eq!(
+            sha256_hex(b"meshfit"),
+            "1700d6ad0d90692a1ee5680de2e002e9c32d7923afa67834f4a04a85d604a034"
+        );
+    }
+
+    #[test]
+    fn benchmark_proof_succeeds_for_complete_provisional_kit() {
+        let dir = status_test_dir("proof-complete-provisional");
+        fs::create_dir_all(dir.join("inputs")).unwrap();
+        fs::create_dir_all(dir.join("results/baseline")).unwrap();
+        fs::create_dir_all(dir.join("results/meshfit")).unwrap();
+
+        let fixture_raw = include_str!("../../../examples/benchmark-bundle.yaml");
+        let mut baseline: BenchmarkBundle = serde_yaml::from_str(fixture_raw).unwrap();
+        baseline.benchmark_id = "baseline-run-01".into();
+        baseline.request.executable.source_plan_id = "plan-baseline".into();
+
+        let mut meshfit = baseline.clone();
+        meshfit.benchmark_id = "meshfit-run-01".into();
+        meshfit.request.executable.source_plan_id = "plan-meshfit".into();
+        for measurement in &mut meshfit.measurements {
+            measurement.ttft_ms *= 0.9;
+            measurement.total_ms *= 0.95;
+        }
+
+        fs::write(
+            dir.join("results/baseline/run-01.yaml"),
+            serde_yaml::to_string(&baseline).unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            dir.join("results/meshfit/run-01.yaml"),
+            serde_yaml::to_string(&meshfit).unwrap(),
+        )
+        .unwrap();
+        fs::write(dir.join("inputs/snapshot.yaml"), "snapshot: fixture\n").unwrap();
+        fs::write(dir.join("inputs/target.yaml"), "target: fixture\n").unwrap();
+        fs::write(
+            dir.join("inputs/model-identity.yaml"),
+            "model_identity: fixture\n",
+        )
+        .unwrap();
+
+        let kit = BenchmarkExecutionKit {
+            benchmark_id: "benchmark-001-proof-test".into(),
+            ready: true,
+            snapshot: "inputs/snapshot.yaml".into(),
+            target: "inputs/target.yaml".into(),
+            model_path: "demo".into(),
+            model_identity: "inputs/model-identity.yaml".into(),
+            concurrency: 1,
+            measured_requests_per_run: 2,
+            runs_per_candidate: 1,
+            listen_port: BENCHMARK_LISTEN_PORT,
+            candidates: vec![
+                BenchmarkExecutionCandidate {
+                    name: "baseline".into(),
+                    plan_id: "plan-baseline".into(),
+                    nodes: vec!["node-a".into()],
+                    benchmark_host: "node-a".into(),
+                    runtime: "vllm".into(),
+                    result_dir: "results/baseline".into(),
+                    executable_path: "artifacts/baseline/executable.yaml".into(),
+                    compile_ready: true,
+                    compile_error: None,
+                    compile_command: None,
+                    run_commands: vec![],
+                },
+                BenchmarkExecutionCandidate {
+                    name: "meshfit".into(),
+                    plan_id: "plan-meshfit".into(),
+                    nodes: vec!["node-b".into()],
+                    benchmark_host: "node-b".into(),
+                    runtime: "vllm".into(),
+                    result_dir: "results/meshfit".into(),
+                    executable_path: "artifacts/meshfit/executable.yaml".into(),
+                    compile_ready: true,
+                    compile_error: None,
+                    compile_command: None,
+                    run_commands: vec![],
+                },
+            ],
+            comparison_manifest: BenchmarkExecutionComparison {
+                benchmark_id: "benchmark-001-proof-test".into(),
+                meshfit_candidate: "meshfit".into(),
+                objective: "p95_ttft_ms".into(),
+                candidates: vec![
+                    BenchmarkExecutionComparisonCandidate {
+                        name: "baseline".into(),
+                        strategy: "fixture baseline".into(),
+                        hourly_cost_usd: 1.0,
+                        bundles: vec!["results/baseline/run-01.yaml".into()],
+                    },
+                    BenchmarkExecutionComparisonCandidate {
+                        name: "meshfit".into(),
+                        strategy: "fixture meshfit".into(),
+                        hourly_cost_usd: 1.0,
+                        bundles: vec!["results/meshfit/run-01.yaml".into()],
+                    },
+                ],
+            },
+            warnings: vec![],
+        };
+
+        fs::write(dir.join("kit.yaml"), serde_yaml::to_string(&kit).unwrap()).unwrap();
+        fs::write(
+            dir.join("comparison.yaml"),
+            serde_yaml::to_string(&kit.comparison_manifest).unwrap(),
+        )
+        .unwrap();
+
+        let receipt = build_benchmark_proof_receipt(&dir).unwrap();
+        assert_eq!(receipt.schema, "meshfit.benchmark-proof/v1");
+        assert!(receipt.kit_complete);
+        assert_eq!(receipt.expected_bundles, 2);
+        assert_eq!(receipt.valid_bundles, 2);
+        assert!(!receipt.evidence_publishable);
+        assert_eq!(receipt.inputs.len(), 5);
+        assert_eq!(receipt.candidates.len(), 2);
+        assert!(receipt
+            .candidates
+            .iter()
+            .flat_map(|candidate| candidate.bundles.iter())
+            .all(|bundle| bundle.sha256.len() == 64));
+
+        let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
     fn benchmark_auto_defaults_to_at_least_ten_samples() {
         assert_eq!(default_measured_requests(1), 10);
         assert_eq!(default_measured_requests(2), 10);
