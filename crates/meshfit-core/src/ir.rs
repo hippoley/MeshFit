@@ -376,6 +376,28 @@ pub struct PlanIR {
     pub assumptions: Vec<String>,
 }
 
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq, Eq, PartialOrd, Ord)]
+#[serde(rename_all = "snake_case")]
+pub enum EvidenceGapKind {
+    MeasurePeerLink,
+    DiscoverPeerLink,
+    DiscoverLocalFabric,
+    SupplyTpCommunicationProfile,
+    SupplyTpCommunicationBudget,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
+pub struct EvidenceGapIR {
+    pub kind: EvidenceGapKind,
+    pub candidate: String,
+    #[serde(default)]
+    pub nodes: Vec<String>,
+    #[serde(default)]
+    pub accelerators: Vec<AcceleratorRefIR>,
+    #[serde(default)]
+    pub missing_fields: Vec<String>,
+}
+
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct RejectionIR {
     pub candidate: String,
@@ -396,6 +418,8 @@ pub struct PlacementReport {
     pub feasible: Vec<PlanIR>,
     pub pareto: Vec<PlanIR>,
     pub rejected: Vec<RejectionIR>,
+    #[serde(default)]
+    pub evidence_gaps: Vec<EvidenceGapIR>,
     pub excluded_nodes: Vec<ExclusionIR>,
 }
 
