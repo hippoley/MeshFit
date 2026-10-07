@@ -897,6 +897,8 @@ mod tests {
             objective: ComparisonObjective::P95TtftMs,
             publishable: true,
             evidence_status: "independent repeated benchmark bundles verified".into(),
+            performance_claim_publishable: true,
+            performance_claim_status: "conservative improvement interval remains above zero".into(),
             oracle_candidate: "meshfit".into(),
             meshfit_candidate: "meshfit".into(),
             oracle_objective_value: 100.0,
@@ -906,6 +908,8 @@ mod tests {
             best_baseline_objective_value: 125.0,
             best_baseline_regret_fraction: 0.25,
             meshfit_improvement_vs_best_baseline_fraction: 0.20,
+            meshfit_improvement_ci95_lower_fraction: Some(0.10),
+            meshfit_improvement_ci95_upper_fraction: Some(0.30),
             regret_reduction_vs_best_baseline_fraction: Some(1.0),
             candidates: vec![CandidateBenchmarkSummary {
                 name: "meshfit".into(),
@@ -925,6 +929,10 @@ mod tests {
                 hourly_cost_usd: Some(1.0),
                 estimated_cost_per_million_output_tokens_usd: Some(6.944),
                 objective_value: 100.0,
+                run_objective_mean: Some(100.0),
+                run_objective_geometric_mean: Some(99.9),
+                run_objective_ci95_lower: Some(95.0),
+                run_objective_ci95_upper: Some(105.0),
                 run_objective_cv: Some(0.05),
                 regret_fraction: 0.0,
             }],
@@ -932,8 +940,87 @@ mod tests {
 
         let markdown = report.to_markdown();
         assert!(markdown.contains("MeshFit vs best baseline (heuristic): 20.0% better"));
+        assert!(markdown.contains("conservative improvement interval"));
         assert!(markdown.contains("| meshfit | topology-aware | 2 | 20 |"));
         assert!(markdown.contains("Observed oracle: **meshfit**"));
+    }
+
+    #[test]
+    fn geometric_mean_matches_log_space_center() {
+        let values = vec![100.0, 400.0];
+        let geometric = geometric_mean(&values).unwrap();
+        let (lower, upper) = log_student_t_interval_95(&values).unwrap();
+
+        assert!((geometric - 200.0).abs() < 1e-12);
+        assert!((geometric.ln() - ((lower.ln() + upper.ln()) / 2.0)).abs() < 1e-12);
+        assert_ne!(geometric, mean(&values).unwrap());
+    }
+
+    #[test]
+    fn log_student_t_interval_is_positive_and_widens_for_two_runs() {
+        let interval = log_student_t_interval_95(&[100.0, 110.0]).unwrap();
+        assert!(interval.0 > 0.0);
+        assert!(interval.0 < 100.0);
+        assert!(interval.1 > 110.0);
+    }
+
+    #[test]
+    fn performance_claim_gate_requires_strictly_positive_interval() {
+        assert!(performance_claim_publishable(true, Some((0.01, 0.20))));
+        assert!(!performance_claim_publishable(true, Some((0.0, 0.20))));
+        assert!(!performance_claim_publishable(true, Some((-0.05, 0.20))));
+        assert!(!performance_claim_publishable(false, Some((0.10, 0.30))));
+        assert!(!performance_claim_publishable(true, None));
+    }
+
+    #[test]
+    fn higher_and_lower_objectives_produce_positive_advantage_bounds_consistently() {
+        let lower_better = conservative_improvement_interval(
+            Some(80.0),
+            Some(90.0),
+            Some(100.0),
+            Some(110.0),
+            ComparisonObjective::P95TtftMs,
+        )
+        .unwrap();
+        let higher_better = conservative_improvement_interval(
+            Some(110.0),
+            Some(120.0),
+            Some(90.0),
+            Some(100.0),
+            ComparisonObjective::MeanDecodeTokensPerSecond,
+        )
+        .unwrap();
+
+        assert!(lower_better.0 > 0.0);
+        assert!(higher_better.0 > 0.0);
+        assert!(performance_claim_publishable(true, Some(lower_better)));
+        assert!(performance_claim_publishable(true, Some(higher_better)));
+    }
+
+    #[test]
+    fn conservative_improvement_interval_uses_worst_case_bounds() {
+        let lower_better = conservative_improvement_interval(
+            Some(80.0),
+            Some(100.0),
+            Some(100.0),
+            Some(120.0),
+            ComparisonObjective::P95TtftMs,
+        )
+        .unwrap();
+        assert!((lower_better.0 - 0.0).abs() < 1e-12);
+        assert!((lower_better.1 - (1.0 - 80.0 / 120.0)).abs() < 1e-12);
+
+        let higher_better = conservative_improvement_interval(
+            Some(100.0),
+            Some(120.0),
+            Some(80.0),
+            Some(100.0),
+            ComparisonObjective::MeanDecodeTokensPerSecond,
+        )
+        .unwrap();
+        assert!((higher_better.0 - 0.0).abs() < 1e-12);
+        assert!((higher_better.1 - 0.5).abs() < 1e-12);
     }
 
     #[test]
