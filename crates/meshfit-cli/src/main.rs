@@ -4160,6 +4160,127 @@ mod tests {
         }
     }
 
+    fn status_expected_hardware() -> HardwareIdentity {
+        attestation_identity("NVIDIA H100", 81_920, "580.65", 65_536)
+    }
+
+    fn status_expected_model() -> ModelArtifactIdentity {
+        ModelArtifactIdentity {
+            model_id: "qwen-demo".into(),
+            format: "safetensors".into(),
+            quantization: "awq4".into(),
+            artifact_sha256: Some("demo-sha".into()),
+            revision: Some("main".into()),
+        }
+    }
+
+    fn write_status_contract_files(dir: &Path) {
+        let inputs = dir.join("inputs");
+        fs::create_dir_all(&inputs).unwrap();
+
+        let mut hardware_identities = std::collections::BTreeMap::new();
+        hardware_identities.insert("node-a".to_string(), status_expected_hardware());
+        let snapshot = InfrastructureSnapshot {
+            infrastructure: meshfit_core::InfrastructureIR {
+                nodes: Vec::new(),
+                links: Vec::new(),
+            },
+            hardware_identities,
+            peer_measurements: Vec::new(),
+            warnings: Vec::new(),
+        };
+        fs::write(
+            inputs.join("snapshot.yaml"),
+            serde_yaml::to_string(&snapshot).unwrap(),
+        )
+        .unwrap();
+        fs::write(
+            inputs.join("model-identity.yaml"),
+            serde_yaml::to_string(&status_expected_model()).unwrap(),
+        )
+        .unwrap();
+    }
+
+    fn example_bundle_contract() -> (
+        BenchmarkBundle,
+        BenchmarkExecutionCandidate,
+        HardwareIdentity,
+        ModelArtifactIdentity,
+    ) {
+        let bundle: BenchmarkBundle =
+            serde_yaml::from_str(include_str!("../../../examples/benchmark-bundle.yaml")).unwrap();
+        let candidate = BenchmarkExecutionCandidate {
+            name: "meshfit".into(),
+            plan_id: bundle.request.executable.source_plan_id.clone(),
+            nodes: vec![bundle.request.executable.working_node.clone()],
+            benchmark_host: bundle.request.executable.working_node.clone(),
+            runtime: bundle.request.executable.runtime.clone(),
+            result_dir: "results/meshfit".into(),
+            executable_path: "artifacts/meshfit/executable.yaml".into(),
+            compile_ready: true,
+            compile_error: None,
+            compile_command: None,
+            run_commands: Vec::new(),
+        };
+        (
+            bundle.clone(),
+            candidate,
+            bundle.request.identity.hardware.clone(),
+            bundle.request.identity.model.clone(),
+        )
+    }
+
+    #[test]
+    fn persisted_bundle_contract_rejects_foreign_hardware_model_and_port() {
+        let (bundle, candidate, expected_hardware, expected_model) = example_bundle_contract();
+        let expected_port = bundle.request.executable.service.port;
+
+        validate_benchmark_bundle_for_candidate(
+            &bundle,
+            &candidate,
+            &expected_hardware,
+            &expected_model,
+            expected_port,
+        )
+        .unwrap();
+
+        let mut wrong_hardware = bundle.clone();
+        wrong_hardware.request.identity.hardware.devices[0].model = "RTX 4090".into();
+        assert!(validate_benchmark_bundle_for_candidate(
+            &wrong_hardware,
+            &candidate,
+            &expected_hardware,
+            &expected_model,
+            expected_port,
+        )
+        .unwrap_err()
+        .contains("bundle hardware identity"));
+
+        let mut wrong_model = bundle.clone();
+        wrong_model.request.identity.model.artifact_sha256 = Some("other-sha".into());
+        assert!(validate_benchmark_bundle_for_candidate(
+            &wrong_model,
+            &candidate,
+            &expected_hardware,
+            &expected_model,
+            expected_port,
+        )
+        .unwrap_err()
+        .contains("model identity"));
+
+        let mut wrong_port = bundle;
+        wrong_port.request.executable.service.port = expected_port.saturating_add(1);
+        assert!(validate_benchmark_bundle_for_candidate(
+            &wrong_port,
+            &candidate,
+            &expected_hardware,
+            &expected_model,
+            expected_port,
+        )
+        .unwrap_err()
+        .contains("service port"));
+    }
+
     fn status_test_dir(label: &str) -> PathBuf {
         use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -4234,7 +4355,15 @@ mod tests {
         let bundle = dir.join("run-01.yaml");
         fs::write(&bundle, "not-valid-yaml: [").unwrap();
 
-        let error = validate_existing_candidate_bundle(&bundle, "plan-test").unwrap_err();
+        let kit = status_test_kit();
+        let error = validate_existing_candidate_bundle(
+            &bundle,
+            &kit.candidates[0],
+            &status_expected_hardware(),
+            &status_expected_model(),
+            kit.listen_port,
+        )
+        .unwrap_err();
         assert!(error.contains("parse existing bundle"));
 
         let _ = fs::remove_dir_all(dir);
@@ -4465,19 +4594,45 @@ mod tests {
         let bundle_path = dir.join("run-01.yaml");
         let lock_path = PathBuf::from(format!("{}.lock", bundle_path.display()));
 
+        let kit = status_test_kit();
+        let candidate = &kit.candidates[0];
+        let expected_hardware = status_expected_hardware();
+        let expected_model = status_expected_model();
+
         assert_eq!(
-            inspect_work_slot(&bundle_path, "plan-test", &lock_path),
+            inspect_work_slot(
+                &bundle_path,
+                candidate,
+                &expected_hardware,
+                &expected_model,
+                kit.listen_port,
+                &lock_path,
+            ),
             ("pending", None)
         );
 
         fs::write(&lock_path, "").unwrap();
-        let locked = inspect_work_slot(&bundle_path, "plan-test", &lock_path);
+        let locked = inspect_work_slot(
+            &bundle_path,
+            candidate,
+            &expected_hardware,
+            &expected_model,
+            kit.listen_port,
+            &lock_path,
+        );
         assert_eq!(locked.0, "locked");
         assert!(locked.1.unwrap().contains("may be stale"));
 
         fs::remove_file(&lock_path).unwrap();
         fs::write(&bundle_path, "not-valid-yaml: [").unwrap();
-        let invalid = inspect_work_slot(&bundle_path, "plan-test", &lock_path);
+        let invalid = inspect_work_slot(
+            &bundle_path,
+            candidate,
+            &expected_hardware,
+            &expected_model,
+            kit.listen_port,
+            &lock_path,
+        );
         assert_eq!(invalid.0, "invalid");
         assert!(invalid.1.unwrap().contains("parse failed"));
 
@@ -4488,6 +4643,7 @@ mod tests {
     fn benchmark_finalize_refuses_incomplete_kit() {
         let dir = status_test_dir("finalize-incomplete");
         fs::create_dir_all(&dir).unwrap();
+        write_status_contract_files(&dir);
         fs::write(
             dir.join("kit.yaml"),
             serde_yaml::to_string(&status_test_kit()).unwrap(),
@@ -4505,6 +4661,7 @@ mod tests {
     fn benchmark_status_reports_missing_bundle() {
         let dir = status_test_dir("missing");
         fs::create_dir_all(&dir).unwrap();
+        write_status_contract_files(&dir);
         fs::write(
             dir.join("kit.yaml"),
             serde_yaml::to_string(&status_test_kit()).unwrap(),
@@ -4527,6 +4684,7 @@ mod tests {
     fn benchmark_status_reports_corrupt_bundle() {
         let dir = status_test_dir("corrupt");
         fs::create_dir_all(dir.join("results/meshfit")).unwrap();
+        write_status_contract_files(&dir);
         fs::write(
             dir.join("kit.yaml"),
             serde_yaml::to_string(&status_test_kit()).unwrap(),
