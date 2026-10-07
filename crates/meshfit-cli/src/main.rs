@@ -102,6 +102,8 @@ struct BenchmarkExecutionCandidate {
     nodes: Vec<String>,
     benchmark_host: String,
     runtime: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    placement: Option<PlacementKind>,
     result_dir: String,
     executable_path: String,
     compile_ready: bool,
@@ -279,6 +281,9 @@ struct BenchmarkRunCandidatePlan {
     host_match: bool,
     hardware_profile_match: bool,
     hardware_profile_issues: Vec<String>,
+    local_topology_verified: bool,
+    local_topology_match: bool,
+    local_topology_issues: Vec<String>,
     preflight_ready: bool,
     preflight_issues: Vec<String>,
     preflight_warnings: Vec<String>,
@@ -356,6 +361,9 @@ struct BenchmarkPreflight {
     host_match: bool,
     hardware_profile_match: bool,
     hardware_profile_issues: Vec<String>,
+    local_topology_verified: bool,
+    local_topology_match: bool,
+    local_topology_issues: Vec<String>,
     runtime: String,
     runtime_found: bool,
     model_path: String,
@@ -376,6 +384,126 @@ struct BenchmarkHostAttestation {
     matches: bool,
     issues: Vec<String>,
     warnings: Vec<String>,
+}
+
+#[derive(Debug)]
+struct BenchmarkLocalTopologyAttestation {
+    verified: bool,
+    matches: bool,
+    issues: Vec<String>,
+    warnings: Vec<String>,
+}
+
+fn normalized_snapshot_local_topology(
+    snapshot: &InfrastructureSnapshot,
+    host: &str,
+) -> Vec<String> {
+    let mut edges = snapshot
+        .infrastructure
+        .links
+        .iter()
+        .filter_map(|edge| match (&edge.from, &edge.to) {
+            (
+                meshfit_core::FabricEndpointIR::Accelerator {
+                    node: from_node,
+                    accelerator: from_accelerator,
+                },
+                meshfit_core::FabricEndpointIR::Accelerator {
+                    node: to_node,
+                    accelerator: to_accelerator,
+                },
+            ) if from_node == host && to_node == host => {
+                let (left, right) = if from_accelerator <= to_accelerator {
+                    (from_accelerator, to_accelerator)
+                } else {
+                    (to_accelerator, from_accelerator)
+                };
+                Some(format!("{left}<->{right}:{:?}", edge.kind))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    edges.sort();
+    edges.dedup();
+    edges
+}
+
+fn parse_topology_accelerator_endpoint(endpoint: &str) -> Option<(&str, &str)> {
+    let rest = endpoint.strip_prefix("accelerator:")?;
+    rest.split_once('/')
+}
+
+fn normalized_identity_local_topology(
+    topology: &meshfit_core::TopologyIdentity,
+    host: &str,
+) -> Vec<String> {
+    let mut edges = topology
+        .links
+        .iter()
+        .filter_map(|link| {
+            let (from_node, from_accelerator) =
+                parse_topology_accelerator_endpoint(&link.from)?;
+            let (to_node, to_accelerator) = parse_topology_accelerator_endpoint(&link.to)?;
+            if from_node != host || to_node != host {
+                return None;
+            }
+            let (left, right) = if from_accelerator <= to_accelerator {
+                (from_accelerator, to_accelerator)
+            } else {
+                (to_accelerator, from_accelerator)
+            };
+            Some(format!("{left}<->{right}:{:?}", link.kind))
+        })
+        .collect::<Vec<_>>();
+    edges.sort();
+    edges.dedup();
+    edges
+}
+
+fn benchmark_local_topology_attestation(
+    expected: &[String],
+    observed: &[String],
+    topology_required: bool,
+    host: &str,
+) -> BenchmarkLocalTopologyAttestation {
+    if expected.is_empty() {
+        if topology_required {
+            return BenchmarkLocalTopologyAttestation {
+                verified: false,
+                matches: false,
+                issues: vec![format!(
+                    "snapshot has no local accelerator topology evidence for tensor-parallel benchmark host '{host}'"
+                )],
+                warnings: Vec::new(),
+            };
+        }
+        return BenchmarkLocalTopologyAttestation {
+            verified: false,
+            matches: true,
+            issues: Vec::new(),
+            warnings: vec![format!(
+                "snapshot has no local accelerator topology evidence for benchmark host '{host}'; topology is unverified"
+            )],
+        };
+    }
+
+    if expected != observed {
+        return BenchmarkLocalTopologyAttestation {
+            verified: true,
+            matches: false,
+            issues: vec![format!(
+                "local accelerator topology mismatch for benchmark host '{host}': snapshot={expected:?} observed={observed:?}"
+            )],
+            warnings: Vec::new(),
+        };
+    }
+
+    BenchmarkLocalTopologyAttestation {
+        verified: true,
+        matches: true,
+        issues: Vec::new(),
+        warnings: Vec::new(),
+    }
 }
 
 fn benchmark_hardware_profile_attestation(
@@ -1101,6 +1229,7 @@ fn run() -> Result<(), String> {
                     nodes: plan.nodes.clone(),
                     benchmark_host,
                     runtime: plan.runtime.clone(),
+                    placement: Some(plan.placement),
                     result_dir,
                     executable_path,
                     compile_ready,
@@ -4071,6 +4200,7 @@ mod tests {
                     nodes: vec!["node-a".into()],
                     benchmark_host: "node-a".into(),
                     runtime: "vllm".into(),
+                    placement: Some(PlacementKind::SingleHost),
                     result_dir: "results/baseline".into(),
                     executable_path: "artifacts/baseline/executable.yaml".into(),
                     compile_ready: true,
@@ -4084,6 +4214,7 @@ mod tests {
                     nodes: vec!["node-b".into()],
                     benchmark_host: "node-b".into(),
                     runtime: "vllm".into(),
+                    placement: Some(PlacementKind::SingleHost),
                     result_dir: "results/meshfit".into(),
                     executable_path: "artifacts/meshfit/executable.yaml".into(),
                     compile_ready: true,
@@ -4201,6 +4332,7 @@ mod tests {
                 nodes: vec!["node-a".into()],
                 benchmark_host: "node-a".into(),
                 runtime: "vllm".into(),
+                placement: Some(PlacementKind::SingleHost),
                 result_dir: "results/meshfit".into(),
                 executable_path: "artifacts/meshfit/executable.yaml".into(),
                 compile_ready: true,
@@ -4278,6 +4410,7 @@ mod tests {
             nodes: vec![bundle.request.executable.working_node.clone()],
             benchmark_host: bundle.request.executable.working_node.clone(),
             runtime: bundle.request.executable.runtime.clone(),
+            placement: Some(bundle.request.executable.placement),
             result_dir: "results/meshfit".into(),
             executable_path: "artifacts/meshfit/executable.yaml".into(),
             compile_ready: true,
