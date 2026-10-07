@@ -102,6 +102,8 @@ struct BenchmarkExecutionCandidate {
     nodes: Vec<String>,
     benchmark_host: String,
     runtime: String,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    placement: Option<PlacementKind>,
     result_dir: String,
     executable_path: String,
     compile_ready: bool,
@@ -279,6 +281,9 @@ struct BenchmarkRunCandidatePlan {
     host_match: bool,
     hardware_profile_match: bool,
     hardware_profile_issues: Vec<String>,
+    local_topology_verified: bool,
+    local_topology_match: bool,
+    local_topology_issues: Vec<String>,
     preflight_ready: bool,
     preflight_issues: Vec<String>,
     preflight_warnings: Vec<String>,
@@ -356,6 +361,9 @@ struct BenchmarkPreflight {
     host_match: bool,
     hardware_profile_match: bool,
     hardware_profile_issues: Vec<String>,
+    local_topology_verified: bool,
+    local_topology_match: bool,
+    local_topology_issues: Vec<String>,
     runtime: String,
     runtime_found: bool,
     model_path: String,
@@ -376,6 +384,125 @@ struct BenchmarkHostAttestation {
     matches: bool,
     issues: Vec<String>,
     warnings: Vec<String>,
+}
+
+#[derive(Debug)]
+struct BenchmarkLocalTopologyAttestation {
+    verified: bool,
+    matches: bool,
+    issues: Vec<String>,
+    warnings: Vec<String>,
+}
+
+fn normalized_snapshot_local_topology(
+    snapshot: &InfrastructureSnapshot,
+    host: &str,
+) -> Vec<String> {
+    let mut edges = snapshot
+        .infrastructure
+        .links
+        .iter()
+        .filter_map(|edge| match (&edge.from, &edge.to) {
+            (
+                meshfit_core::FabricEndpointIR::Accelerator {
+                    node: from_node,
+                    accelerator: from_accelerator,
+                },
+                meshfit_core::FabricEndpointIR::Accelerator {
+                    node: to_node,
+                    accelerator: to_accelerator,
+                },
+            ) if from_node == host && to_node == host => {
+                let (left, right) = if from_accelerator <= to_accelerator {
+                    (from_accelerator, to_accelerator)
+                } else {
+                    (to_accelerator, from_accelerator)
+                };
+                Some(format!("{left}<->{right}:{:?}", edge.kind))
+            }
+            _ => None,
+        })
+        .collect::<Vec<_>>();
+    edges.sort();
+    edges.dedup();
+    edges
+}
+
+fn parse_topology_accelerator_endpoint(endpoint: &str) -> Option<(&str, &str)> {
+    let rest = endpoint.strip_prefix("accelerator:")?;
+    rest.split_once('/')
+}
+
+fn normalized_identity_local_topology(
+    topology: &meshfit_core::TopologyIdentity,
+    host: &str,
+) -> Vec<String> {
+    let mut edges = topology
+        .links
+        .iter()
+        .filter_map(|link| {
+            let (from_node, from_accelerator) = parse_topology_accelerator_endpoint(&link.from)?;
+            let (to_node, to_accelerator) = parse_topology_accelerator_endpoint(&link.to)?;
+            if from_node != host || to_node != host {
+                return None;
+            }
+            let (left, right) = if from_accelerator <= to_accelerator {
+                (from_accelerator, to_accelerator)
+            } else {
+                (to_accelerator, from_accelerator)
+            };
+            Some(format!("{left}<->{right}:{:?}", link.kind))
+        })
+        .collect::<Vec<_>>();
+    edges.sort();
+    edges.dedup();
+    edges
+}
+
+fn benchmark_local_topology_attestation(
+    expected: &[String],
+    observed: &[String],
+    topology_required: bool,
+    host: &str,
+) -> BenchmarkLocalTopologyAttestation {
+    if expected.is_empty() {
+        if topology_required {
+            return BenchmarkLocalTopologyAttestation {
+                verified: false,
+                matches: false,
+                issues: vec![format!(
+                    "snapshot has no local accelerator topology evidence for tensor-parallel benchmark host '{host}'"
+                )],
+                warnings: Vec::new(),
+            };
+        }
+        return BenchmarkLocalTopologyAttestation {
+            verified: false,
+            matches: true,
+            issues: Vec::new(),
+            warnings: vec![format!(
+                "snapshot has no local accelerator topology evidence for benchmark host '{host}'; topology is unverified"
+            )],
+        };
+    }
+
+    if expected != observed {
+        return BenchmarkLocalTopologyAttestation {
+            verified: true,
+            matches: false,
+            issues: vec![format!(
+                "local accelerator topology mismatch for benchmark host '{host}': snapshot={expected:?} observed={observed:?}"
+            )],
+            warnings: Vec::new(),
+        };
+    }
+
+    BenchmarkLocalTopologyAttestation {
+        verified: true,
+        matches: true,
+        issues: Vec::new(),
+        warnings: Vec::new(),
+    }
 }
 
 fn benchmark_hardware_profile_attestation(
@@ -563,6 +690,71 @@ fn inspect_benchmark_host_attestation(
     };
 
     benchmark_hardware_profile_attestation(expected, &local.hardware_identity)
+}
+
+fn inspect_benchmark_local_topology_attestation(
+    kit_dir: &Path,
+    kit: &BenchmarkExecutionKit,
+    candidate: &BenchmarkExecutionCandidate,
+    local: &LocalDiscovery,
+) -> BenchmarkLocalTopologyAttestation {
+    let snapshot_path = kit_dir.join(&kit.snapshot);
+    let raw = match fs::read_to_string(&snapshot_path) {
+        Ok(raw) => raw,
+        Err(error) => {
+            return BenchmarkLocalTopologyAttestation {
+                verified: false,
+                matches: false,
+                issues: vec![format!(
+                    "cannot attest local topology because snapshot '{}' could not be read: {error}",
+                    snapshot_path.display()
+                )],
+                warnings: Vec::new(),
+            };
+        }
+    };
+    let snapshot: InfrastructureSnapshot = match serde_yaml::from_str(&raw) {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            return BenchmarkLocalTopologyAttestation {
+                verified: false,
+                matches: false,
+                issues: vec![format!(
+                    "cannot attest local topology because snapshot '{}' is invalid: {error}",
+                    snapshot_path.display()
+                )],
+                warnings: Vec::new(),
+            };
+        }
+    };
+
+    let expected = normalized_snapshot_local_topology(&snapshot, &candidate.benchmark_host);
+    let observed_identity = meshfit_core::topology_identity_from_discovery(local);
+    let observed = normalized_identity_local_topology(&observed_identity, &local.node.id);
+    let topology_required = candidate.placement == Some(PlacementKind::TensorParallel);
+
+    benchmark_local_topology_attestation(
+        &expected,
+        &observed,
+        topology_required,
+        &candidate.benchmark_host,
+    )
+}
+
+fn load_expected_benchmark_local_topology(
+    kit_dir: &Path,
+    kit: &BenchmarkExecutionKit,
+    benchmark_host: &str,
+) -> Result<Vec<String>, String> {
+    let snapshot_path = kit_dir.join(&kit.snapshot);
+    let raw = fs::read_to_string(&snapshot_path)
+        .map_err(|e| format!("read {}: {e}", snapshot_path.display()))?;
+    let snapshot: InfrastructureSnapshot = serde_yaml::from_str(&raw)
+        .map_err(|e| format!("parse {}: {e}", snapshot_path.display()))?;
+    Ok(normalized_snapshot_local_topology(
+        &snapshot,
+        benchmark_host,
+    ))
 }
 
 fn benchmark_peer_evidence_check_at(
@@ -1101,6 +1293,7 @@ fn run() -> Result<(), String> {
                     nodes: plan.nodes.clone(),
                     benchmark_host,
                     runtime: plan.runtime.clone(),
+                    placement: Some(plan.placement),
                     result_dir,
                     executable_path,
                     compile_ready,
@@ -2107,6 +2300,7 @@ fn validate_existing_candidate_bundle(
     candidate: &BenchmarkExecutionCandidate,
     expected_hardware: &HardwareIdentity,
     expected_model: &ModelArtifactIdentity,
+    expected_local_topology: &[String],
     expected_listen_port: u16,
 ) -> Result<(), String> {
     let raw = fs::read_to_string(bundle_path)
@@ -2118,6 +2312,7 @@ fn validate_existing_candidate_bundle(
         candidate,
         expected_hardware,
         expected_model,
+        expected_local_topology,
         expected_listen_port,
     )
     .map_err(|e| format!("invalid existing bundle {}: {e}", bundle_path.display()))
@@ -2160,6 +2355,7 @@ fn plan_benchmark_candidate_runs(
         Some((
             load_expected_benchmark_hardware(kit_dir, &kit, &candidate.benchmark_host)?,
             load_expected_benchmark_model(kit_dir, &kit)?,
+            load_expected_benchmark_local_topology(kit_dir, &kit, &candidate.benchmark_host)?,
         ))
     } else {
         None
@@ -2180,7 +2376,7 @@ fn plan_benchmark_candidate_runs(
             continue;
         }
         if resume {
-            let (expected_hardware, expected_model) = resume_contract
+            let (expected_hardware, expected_model, expected_local_topology) = resume_contract
                 .as_ref()
                 .ok_or_else(|| "resume evidence contract is unavailable".to_string())?;
             validate_existing_candidate_bundle(
@@ -2188,6 +2384,7 @@ fn plan_benchmark_candidate_runs(
                 candidate,
                 expected_hardware,
                 expected_model,
+                expected_local_topology,
                 kit.listen_port,
             )?;
             existing_valid_runs.push(run_number);
@@ -2208,6 +2405,9 @@ fn plan_benchmark_candidate_runs(
         host_match: preflight.host_match,
         hardware_profile_match: preflight.hardware_profile_match,
         hardware_profile_issues: preflight.hardware_profile_issues,
+        local_topology_verified: preflight.local_topology_verified,
+        local_topology_match: preflight.local_topology_match,
+        local_topology_issues: preflight.local_topology_issues,
         preflight_ready: preflight.ready,
         preflight_issues: preflight.issues,
         preflight_warnings: preflight.warnings,
@@ -2833,6 +3033,8 @@ fn inspect_benchmark_preflight(
     let host_match = observed_host == candidate.benchmark_host;
     let hardware_attestation =
         inspect_benchmark_host_attestation(kit_dir, &kit, &candidate.benchmark_host, &local);
+    let topology_attestation =
+        inspect_benchmark_local_topology_attestation(kit_dir, &kit, candidate, &local);
     let peer_evidence = inspect_benchmark_peer_evidence(kit_dir, &kit, candidate);
     let runtime_discovery = discover_runtimes();
     let runtime_found = runtime_discovery
@@ -2877,9 +3079,11 @@ fn inspect_benchmark_preflight(
         ));
     }
     issues.extend(hardware_attestation.issues.clone());
+    issues.extend(topology_attestation.issues.clone());
     issues.extend(peer_evidence.issues.clone());
     let mut warnings = model_check.warnings.clone();
     warnings.extend(hardware_attestation.warnings.clone());
+    warnings.extend(topology_attestation.warnings.clone());
     warnings.extend(peer_evidence.warnings.clone());
     warnings.extend(local.warnings);
     warnings.extend(runtime_discovery.warnings);
@@ -2893,6 +3097,9 @@ fn inspect_benchmark_preflight(
         host_match,
         hardware_profile_match: hardware_attestation.matches,
         hardware_profile_issues: hardware_attestation.issues,
+        local_topology_verified: topology_attestation.verified,
+        local_topology_match: topology_attestation.matches,
+        local_topology_issues: topology_attestation.issues,
         runtime: candidate.runtime.clone(),
         runtime_found,
         model_path: model_check.path,
@@ -2943,6 +3150,7 @@ fn validate_benchmark_bundle_for_candidate(
     candidate: &BenchmarkExecutionCandidate,
     expected_hardware: &HardwareIdentity,
     expected_model: &ModelArtifactIdentity,
+    expected_local_topology: &[String],
     expected_listen_port: u16,
 ) -> Result<(), String> {
     bundle.validate()?;
@@ -2989,6 +3197,26 @@ fn validate_benchmark_bundle_for_candidate(
         ));
     }
 
+    let observed_topology = normalized_identity_local_topology(
+        &bundle.request.identity.topology,
+        &candidate.benchmark_host,
+    );
+    let topology_required = candidate.placement == Some(PlacementKind::TensorParallel)
+        || bundle.request.executable.placement == PlacementKind::TensorParallel;
+    let topology_attestation = benchmark_local_topology_attestation(
+        expected_local_topology,
+        &observed_topology,
+        topology_required,
+        &candidate.benchmark_host,
+    );
+    if !topology_attestation.matches {
+        return Err(format!(
+            "bundle local topology does not match snapshot benchmark host '{}': {}",
+            candidate.benchmark_host,
+            topology_attestation.issues.join("; ")
+        ));
+    }
+
     Ok(())
 }
 
@@ -3020,6 +3248,8 @@ fn inspect_benchmark_worklist(
         let expected_hardware =
             load_expected_benchmark_hardware(kit_dir, &kit, &candidate.benchmark_host)?;
         let expected_model = load_expected_benchmark_model(kit_dir, &kit)?;
+        let expected_local_topology =
+            load_expected_benchmark_local_topology(kit_dir, &kit, &candidate.benchmark_host)?;
 
         for (index, bundle_rel) in comparison.bundles.iter().enumerate() {
             let run_number = index + 1;
@@ -3030,6 +3260,7 @@ fn inspect_benchmark_worklist(
                 candidate,
                 &expected_hardware,
                 &expected_model,
+                &expected_local_topology,
                 kit.listen_port,
                 &lock_path,
             );
@@ -3110,6 +3341,7 @@ fn inspect_work_slot(
     candidate: &BenchmarkExecutionCandidate,
     expected_hardware: &HardwareIdentity,
     expected_model: &ModelArtifactIdentity,
+    expected_local_topology: &[String],
     expected_listen_port: u16,
     lock_path: &Path,
 ) -> (&'static str, Option<String>) {
@@ -3127,6 +3359,7 @@ fn inspect_work_slot(
             candidate,
             expected_hardware,
             expected_model,
+            expected_local_topology,
             expected_listen_port,
         ) {
             return ("invalid", Some(error));
@@ -3201,6 +3434,8 @@ fn inspect_benchmark_kit(kit_dir: &Path) -> Result<BenchmarkKitStatus, String> {
         let expected_hardware =
             load_expected_benchmark_hardware(kit_dir, &kit, &candidate.benchmark_host)?;
         let expected_model = load_expected_benchmark_model(kit_dir, &kit)?;
+        let expected_local_topology =
+            load_expected_benchmark_local_topology(kit_dir, &kit, &candidate.benchmark_host)?;
 
         expected_bundles += comparison.bundles.len();
         let mut valid_runs = 0_usize;
@@ -3241,6 +3476,7 @@ fn inspect_benchmark_kit(kit_dir: &Path) -> Result<BenchmarkKitStatus, String> {
                 candidate,
                 &expected_hardware,
                 &expected_model,
+                &expected_local_topology,
                 kit.listen_port,
             ) {
                 invalid_bundles.push(BenchmarkInvalidBundle {
@@ -3785,6 +4021,65 @@ mod tests {
     }
 
     #[test]
+    fn local_topology_attestation_rejects_nvlink_to_pcie_drift() {
+        let expected = vec!["gpu0<->gpu1:Nvlink".to_string()];
+        let observed = vec!["gpu0<->gpu1:Pcie".to_string()];
+
+        let attestation =
+            benchmark_local_topology_attestation(&expected, &observed, true, "node-a");
+
+        assert!(attestation.verified);
+        assert!(!attestation.matches);
+        assert!(attestation
+            .issues
+            .iter()
+            .any(|issue| issue.contains("local accelerator topology mismatch")));
+    }
+
+    #[test]
+    fn tensor_parallel_requires_snapshot_local_topology_evidence() {
+        let attestation = benchmark_local_topology_attestation(&[], &[], true, "node-a");
+
+        assert!(!attestation.verified);
+        assert!(!attestation.matches);
+        assert!(attestation
+            .issues
+            .iter()
+            .any(|issue| issue.contains("tensor-parallel")));
+    }
+
+    #[test]
+    fn non_topology_dependent_plan_keeps_missing_topology_as_warning() {
+        let attestation = benchmark_local_topology_attestation(&[], &[], false, "node-b");
+
+        assert!(!attestation.verified);
+        assert!(attestation.matches);
+        assert!(attestation.issues.is_empty());
+        assert!(attestation
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("topology is unverified")));
+    }
+
+    #[test]
+    fn topology_identity_normalization_is_undirected() {
+        let topology = meshfit_core::TopologyIdentity {
+            links: vec![meshfit_core::LinkIdentity {
+                from: "accelerator:node-a/gpu1".into(),
+                to: "accelerator:node-a/gpu0".into(),
+                kind: LinkKind::Nvlink,
+                bandwidth_mbps: None,
+                latency_micros: None,
+            }],
+        };
+
+        assert_eq!(
+            normalized_identity_local_topology(&topology, "node-a"),
+            vec!["gpu0<->gpu1:Nvlink".to_string()]
+        );
+    }
+
+    #[test]
     fn hardware_attestation_allows_driver_drift_but_reports_it() {
         let expected = attestation_identity("NVIDIA H100 80GB HBM3", 81_559, "580.65", 262_144);
         let observed = attestation_identity("NVIDIA H100 80GB HBM3", 81_559, "590.01", 260_000);
@@ -4071,6 +4366,7 @@ mod tests {
                     nodes: vec!["node-a".into()],
                     benchmark_host: "node-a".into(),
                     runtime: "vllm".into(),
+                    placement: Some(PlacementKind::SingleHost),
                     result_dir: "results/baseline".into(),
                     executable_path: "artifacts/baseline/executable.yaml".into(),
                     compile_ready: true,
@@ -4084,6 +4380,7 @@ mod tests {
                     nodes: vec!["node-b".into()],
                     benchmark_host: "node-b".into(),
                     runtime: "vllm".into(),
+                    placement: Some(PlacementKind::SingleHost),
                     result_dir: "results/meshfit".into(),
                     executable_path: "artifacts/meshfit/executable.yaml".into(),
                     compile_ready: true,
@@ -4201,6 +4498,7 @@ mod tests {
                 nodes: vec!["node-a".into()],
                 benchmark_host: "node-a".into(),
                 runtime: "vllm".into(),
+                placement: Some(PlacementKind::SingleHost),
                 result_dir: "results/meshfit".into(),
                 executable_path: "artifacts/meshfit/executable.yaml".into(),
                 compile_ready: true,
@@ -4278,6 +4576,7 @@ mod tests {
             nodes: vec![bundle.request.executable.working_node.clone()],
             benchmark_host: bundle.request.executable.working_node.clone(),
             runtime: bundle.request.executable.runtime.clone(),
+            placement: Some(bundle.request.executable.placement),
             result_dir: "results/meshfit".into(),
             executable_path: "artifacts/meshfit/executable.yaml".into(),
             compile_ready: true,
@@ -4303,6 +4602,7 @@ mod tests {
             &candidate,
             &expected_hardware,
             &expected_model,
+            &[],
             expected_port,
         )
         .unwrap();
@@ -4314,6 +4614,7 @@ mod tests {
             &candidate,
             &expected_hardware,
             &expected_model,
+            &[],
             expected_port,
         )
         .unwrap_err()
@@ -4326,22 +4627,47 @@ mod tests {
             &candidate,
             &expected_hardware,
             &expected_model,
+            &[],
             expected_port,
         )
         .unwrap_err()
         .contains("model identity"));
 
-        let mut wrong_port = bundle;
+        let mut wrong_port = bundle.clone();
         wrong_port.request.executable.service.port = expected_port.saturating_add(1);
         assert!(validate_benchmark_bundle_for_candidate(
             &wrong_port,
             &candidate,
             &expected_hardware,
             &expected_model,
+            &[],
             expected_port,
         )
         .unwrap_err()
         .contains("service port"));
+
+        let mut tp_bundle = bundle;
+        tp_bundle.request.executable.placement = PlacementKind::TensorParallel;
+        tp_bundle.request.identity.placement = PlacementKind::TensorParallel;
+        tp_bundle.request.identity.topology.links = vec![meshfit_core::LinkIdentity {
+            from: "accelerator:node-b/gpu0".into(),
+            to: "accelerator:node-b/gpu1".into(),
+            kind: LinkKind::Pcie,
+            bandwidth_mbps: None,
+            latency_micros: None,
+        }];
+        let mut tp_candidate = candidate;
+        tp_candidate.placement = Some(PlacementKind::TensorParallel);
+        assert!(validate_benchmark_bundle_for_candidate(
+            &tp_bundle,
+            &tp_candidate,
+            &expected_hardware,
+            &expected_model,
+            &["gpu0<->gpu1:Nvlink".to_string()],
+            expected_port,
+        )
+        .unwrap_err()
+        .contains("bundle local topology"));
     }
 
     fn status_test_dir(label: &str) -> PathBuf {
@@ -4424,6 +4750,7 @@ mod tests {
             &kit.candidates[0],
             &status_expected_hardware(),
             &status_expected_model(),
+            &[],
             kit.listen_port,
         )
         .unwrap_err();
@@ -4535,6 +4862,18 @@ mod tests {
         assert!(error.contains("not present in kit.yaml"));
 
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn legacy_benchmark_candidate_without_placement_remains_readable() {
+        let yaml = serde_yaml::to_string(&status_test_kit()).unwrap();
+        let legacy = yaml
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("placement:"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let parsed: BenchmarkExecutionKit = serde_yaml::from_str(&legacy).unwrap();
+        assert_eq!(parsed.candidates[0].placement, None);
     }
 
     #[test]
@@ -4668,6 +5007,7 @@ mod tests {
                 candidate,
                 &expected_hardware,
                 &expected_model,
+                &[],
                 kit.listen_port,
                 &lock_path,
             ),
@@ -4680,6 +5020,7 @@ mod tests {
             candidate,
             &expected_hardware,
             &expected_model,
+            &[],
             kit.listen_port,
             &lock_path,
         );
@@ -4693,6 +5034,7 @@ mod tests {
             candidate,
             &expected_hardware,
             &expected_model,
+            &[],
             kit.listen_port,
             &lock_path,
         );
