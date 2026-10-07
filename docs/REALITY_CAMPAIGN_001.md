@@ -144,8 +144,10 @@ its PID so it can be stopped cleanly after evidence capture:
 export MESHFIT_PRIVATE_IP=<this-host-private-address>
 
 command -v iperf3
+test ! -e /tmp/meshfit-iperf3.pid
 iperf3 -s -D -B "$MESHFIT_PRIVATE_IP" -I /tmp/meshfit-iperf3.pid
 test -s /tmp/meshfit-iperf3.pid
+kill -0 "$(cat /tmp/meshfit-iperf3.pid)"
 ```
 
 Allow ICMP and TCP/5201 only between the experiment hosts. Do not expose the
