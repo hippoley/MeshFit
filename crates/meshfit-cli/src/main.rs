@@ -3816,7 +3816,7 @@ mod tests {
     fn single_host_candidate_does_not_require_peer_measurement() {
         let snapshot = peer_evidence_snapshot(vec![]);
         let nodes = vec!["node-a".to_string()];
-        let check = benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_010_000);
+        let check = benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_010_000, None);
 
         assert!(check.ready);
         assert!(check.measurements.is_empty());
@@ -3827,7 +3827,7 @@ mod tests {
     fn cross_node_candidate_requires_peer_measurement_provenance() {
         let snapshot = peer_evidence_snapshot(vec![]);
         let nodes = vec!["node-a".to_string(), "node-b".to_string()];
-        let check = benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_010_000);
+        let check = benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_010_000, None);
 
         assert!(!check.ready);
         assert!(check
@@ -3844,7 +3844,7 @@ mod tests {
             Some(1_700_000_000_000),
         )]);
         let nodes = vec!["node-a".to_string(), "node-b".to_string()];
-        let check = benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_010_000);
+        let check = benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_010_000, None);
 
         assert!(check.ready);
         assert!(check.issues.is_empty());
@@ -3864,13 +3864,48 @@ mod tests {
             Some(1_700_000_000_000),
         )]);
         let nodes = vec!["node-a".to_string(), "node-b".to_string()];
-        let check = benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_010_000);
+        let check = benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_010_000, None);
 
         assert!(!check.ready);
         assert!(check
             .issues
             .iter()
             .any(|issue| issue.contains("no measured bandwidth")));
+    }
+
+    #[test]
+    fn peer_measurement_age_is_diagnostic_without_declared_limit() {
+        let snapshot = peer_evidence_snapshot(vec![peer_measurement(
+            Some(0.42),
+            Some(21.8),
+            Some(1_700_000_000_000),
+        )]);
+        let nodes = vec!["node-a".to_string(), "node-b".to_string()];
+        let check =
+            benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_060_000, None);
+
+        assert!(check.ready);
+        assert!(check.issues.is_empty());
+        assert_eq!(check.measurements[0].age_seconds, Some(60));
+    }
+
+    #[test]
+    fn declared_peer_freshness_limit_rejects_stale_measurement() {
+        let snapshot = peer_evidence_snapshot(vec![peer_measurement(
+            Some(0.42),
+            Some(21.8),
+            Some(1_700_000_000_000),
+        )]);
+        let nodes = vec!["node-a".to_string(), "node-b".to_string()];
+        let check =
+            benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_060_000, Some(30));
+
+        assert!(!check.ready);
+        assert!(check
+            .issues
+            .iter()
+            .any(|issue| issue.contains("exceeds declared freshness limit 30s")));
+        assert_eq!(check.measurements[0].age_seconds, Some(60));
     }
 
     #[test]
@@ -4258,6 +4293,28 @@ mod tests {
         assert!(parse_benchmark_listen_port(&zero)
             .unwrap_err()
             .contains("between 1 and 65535"));
+    }
+
+    #[test]
+    fn peer_probe_freshness_policy_is_optional_and_rejects_zero() {
+        assert_eq!(parse_max_peer_probe_age_seconds(&[]).unwrap(), None);
+
+        let args = vec![
+            "--max-peer-probe-age-seconds".to_string(),
+            "1800".to_string(),
+        ];
+        assert_eq!(
+            parse_max_peer_probe_age_seconds(&args).unwrap(),
+            Some(1800)
+        );
+
+        let zero = vec![
+            "--max-peer-probe-age-seconds".to_string(),
+            "0".to_string(),
+        ];
+        assert!(parse_max_peer_probe_age_seconds(&zero)
+            .unwrap_err()
+            .contains("greater than zero"));
     }
 
     #[test]
