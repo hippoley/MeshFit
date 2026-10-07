@@ -133,10 +133,46 @@ edge, `bandwidth_gbps` is the slower of the two measured directions. If either
 direction cannot be measured, effective bandwidth is omitted so readiness fails
 closed instead of treating one direction as representative of both.
 
-Example:
+Before measuring, prepare every participating host to receive peer probes over
+the experiment's private network. `meshfit probe --bandwidth` uses ping for RTT
+and iperf3 for throughput; iperf3 therefore needs a server on the peer.
+
+On each host, bind the server to that host's private experiment address and keep
+its PID so it can be stopped cleanly after evidence capture:
 
 ```bash
-meshfit probe <peer-address> --bandwidth > node-a-node-b-probe.yaml
+export MESHFIT_PRIVATE_IP=<this-host-private-address>
+
+command -v iperf3
+iperf3 -s -D -B "$MESHFIT_PRIVATE_IP" -I /tmp/meshfit-iperf3.pid
+test -s /tmp/meshfit-iperf3.pid
+```
+
+Allow ICMP and TCP/5201 only between the experiment hosts. Do not expose the
+iperf3 listener to the public Internet. Verify the private path before recording
+evidence:
+
+```bash
+ping -c 1 <peer-private-address>
+```
+
+Because one MeshFit bandwidth probe now measures both forward and reverse
+throughput and the planner treats the resulting node link as undirected, capture
+one probe for each unordered host pair:
+
+```bash
+meshfit probe <node-b-private-address> --bandwidth > node-a-node-b-probe.yaml
+meshfit probe <node-c-private-address> --bandwidth > node-a-node-c-probe.yaml
+# run from node-b:
+meshfit probe <node-c-private-address> --bandwidth > node-b-node-c-probe.yaml
+```
+
+After all peer evidence has been captured on a host, stop only the server started
+for this campaign:
+
+```bash
+kill "$(cat /tmp/meshfit-iperf3.pid)"
+rm -f /tmp/meshfit-iperf3.pid
 ```
 
 Do not substitute configured NIC speed for measured bandwidth. If a candidate
