@@ -21,6 +21,7 @@ jobs:
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
       - run: cargo build --workspace --release
+      - run: python3 -m py_compile tools/compute_proxy.py
       - run: cargo run -p meshfit -- discover
       - run: MESHFIT_NODE_ID=node-ci cargo run -p meshfit -- discover > /tmp/meshfit-discover-node-id.yaml
       - run: grep -q 'node-ci' /tmp/meshfit-discover-node-id.yaml
