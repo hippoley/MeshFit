@@ -211,7 +211,7 @@ meshfit benchmark-status benchmark-001
 meshfit benchmark-status benchmark-001 --require-complete
 ```
 
-The status command reports each candidate's `benchmark_host`, expected/valid run counts, missing bundle paths, and invalid bundles. Existing bundle files are parsed and validated, and their `source_plan_id` must match the candidate plan; a merely present file does not count as a completed run.
+The status command reports each candidate's `benchmark_host`, expected/valid run counts, missing bundle paths, and invalid bundles. A merely present file does not count as a completed run. Stored evidence is revalidated against the materialized execution contract: the bundle must parse and validate, its source plan and runtime must match the candidate, its service port must match the kit, its model identity must match the materialized model identity, and its captured hardware identity must attest against the snapshot hardware identity for that candidate's `benchmark_host`. Driver/CPU drift follows the same warning-only policy as preflight, while architecture/OS/accelerator-profile/material RAM mismatches invalidate the bundle.
 
 Every candidate is compiler-preflighted before a command is emitted. Unsupported plans are marked `compile_ready: false` with the compiler error instead of receiving a command that is known to fail. The kit also validates that the model identity matches the target model and carries an artifact hash or revision.
 
