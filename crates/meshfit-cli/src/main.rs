@@ -193,6 +193,99 @@ struct BenchmarkInvalidBundle {
     error: String,
 }
 
+#[derive(Debug, Clone)]
+struct BenchmarkBundleContract {
+    plan_id: String,
+    runtime: String,
+    listen_port: u16,
+    benchmark_host: String,
+    model_identity: ModelArtifactIdentity,
+    hardware_identity: HardwareIdentity,
+}
+
+fn load_benchmark_bundle_contract(
+    kit_dir: &Path,
+    kit: &BenchmarkExecutionKit,
+    candidate: &BenchmarkExecutionCandidate,
+) -> Result<BenchmarkBundleContract, String> {
+    let snapshot_path = kit_dir.join(&kit.snapshot);
+    let snapshot_raw = fs::read_to_string(&snapshot_path)
+        .map_err(|e| format!("read {}: {e}", snapshot_path.display()))?;
+    let snapshot: InfrastructureSnapshot = serde_yaml::from_str(&snapshot_raw)
+        .map_err(|e| format!("parse {}: {e}", snapshot_path.display()))?;
+    let hardware_identity = snapshot
+        .hardware_identities
+        .get(&candidate.benchmark_host)
+        .cloned()
+        .ok_or_else(|| {
+            format!(
+                "snapshot has no hardware identity for benchmark host '{}'",
+                candidate.benchmark_host
+            )
+        })?;
+
+    let model_path = kit_dir.join(&kit.model_identity);
+    let model_raw =
+        fs::read_to_string(&model_path).map_err(|e| format!("read {}: {e}", model_path.display()))?;
+    let model_identity: ModelArtifactIdentity = serde_yaml::from_str(&model_raw)
+        .map_err(|e| format!("parse {}: {e}", model_path.display()))?;
+
+    Ok(BenchmarkBundleContract {
+        plan_id: candidate.plan_id.clone(),
+        runtime: candidate.runtime.clone(),
+        listen_port: kit.listen_port,
+        benchmark_host: candidate.benchmark_host.clone(),
+        model_identity,
+        hardware_identity,
+    })
+}
+
+fn validate_benchmark_bundle_contract(
+    bundle: &BenchmarkBundle,
+    contract: &BenchmarkBundleContract,
+) -> Result<(), String> {
+    bundle.validate()?;
+
+    if bundle.request.executable.source_plan_id != contract.plan_id {
+        return Err(format!(
+            "source plan '{}' does not match candidate plan '{}'",
+            bundle.request.executable.source_plan_id, contract.plan_id
+        ));
+    }
+    if bundle.request.executable.runtime != contract.runtime {
+        return Err(format!(
+            "runtime '{}' does not match candidate runtime '{}'",
+            bundle.request.executable.runtime, contract.runtime
+        ));
+    }
+    if bundle.request.executable.service.port != contract.listen_port {
+        return Err(format!(
+            "service port {} does not match benchmark listen port {}",
+            bundle.request.executable.service.port, contract.listen_port
+        ));
+    }
+    if bundle.request.identity.model != contract.model_identity {
+        return Err(format!(
+            "model identity does not match materialized model identity for benchmark host '{}'",
+            contract.benchmark_host
+        ));
+    }
+
+    let hardware = benchmark_hardware_profile_attestation(
+        &contract.hardware_identity,
+        &bundle.request.identity.hardware,
+    );
+    if !hardware.matches {
+        return Err(format!(
+            "hardware identity does not match snapshot host '{}': {}",
+            contract.benchmark_host,
+            hardware.issues.join(" ")
+        ));
+    }
+
+    Ok(())
+}
+
 #[derive(Debug, Serialize)]
 struct BenchmarkProofReceipt {
     schema: String,
@@ -1868,6 +1961,7 @@ fn build_benchmark_proof_receipt(kit_dir: &Path) -> Result<BenchmarkProofReceipt
 
     let mut candidates = Vec::new();
     for candidate in &kit.candidates {
+        let evidence_contract = load_benchmark_bundle_contract(kit_dir, &kit, candidate)?;
         let comparison = kit
             .comparison_manifest
             .candidates
@@ -1887,14 +1981,8 @@ fn build_benchmark_proof_receipt(kit_dir: &Path) -> Result<BenchmarkProofReceipt
                 .map_err(|e| format!("read proof bundle {}: {e}", path.display()))?;
             let bundle: BenchmarkBundle = serde_yaml::from_slice(&bytes)
                 .map_err(|e| format!("parse proof bundle {}: {e}", path.display()))?;
-            bundle.validate()?;
-
-            if bundle.request.executable.source_plan_id != candidate.plan_id {
-                return Err(format!(
-                    "proof bundle '{}' source plan '{}' does not match candidate plan '{}'",
-                    bundle_rel, bundle.request.executable.source_plan_id, candidate.plan_id
-                ));
-            }
+            validate_benchmark_bundle_contract(&bundle, &evidence_contract)
+                .map_err(|e| format!("proof bundle '{}' is invalid: {e}", bundle_rel))?;
 
             bundles.push(BenchmarkProofBundle {
                 path: bundle_rel.clone(),
@@ -2104,24 +2192,14 @@ fn inspect_benchmark_run_one_plan(
 
 fn validate_existing_candidate_bundle(
     bundle_path: &Path,
-    expected_plan_id: &str,
+    contract: &BenchmarkBundleContract,
 ) -> Result<(), String> {
     let raw = fs::read_to_string(bundle_path)
         .map_err(|e| format!("read existing bundle {}: {e}", bundle_path.display()))?;
     let bundle: BenchmarkBundle = serde_yaml::from_str(&raw)
         .map_err(|e| format!("parse existing bundle {}: {e}", bundle_path.display()))?;
-    bundle
-        .validate()
-        .map_err(|e| format!("invalid existing bundle {}: {e}", bundle_path.display()))?;
-    if bundle.request.executable.source_plan_id != expected_plan_id {
-        return Err(format!(
-            "existing bundle '{}' belongs to plan '{}' instead of expected plan '{}'",
-            bundle_path.display(),
-            bundle.request.executable.source_plan_id,
-            expected_plan_id
-        ));
-    }
-    Ok(())
+    validate_benchmark_bundle_contract(&bundle, contract)
+        .map_err(|e| format!("invalid existing bundle {}: {e}", bundle_path.display()))
 }
 
 fn plan_benchmark_candidate_runs(
@@ -2157,6 +2235,7 @@ fn plan_benchmark_candidate_runs(
         model_path_override,
         true,
     )?;
+    let evidence_contract = load_benchmark_bundle_contract(kit_dir, &kit, candidate)?;
     let mut existing_valid_runs = Vec::new();
     let mut pending_runs = Vec::new();
 
@@ -2172,7 +2251,7 @@ fn plan_benchmark_candidate_runs(
             continue;
         }
         if resume {
-            validate_existing_candidate_bundle(&bundle_path, &candidate.plan_id)?;
+            validate_existing_candidate_bundle(&bundle_path, &evidence_contract)?;
             existing_valid_runs.push(run_number);
             continue;
         }
@@ -2905,6 +2984,8 @@ fn inspect_benchmark_worklist(
             continue;
         }
 
+        let evidence_contract = load_benchmark_bundle_contract(kit_dir, &kit, candidate)?;
+
         let comparison = kit
             .comparison_manifest
             .candidates
@@ -2921,7 +3002,7 @@ fn inspect_benchmark_worklist(
             let run_number = index + 1;
             let bundle_path = kit_dir.join(bundle_rel);
             let lock_path = PathBuf::from(format!("{}.lock", bundle_path.display()));
-            let (state, error) = inspect_work_slot(&bundle_path, &candidate.plan_id, &lock_path);
+            let (state, error) = inspect_work_slot(&bundle_path, &evidence_contract, &lock_path);
 
             let host = hosts
                 .entry(candidate.benchmark_host.clone())
@@ -2996,7 +3077,7 @@ fn inspect_benchmark_worklist(
 
 fn inspect_work_slot(
     bundle_path: &Path,
-    expected_plan_id: &str,
+    contract: &BenchmarkBundleContract,
     lock_path: &Path,
 ) -> (&'static str, Option<String>) {
     if bundle_path.is_file() {
@@ -3008,17 +3089,8 @@ fn inspect_work_slot(
             Ok(bundle) => bundle,
             Err(error) => return ("invalid", Some(format!("parse failed: {error}"))),
         };
-        if let Err(error) = bundle.validate() {
+        if let Err(error) = validate_benchmark_bundle_contract(&bundle, contract) {
             return ("invalid", Some(error));
-        }
-        if bundle.request.executable.source_plan_id != expected_plan_id {
-            return (
-                "invalid",
-                Some(format!(
-                    "source plan '{}' does not match candidate plan '{}'",
-                    bundle.request.executable.source_plan_id, expected_plan_id
-                )),
-            );
         }
         return ("valid", None);
     }
@@ -3052,6 +3124,26 @@ fn inspect_benchmark_kit(kit_dir: &Path) -> Result<BenchmarkKitStatus, String> {
     }
 
     for candidate in &kit.candidates {
+        let evidence_contract = match load_benchmark_bundle_contract(kit_dir, &kit, candidate) {
+            Ok(contract) => contract,
+            Err(error) => {
+                issues.push(format!(
+                    "candidate '{}' evidence contract is invalid: {error}",
+                    candidate.name
+                ));
+                candidates.push(BenchmarkCandidateStatus {
+                    name: candidate.name.clone(),
+                    benchmark_host: candidate.benchmark_host.clone(),
+                    plan_id: candidate.plan_id.clone(),
+                    expected_runs: 0,
+                    valid_runs: 0,
+                    missing_bundles: Vec::new(),
+                    invalid_bundles: Vec::new(),
+                });
+                continue;
+            }
+        };
+
         if !candidate.compile_ready {
             issues.push(format!(
                 "candidate '{}' is not compiler-ready{}",
@@ -3121,21 +3213,12 @@ fn inspect_benchmark_kit(kit_dir: &Path) -> Result<BenchmarkKitStatus, String> {
                 }
             };
 
-            if let Err(error) = bundle.validate() {
+            if let Err(error) =
+                validate_benchmark_bundle_contract(&bundle, &evidence_contract)
+            {
                 invalid_bundles.push(BenchmarkInvalidBundle {
                     path: bundle_rel.clone(),
                     error,
-                });
-                continue;
-            }
-
-            if bundle.request.executable.source_plan_id != candidate.plan_id {
-                invalid_bundles.push(BenchmarkInvalidBundle {
-                    path: bundle_rel.clone(),
-                    error: format!(
-                        "source plan '{}' does not match candidate plan '{}'",
-                        bundle.request.executable.source_plan_id, candidate.plan_id
-                    ),
                 });
                 continue;
             }
