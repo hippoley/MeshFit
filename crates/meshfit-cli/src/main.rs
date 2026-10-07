@@ -1367,7 +1367,7 @@ fn run() -> Result<(), String> {
         }
         "benchmark-kit" => {
             let snapshot_path = args.get(2).ok_or_else(|| {
-                "usage: meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--listen-port N] [--prompt TEXT|--prompt-file PATH] [--max-tokens N] [--warmup-requests N] [--measured-requests N] [--request-timeout-ms N] [--startup-timeout-ms N] [--max-peer-probe-age-seconds N] [--require-ready] [--write-dir DIR]"
+                "usage: meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--listen-port N] [--max-peer-probe-age-seconds N] [--prompt TEXT|--prompt-file PATH] [--max-tokens N] [--warmup-requests N] [--measured-requests N] [--request-timeout-ms N] [--startup-timeout-ms N] [--max-peer-probe-age-seconds N] [--require-ready] [--write-dir DIR]"
                     .to_string()
             })?;
             let target_path = args
@@ -1383,6 +1383,7 @@ fn run() -> Result<(), String> {
                 .get(6)
                 .ok_or_else(|| "missing model-identity.yaml".to_string())?;
             let listen_port = parse_benchmark_listen_port(&args[7..])?;
+            let max_peer_probe_age_seconds = parse_max_peer_probe_age_seconds(&args[7..])?;
             let max_peer_probe_age_seconds = parse_max_peer_probe_age_seconds(&args[7..])?;
             let prompt = benchmark_prompt_from_args(&args[7..])?;
             let max_tokens =
@@ -4326,7 +4327,7 @@ fn render_benchmark_runbook(kit: &BenchmarkExecutionKit) -> String {
 
     out.push_str("## Real-host execution\n\n");
     out.push_str(
-        "Use one host-level command per machine. `MESHFIT_NODE_ID` selects the logical host, but it is not trusted as physical proof: preflight also compares this machine's discovered hardware profile with the snapshot identity for that host. If the immutable model lives at a different local path, set `MESHFIT_MODEL_PATH`; MeshFit verifies its SHA-256 before execution.\n\n",
+        "Use one host-level command per machine. `MESHFIT_NODE_ID` selects the logical host, but it is not trusted as physical proof: preflight also compares this machine's discovered hardware profile with the snapshot identity for that host. Cross-node candidates also enforce the kit's declared peer-probe freshness policy when one is configured. If the immutable model lives at a different local path, set `MESHFIT_MODEL_PATH`; MeshFit verifies its SHA-256 before execution.\n\n",
     );
 
     for (host, candidates) in &by_host {
