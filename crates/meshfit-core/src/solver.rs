@@ -32,12 +32,7 @@ pub fn solve(scenario: &ScenarioIR) -> PlacementReport {
     };
 
     for runtime in &scenario.runtimes {
-        enumerate_single_node(
-            &scenario.infrastructure,
-            &context,
-            runtime,
-            &mut output,
-        );
+        enumerate_single_node(&scenario.infrastructure, &context, runtime, &mut output);
         enumerate_two_node_tp(&scenario.infrastructure, &context, runtime, &mut output);
     }
 
