@@ -1713,6 +1713,26 @@ fn run() -> Result<(), String> {
                 )?;
 
                 for run_number in &plan.pending_runs {
+                    let preflight = inspect_benchmark_preflight(
+                        kit_dir,
+                        candidate_name,
+                        declared_host,
+                        Some(&plan.model_path),
+                        true,
+                    )?;
+                    if !preflight.ready {
+                        return Err(format!(
+                            "Benchmark 001 preflight became invalid before candidate '{}' run {}: {}",
+                            candidate_name,
+                            run_number,
+                            if preflight.issues.is_empty() {
+                                "unknown preflight failure".to_string()
+                            } else {
+                                preflight.issues.join(" ")
+                            }
+                        ));
+                    }
+
                     execute_benchmark_run_one_prevalidated(
                         kit_dir,
                         candidate_name,
@@ -2812,6 +2832,26 @@ fn execute_benchmark_host_plan(
 
     for candidate_plan in &plan.candidates {
         for run_number in &candidate_plan.pending_runs {
+            let preflight = inspect_benchmark_preflight(
+                kit_dir,
+                &candidate_plan.candidate,
+                Some(&plan.host),
+                Some(&candidate_plan.model_path),
+                true,
+            )?;
+            if !preflight.ready {
+                return Err(format!(
+                    "Benchmark 001 preflight became invalid before candidate '{}' run {}: {}",
+                    candidate_plan.candidate,
+                    run_number,
+                    if preflight.issues.is_empty() {
+                        "unknown preflight failure".to_string()
+                    } else {
+                        preflight.issues.join(" ")
+                    }
+                ));
+            }
+
             execute_benchmark_run_one_prevalidated(
                 kit_dir,
                 &candidate_plan.candidate,
@@ -5105,6 +5145,27 @@ mod tests {
             .issues
             .iter()
             .any(|issue| issue.contains("peer bandwidth evidence is invalid")));
+    }
+
+    #[test]
+    fn stale_peer_evidence_blocks_each_real_run_preflight() {
+        let snapshot = peer_evidence_snapshot(vec![peer_measurement(
+            Some(0.42),
+            Some(21.8),
+            Some(1_700_000_000_000),
+        )]);
+        let nodes = vec!["node-a".to_string(), "node-b".to_string()];
+        let initial =
+            benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_010_000, Some(30));
+        let later =
+            benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_040_000, Some(30));
+
+        assert!(initial.ready);
+        assert!(!later.ready);
+        assert!(later
+            .issues
+            .iter()
+            .any(|issue| issue.contains("exceeds declared freshness limit 30s")));
     }
 
     #[test]
