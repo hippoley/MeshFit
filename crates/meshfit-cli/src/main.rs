@@ -4023,6 +4023,65 @@ mod tests {
     }
 
     #[test]
+    fn local_topology_attestation_rejects_nvlink_to_pcie_drift() {
+        let expected = vec!["gpu0<->gpu1:Nvlink".to_string()];
+        let observed = vec!["gpu0<->gpu1:Pcie".to_string()];
+
+        let attestation =
+            benchmark_local_topology_attestation(&expected, &observed, true, "node-a");
+
+        assert!(attestation.verified);
+        assert!(!attestation.matches);
+        assert!(attestation
+            .issues
+            .iter()
+            .any(|issue| issue.contains("local accelerator topology mismatch")));
+    }
+
+    #[test]
+    fn tensor_parallel_requires_snapshot_local_topology_evidence() {
+        let attestation = benchmark_local_topology_attestation(&[], &[], true, "node-a");
+
+        assert!(!attestation.verified);
+        assert!(!attestation.matches);
+        assert!(attestation
+            .issues
+            .iter()
+            .any(|issue| issue.contains("tensor-parallel")));
+    }
+
+    #[test]
+    fn non_topology_dependent_plan_keeps_missing_topology_as_warning() {
+        let attestation = benchmark_local_topology_attestation(&[], &[], false, "node-b");
+
+        assert!(!attestation.verified);
+        assert!(attestation.matches);
+        assert!(attestation.issues.is_empty());
+        assert!(attestation
+            .warnings
+            .iter()
+            .any(|warning| warning.contains("topology is unverified")));
+    }
+
+    #[test]
+    fn topology_identity_normalization_is_undirected() {
+        let topology = meshfit_core::TopologyIdentity {
+            links: vec![meshfit_core::LinkIdentity {
+                from: "accelerator:node-a/gpu1".into(),
+                to: "accelerator:node-a/gpu0".into(),
+                kind: LinkKind::Nvlink,
+                bandwidth_mbps: None,
+                latency_micros: None,
+            }],
+        };
+
+        assert_eq!(
+            normalized_identity_local_topology(&topology, "node-a"),
+            vec!["gpu0<->gpu1:Nvlink".to_string()]
+        );
+    }
+
+    #[test]
     fn hardware_attestation_allows_driver_drift_but_reports_it() {
         let expected = attestation_identity("NVIDIA H100 80GB HBM3", 81_559, "580.65", 262_144);
         let observed = attestation_identity("NVIDIA H100 80GB HBM3", 81_559, "590.01", 260_000);
@@ -4576,7 +4635,7 @@ mod tests {
         .unwrap_err()
         .contains("model identity"));
 
-        let mut wrong_port = bundle;
+        let mut wrong_port = bundle.clone();
         wrong_port.request.executable.service.port = expected_port.saturating_add(1);
         assert!(validate_benchmark_bundle_for_candidate(
             &wrong_port,
@@ -4588,6 +4647,29 @@ mod tests {
         )
         .unwrap_err()
         .contains("service port"));
+
+        let mut tp_bundle = bundle;
+        tp_bundle.request.executable.placement = PlacementKind::TensorParallel;
+        tp_bundle.request.identity.placement = PlacementKind::TensorParallel;
+        tp_bundle.request.identity.topology.links = vec![meshfit_core::LinkIdentity {
+            from: "accelerator:node-b/gpu0".into(),
+            to: "accelerator:node-b/gpu1".into(),
+            kind: LinkKind::Pcie,
+            bandwidth_mbps: None,
+            latency_micros: None,
+        }];
+        let mut tp_candidate = candidate;
+        tp_candidate.placement = Some(PlacementKind::TensorParallel);
+        assert!(validate_benchmark_bundle_for_candidate(
+            &tp_bundle,
+            &tp_candidate,
+            &expected_hardware,
+            &expected_model,
+            &["gpu0<->gpu1:Nvlink".to_string()],
+            expected_port,
+        )
+        .unwrap_err()
+        .contains("bundle local topology"));
     }
 
     fn status_test_dir(label: &str) -> PathBuf {
@@ -4782,6 +4864,18 @@ mod tests {
         assert!(error.contains("not present in kit.yaml"));
 
         let _ = fs::remove_dir_all(dir);
+    }
+
+    #[test]
+    fn legacy_benchmark_candidate_without_placement_remains_readable() {
+        let yaml = serde_yaml::to_string(&status_test_kit()).unwrap();
+        let legacy = yaml
+            .lines()
+            .filter(|line| !line.trim_start().starts_with("placement:"))
+            .collect::<Vec<_>>()
+            .join("\n");
+        let parsed: BenchmarkExecutionKit = serde_yaml::from_str(&legacy).unwrap();
+        assert_eq!(parsed.candidates[0].placement, None);
     }
 
     #[test]
