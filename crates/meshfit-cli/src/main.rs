@@ -2515,14 +2515,10 @@ fn plan_benchmark_candidate_runs(
             continue;
         }
         if resume {
-            let (
-                expected_hardware,
-                expected_model,
-                expected_local_topology,
-                expected_request,
-            ) = resume_contract
-                .as_ref()
-                .ok_or_else(|| "resume evidence contract is unavailable".to_string())?;
+            let (expected_hardware, expected_model, expected_local_topology, expected_request) =
+                resume_contract
+                    .as_ref()
+                    .ok_or_else(|| "resume evidence contract is unavailable".to_string())?;
             validate_existing_candidate_bundle(
                 &bundle_path,
                 candidate,
@@ -3298,8 +3294,8 @@ fn load_expected_benchmark_request_contract(
     let target_path = kit_dir.join(&kit.target);
     let raw = fs::read_to_string(&target_path)
         .map_err(|e| format!("read {}: {e}", target_path.display()))?;
-    let target: PlacementTargetIR = serde_yaml::from_str(&raw)
-        .map_err(|e| format!("parse {}: {e}", target_path.display()))?;
+    let target: PlacementTargetIR =
+        serde_yaml::from_str(&raw).map_err(|e| format!("parse {}: {e}", target_path.display()))?;
 
     Ok(BenchmarkExpectedRequestContract {
         context_tokens: target.workload.context_tokens,
@@ -4856,9 +4852,7 @@ mod tests {
         .unwrap();
     }
 
-    fn expected_request_from_bundle(
-        bundle: &BenchmarkBundle,
-    ) -> BenchmarkExpectedRequestContract {
+    fn expected_request_from_bundle(bundle: &BenchmarkBundle) -> BenchmarkExpectedRequestContract {
         BenchmarkExpectedRequestContract {
             context_tokens: bundle.request.context_tokens,
             concurrency: bundle.request.concurrency,
@@ -5001,15 +4995,19 @@ mod tests {
 
         let mut wrong_prompt = bundle.clone();
         wrong_prompt.request.config.prompt.push_str(" tampered");
-        assert!(validate_benchmark_request_contract(&wrong_prompt, &expected)
-            .unwrap_err()
-            .contains("prompt"));
+        assert!(
+            validate_benchmark_request_contract(&wrong_prompt, &expected)
+                .unwrap_err()
+                .contains("prompt")
+        );
 
         let mut wrong_max_tokens = bundle;
         wrong_max_tokens.request.config.max_tokens += 1;
-        assert!(validate_benchmark_request_contract(&wrong_max_tokens, &expected)
-            .unwrap_err()
-            .contains("max_tokens"));
+        assert!(
+            validate_benchmark_request_contract(&wrong_max_tokens, &expected)
+                .unwrap_err()
+                .contains("max_tokens")
+        );
     }
 
     fn status_test_dir(label: &str) -> PathBuf {
