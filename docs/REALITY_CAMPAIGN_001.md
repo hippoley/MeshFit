@@ -183,18 +183,36 @@ remain closed.
 
 ### 4. Build the coordinator snapshot
 
-On the coordinator, build one snapshot from the final discovery files and peer
-measurements, then inspect the candidate set before materializing anything:
+For a three-host campaign, use the manifest-based snapshot path. The positional
+`meshfit snapshot` command accepts exactly two discovery files plus at most one
+probe; it is not the multi-host assembly interface.
+
+Create `snapshot-manifest.yaml` beside the discovery/probe evidence:
+
+```yaml
+discovery_files:
+  - node-a.yaml
+  - node-b.yaml
+  - node-c.yaml
+probes:
+  - from_node: node-a
+    to_node: node-b
+    probe_file: node-a-node-b-probe.yaml
+    kind: ethernet
+  - from_node: node-a
+    to_node: node-c
+    probe_file: node-a-node-c-probe.yaml
+    kind: ethernet
+  - from_node: node-b
+    to_node: node-c
+    probe_file: node-b-node-c-probe.yaml
+    kind: ethernet
+```
+
+Then materialize exactly one coordinator snapshot:
 
 ```bash
-meshfit snapshot \
-  node-a.yaml \
-  node-b.yaml \
-  node-c.yaml \
-  node-a-node-b-probe.yaml \
-  node-a-node-c-probe.yaml \
-  node-b-node-c-probe.yaml \
-  > cluster.yaml
+meshfit snapshot-manifest snapshot-manifest.yaml > cluster.yaml
 
 meshfit benchmark-candidates \
   cluster.yaml \
@@ -203,9 +221,10 @@ meshfit benchmark-candidates \
   --require-distinct
 ```
 
-The campaign should not proceed unless the selected MeshFit plan and baseline
-plans are genuinely distinct and all compute-ranked baselines have non-zero
-observed proxy scores.
+Keep `snapshot-manifest.yaml` with the campaign inputs so the node/probe binding
+is explicit and replayable. The campaign should not proceed unless the selected
+MeshFit plan and baseline plans are genuinely distinct and all compute-ranked
+baselines have non-zero observed proxy scores.
 
 ### 5. Inspect and freeze the real model identity
 
