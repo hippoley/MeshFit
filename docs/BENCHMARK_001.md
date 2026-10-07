@@ -24,7 +24,9 @@ Compare at least:
 2. `max-aggregate-compute`
 3. `meshfit`
 
-Run each candidate repeatedly. Keep the raw `BenchmarkBundle` files.
+Run each candidate repeatedly. Keep the raw `BenchmarkBundle` files. Every
+publishable bundle in one comparison must come from the same MeshFit source
+commit; mixed builds across hosts or repeated runs are rejected.
 
 ## Primary number
 
