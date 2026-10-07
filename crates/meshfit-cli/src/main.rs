@@ -2310,6 +2310,7 @@ fn validate_existing_candidate_bundle(
         candidate,
         expected_hardware,
         expected_model,
+        expected_local_topology,
         expected_listen_port,
     )
     .map_err(|e| format!("invalid existing bundle {}: {e}", bundle_path.display()))
@@ -2352,6 +2353,11 @@ fn plan_benchmark_candidate_runs(
         Some((
             load_expected_benchmark_hardware(kit_dir, &kit, &candidate.benchmark_host)?,
             load_expected_benchmark_model(kit_dir, &kit)?,
+            load_expected_benchmark_local_topology(
+                kit_dir,
+                &kit,
+                &candidate.benchmark_host,
+            )?,
         ))
     } else {
         None
@@ -2372,7 +2378,7 @@ fn plan_benchmark_candidate_runs(
             continue;
         }
         if resume {
-            let (expected_hardware, expected_model) = resume_contract
+            let (expected_hardware, expected_model, expected_local_topology) = resume_contract
                 .as_ref()
                 .ok_or_else(|| "resume evidence contract is unavailable".to_string())?;
             validate_existing_candidate_bundle(
@@ -2380,6 +2386,7 @@ fn plan_benchmark_candidate_runs(
                 candidate,
                 expected_hardware,
                 expected_model,
+                expected_local_topology,
                 kit.listen_port,
             )?;
             existing_valid_runs.push(run_number);
@@ -3145,6 +3152,7 @@ fn validate_benchmark_bundle_for_candidate(
     candidate: &BenchmarkExecutionCandidate,
     expected_hardware: &HardwareIdentity,
     expected_model: &ModelArtifactIdentity,
+    expected_local_topology: &[String],
     expected_listen_port: u16,
 ) -> Result<(), String> {
     bundle.validate()?;
@@ -3240,6 +3248,10 @@ fn inspect_benchmark_worklist(
         let expected_hardware =
             load_expected_benchmark_hardware(kit_dir, &kit, &candidate.benchmark_host)?;
         let expected_model = load_expected_benchmark_model(kit_dir, &kit)?;
+        let expected_local_topology =
+            load_expected_benchmark_local_topology(kit_dir, &kit, &candidate.benchmark_host)?;
+        let expected_local_topology =
+            load_expected_benchmark_local_topology(kit_dir, &kit, &candidate.benchmark_host)?;
 
         for (index, bundle_rel) in comparison.bundles.iter().enumerate() {
             let run_number = index + 1;
@@ -3250,6 +3262,7 @@ fn inspect_benchmark_worklist(
                 candidate,
                 &expected_hardware,
                 &expected_model,
+                &expected_local_topology,
                 kit.listen_port,
                 &lock_path,
             );
@@ -3330,6 +3343,7 @@ fn inspect_work_slot(
     candidate: &BenchmarkExecutionCandidate,
     expected_hardware: &HardwareIdentity,
     expected_model: &ModelArtifactIdentity,
+    expected_local_topology: &[String],
     expected_listen_port: u16,
     lock_path: &Path,
 ) -> (&'static str, Option<String>) {
@@ -3347,6 +3361,7 @@ fn inspect_work_slot(
             candidate,
             expected_hardware,
             expected_model,
+            expected_local_topology,
             expected_listen_port,
         ) {
             return ("invalid", Some(error));
@@ -3421,6 +3436,8 @@ fn inspect_benchmark_kit(kit_dir: &Path) -> Result<BenchmarkKitStatus, String> {
         let expected_hardware =
             load_expected_benchmark_hardware(kit_dir, &kit, &candidate.benchmark_host)?;
         let expected_model = load_expected_benchmark_model(kit_dir, &kit)?;
+        let expected_local_topology =
+            load_expected_benchmark_local_topology(kit_dir, &kit, &candidate.benchmark_host)?;
 
         expected_bundles += comparison.bundles.len();
         let mut valid_runs = 0_usize;
@@ -3461,6 +3478,7 @@ fn inspect_benchmark_kit(kit_dir: &Path) -> Result<BenchmarkKitStatus, String> {
                 candidate,
                 &expected_hardware,
                 &expected_model,
+                &expected_local_topology,
                 kit.listen_port,
             ) {
                 invalid_bundles.push(BenchmarkInvalidBundle {
@@ -4527,6 +4545,7 @@ mod tests {
             &candidate,
             &expected_hardware,
             &expected_model,
+            &[],
             expected_port,
         )
         .unwrap();
@@ -4538,6 +4557,7 @@ mod tests {
             &candidate,
             &expected_hardware,
             &expected_model,
+            &[],
             expected_port,
         )
         .unwrap_err()
@@ -4550,6 +4570,7 @@ mod tests {
             &candidate,
             &expected_hardware,
             &expected_model,
+            &[],
             expected_port,
         )
         .unwrap_err()
@@ -4562,6 +4583,7 @@ mod tests {
             &candidate,
             &expected_hardware,
             &expected_model,
+            &[],
             expected_port,
         )
         .unwrap_err()
@@ -4648,6 +4670,7 @@ mod tests {
             &kit.candidates[0],
             &status_expected_hardware(),
             &status_expected_model(),
+            &[],
             kit.listen_port,
         )
         .unwrap_err();
