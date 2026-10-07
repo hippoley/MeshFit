@@ -5409,6 +5409,23 @@ mod tests {
             bundle.request.executable.runtime = "vllm".into();
             bundle.request.executable.placement = PlacementKind::SingleHost;
             bundle.request.executable.service.port = kit.listen_port;
+            bundle.request.executable.context_tokens = expected.context_tokens;
+            let expected_context = expected.context_tokens.to_string();
+            for arg in &mut bundle.request.executable.args {
+                if arg == "4096" {
+                    *arg = expected_context.clone();
+                }
+            }
+            for flag in &mut bundle.request.executable.identity_flags {
+                if flag == "4096" {
+                    *flag = expected_context.clone();
+                }
+            }
+            for flag in &mut bundle.request.identity.runtime.flags {
+                if flag == "4096" {
+                    *flag = expected_context.clone();
+                }
+            }
             bundle.request.identity.hardware = status_expected_hardware();
             bundle.request.identity.model = status_expected_model();
             bundle.request.identity.placement = PlacementKind::SingleHost;
