@@ -269,6 +269,14 @@ struct BenchmarkInvalidBundle {
     error: String,
 }
 
+#[derive(Debug, Clone)]
+struct BenchmarkExpectedRequestContract {
+    context_tokens: u32,
+    concurrency: u32,
+    listen_port: u16,
+    config: BenchmarkConfig,
+}
+
 #[derive(Debug, Serialize)]
 struct BenchmarkProofReceipt {
     schema: String,
@@ -2430,7 +2438,7 @@ fn validate_existing_candidate_bundle(
     expected_hardware: &HardwareIdentity,
     expected_model: &ModelArtifactIdentity,
     expected_local_topology: &[String],
-    expected_listen_port: u16,
+    expected_request: &BenchmarkExpectedRequestContract,
 ) -> Result<(), String> {
     let raw = fs::read_to_string(bundle_path)
         .map_err(|e| format!("read existing bundle {}: {e}", bundle_path.display()))?;
@@ -2442,8 +2450,9 @@ fn validate_existing_candidate_bundle(
         expected_hardware,
         expected_model,
         expected_local_topology,
-        expected_listen_port,
+        expected_request.listen_port,
     )
+    .and_then(|_| validate_benchmark_request_contract(&bundle, expected_request))
     .map_err(|e| format!("invalid existing bundle {}: {e}", bundle_path.display()))
 }
 
@@ -2485,6 +2494,7 @@ fn plan_benchmark_candidate_runs(
             load_expected_benchmark_hardware(kit_dir, &kit, &candidate.benchmark_host)?,
             load_expected_benchmark_model(kit_dir, &kit)?,
             load_expected_benchmark_local_topology(kit_dir, &kit, &candidate.benchmark_host)?,
+            load_expected_benchmark_request_contract(kit_dir, &kit)?,
         ))
     } else {
         None
@@ -2505,16 +2515,17 @@ fn plan_benchmark_candidate_runs(
             continue;
         }
         if resume {
-            let (expected_hardware, expected_model, expected_local_topology) = resume_contract
-                .as_ref()
-                .ok_or_else(|| "resume evidence contract is unavailable".to_string())?;
+            let (expected_hardware, expected_model, expected_local_topology, expected_request) =
+                resume_contract
+                    .as_ref()
+                    .ok_or_else(|| "resume evidence contract is unavailable".to_string())?;
             validate_existing_candidate_bundle(
                 &bundle_path,
                 candidate,
                 expected_hardware,
                 expected_model,
                 expected_local_topology,
-                kit.listen_port,
+                expected_request,
             )?;
             existing_valid_runs.push(run_number);
             continue;
@@ -3274,6 +3285,87 @@ fn load_expected_benchmark_model(
     serde_yaml::from_str(&raw).map_err(|e| format!("parse {}: {e}", identity_path.display()))
 }
 
+fn load_expected_benchmark_request_contract(
+    kit_dir: &Path,
+    kit: &BenchmarkExecutionKit,
+) -> Result<BenchmarkExpectedRequestContract, String> {
+    let target_path = kit_dir.join(&kit.target);
+    let raw = fs::read_to_string(&target_path)
+        .map_err(|e| format!("read {}: {e}", target_path.display()))?;
+    let target: PlacementTargetIR =
+        serde_yaml::from_str(&raw).map_err(|e| format!("parse {}: {e}", target_path.display()))?;
+
+    Ok(BenchmarkExpectedRequestContract {
+        context_tokens: target.workload.context_tokens,
+        concurrency: kit.concurrency,
+        listen_port: kit.listen_port,
+        config: BenchmarkConfig {
+            prompt: kit.prompt.clone(),
+            max_tokens: kit.max_tokens,
+            warmup_requests: kit.warmup_requests,
+            measured_requests: kit.measured_requests_per_run,
+            request_timeout_ms: kit.request_timeout_ms,
+            startup_timeout_ms: kit.startup_timeout_ms,
+        },
+    })
+}
+
+fn validate_benchmark_request_contract(
+    bundle: &BenchmarkBundle,
+    expected: &BenchmarkExpectedRequestContract,
+) -> Result<(), String> {
+    if bundle.request.context_tokens != expected.context_tokens {
+        return Err(format!(
+            "bundle context {} does not match kit target context {}",
+            bundle.request.context_tokens, expected.context_tokens
+        ));
+    }
+    if bundle.request.concurrency != expected.concurrency {
+        return Err(format!(
+            "bundle concurrency {} does not match kit concurrency {}",
+            bundle.request.concurrency, expected.concurrency
+        ));
+    }
+
+    let actual = &bundle.request.config;
+    let expected_config = &expected.config;
+    if actual.prompt != expected_config.prompt {
+        return Err("bundle prompt does not match frozen kit prompt".to_string());
+    }
+    if actual.max_tokens != expected_config.max_tokens {
+        return Err(format!(
+            "bundle max_tokens {} does not match kit {}",
+            actual.max_tokens, expected_config.max_tokens
+        ));
+    }
+    if actual.warmup_requests != expected_config.warmup_requests {
+        return Err(format!(
+            "bundle warmup_requests {} does not match kit {}",
+            actual.warmup_requests, expected_config.warmup_requests
+        ));
+    }
+    if actual.measured_requests != expected_config.measured_requests {
+        return Err(format!(
+            "bundle measured_requests {} does not match kit {}",
+            actual.measured_requests, expected_config.measured_requests
+        ));
+    }
+    if actual.request_timeout_ms != expected_config.request_timeout_ms {
+        return Err(format!(
+            "bundle request_timeout_ms {} does not match kit {}",
+            actual.request_timeout_ms, expected_config.request_timeout_ms
+        ));
+    }
+    if actual.startup_timeout_ms != expected_config.startup_timeout_ms {
+        return Err(format!(
+            "bundle startup_timeout_ms {} does not match kit {}",
+            actual.startup_timeout_ms, expected_config.startup_timeout_ms
+        ));
+    }
+
+    Ok(())
+}
+
 fn validate_benchmark_bundle_for_candidate(
     bundle: &BenchmarkBundle,
     candidate: &BenchmarkExecutionCandidate,
@@ -3379,6 +3471,7 @@ fn inspect_benchmark_worklist(
         let expected_model = load_expected_benchmark_model(kit_dir, &kit)?;
         let expected_local_topology =
             load_expected_benchmark_local_topology(kit_dir, &kit, &candidate.benchmark_host)?;
+        let expected_request = load_expected_benchmark_request_contract(kit_dir, &kit)?;
 
         for (index, bundle_rel) in comparison.bundles.iter().enumerate() {
             let run_number = index + 1;
@@ -3390,7 +3483,7 @@ fn inspect_benchmark_worklist(
                 &expected_hardware,
                 &expected_model,
                 &expected_local_topology,
-                kit.listen_port,
+                &expected_request,
                 &lock_path,
             );
 
@@ -3471,7 +3564,7 @@ fn inspect_work_slot(
     expected_hardware: &HardwareIdentity,
     expected_model: &ModelArtifactIdentity,
     expected_local_topology: &[String],
-    expected_listen_port: u16,
+    expected_request: &BenchmarkExpectedRequestContract,
     lock_path: &Path,
 ) -> (&'static str, Option<String>) {
     if bundle_path.is_file() {
@@ -3489,8 +3582,10 @@ fn inspect_work_slot(
             expected_hardware,
             expected_model,
             expected_local_topology,
-            expected_listen_port,
-        ) {
+            expected_request.listen_port,
+        )
+        .and_then(|_| validate_benchmark_request_contract(&bundle, expected_request))
+        {
             return ("invalid", Some(error));
         }
         return ("valid", None);
@@ -3514,6 +3609,7 @@ fn inspect_benchmark_kit(kit_dir: &Path) -> Result<BenchmarkKitStatus, String> {
         fs::read_to_string(&kit_path).map_err(|e| format!("read {}: {e}", kit_path.display()))?;
     let kit: BenchmarkExecutionKit =
         serde_yaml::from_str(&raw).map_err(|e| format!("parse {}: {e}", kit_path.display()))?;
+    let expected_request = load_expected_benchmark_request_contract(kit_dir, &kit)?;
 
     let mut expected_bundles = 0_usize;
     let mut valid_bundles = 0_usize;
@@ -3607,7 +3703,9 @@ fn inspect_benchmark_kit(kit_dir: &Path) -> Result<BenchmarkKitStatus, String> {
                 &expected_model,
                 &expected_local_topology,
                 kit.listen_port,
-            ) {
+            )
+            .and_then(|_| validate_benchmark_request_contract(&bundle, &expected_request))
+            {
                 invalid_bundles.push(BenchmarkInvalidBundle {
                     path: bundle_rel.clone(),
                     error,
@@ -4445,6 +4543,16 @@ mod tests {
         baseline.benchmark_id = "baseline-run-01".into();
         baseline.request.executable.source_plan_id = "plan-baseline".into();
         baseline.request.executable.working_node = "node-a".into();
+        baseline.request.concurrency = 1;
+        baseline.request.executable.service.port = BENCHMARK_LISTEN_PORT;
+        baseline.request.config = BenchmarkConfig {
+            prompt: default_benchmark_prompt(),
+            max_tokens: default_benchmark_max_tokens(),
+            warmup_requests: default_benchmark_warmup_requests(),
+            measured_requests: 2,
+            request_timeout_ms: default_benchmark_request_timeout_ms(),
+            startup_timeout_ms: default_benchmark_startup_timeout_ms(),
+        };
 
         let mut meshfit = baseline.clone();
         meshfit.benchmark_id = "meshfit-run-01".into();
@@ -4485,13 +4593,24 @@ mod tests {
             serde_yaml::to_string(&snapshot).unwrap(),
         )
         .unwrap();
-        fs::write(dir.join("inputs/target.yaml"), "target: fixture\n").unwrap();
+        let mut target: PlacementTargetIR =
+            serde_yaml::from_str(include_str!("../../../examples/placement-target.yaml")).unwrap();
+        target.workload.context_tokens = baseline.request.context_tokens;
+        fs::write(
+            dir.join("inputs/target.yaml"),
+            serde_yaml::to_string(&target).unwrap(),
+        )
+        .unwrap();
         fs::write(
             dir.join("inputs/model-identity.yaml"),
             serde_yaml::to_string(&expected_model).unwrap(),
         )
         .unwrap();
-        fs::write(dir.join("inputs/prompt.txt"), default_benchmark_prompt()).unwrap();
+        fs::write(
+            dir.join("inputs/prompt.txt"),
+            &baseline.request.config.prompt,
+        )
+        .unwrap();
 
         let kit = BenchmarkExecutionKit {
             benchmark_id: "benchmark-001-proof-test".into(),
@@ -4500,15 +4619,15 @@ mod tests {
             target: "inputs/target.yaml".into(),
             model_path: "demo".into(),
             model_identity: "inputs/model-identity.yaml".into(),
-            concurrency: 1,
-            measured_requests_per_run: 2,
-            prompt: default_benchmark_prompt(),
-            max_tokens: default_benchmark_max_tokens(),
-            warmup_requests: default_benchmark_warmup_requests(),
-            request_timeout_ms: default_benchmark_request_timeout_ms(),
-            startup_timeout_ms: default_benchmark_startup_timeout_ms(),
+            concurrency: baseline.request.concurrency,
+            measured_requests_per_run: baseline.request.config.measured_requests,
+            prompt: baseline.request.config.prompt.clone(),
+            max_tokens: baseline.request.config.max_tokens,
+            warmup_requests: baseline.request.config.warmup_requests,
+            request_timeout_ms: baseline.request.config.request_timeout_ms,
+            startup_timeout_ms: baseline.request.config.startup_timeout_ms,
             runs_per_candidate: 1,
-            listen_port: BENCHMARK_LISTEN_PORT,
+            listen_port: baseline.request.executable.service.port,
             candidates: vec![
                 BenchmarkExecutionCandidate {
                     name: "baseline".into(),
@@ -4734,6 +4853,42 @@ mod tests {
             serde_yaml::to_string(&status_expected_model()).unwrap(),
         )
         .unwrap();
+
+        let target: PlacementTargetIR =
+            serde_yaml::from_str(include_str!("../../../examples/placement-target.yaml")).unwrap();
+        fs::write(
+            inputs.join("target.yaml"),
+            serde_yaml::to_string(&target).unwrap(),
+        )
+        .unwrap();
+    }
+
+    fn expected_request_from_bundle(bundle: &BenchmarkBundle) -> BenchmarkExpectedRequestContract {
+        BenchmarkExpectedRequestContract {
+            context_tokens: bundle.request.context_tokens,
+            concurrency: bundle.request.concurrency,
+            listen_port: bundle.request.executable.service.port,
+            config: bundle.request.config.clone(),
+        }
+    }
+
+    fn status_expected_request() -> BenchmarkExpectedRequestContract {
+        let target: PlacementTargetIR =
+            serde_yaml::from_str(include_str!("../../../examples/placement-target.yaml")).unwrap();
+        let kit = status_test_kit();
+        BenchmarkExpectedRequestContract {
+            context_tokens: target.workload.context_tokens,
+            concurrency: kit.concurrency,
+            listen_port: kit.listen_port,
+            config: BenchmarkConfig {
+                prompt: kit.prompt,
+                max_tokens: kit.max_tokens,
+                warmup_requests: kit.warmup_requests,
+                measured_requests: kit.measured_requests_per_run,
+                request_timeout_ms: kit.request_timeout_ms,
+                startup_timeout_ms: kit.startup_timeout_ms,
+            },
+        }
     }
 
     fn example_bundle_contract() -> (
@@ -4844,6 +4999,30 @@ mod tests {
         .contains("bundle local topology"));
     }
 
+    #[test]
+    fn persisted_request_contract_rejects_prompt_and_output_drift() {
+        let (bundle, _, _, _) = example_bundle_contract();
+        let expected = expected_request_from_bundle(&bundle);
+
+        validate_benchmark_request_contract(&bundle, &expected).unwrap();
+
+        let mut wrong_prompt = bundle.clone();
+        wrong_prompt.request.config.prompt.push_str(" tampered");
+        assert!(
+            validate_benchmark_request_contract(&wrong_prompt, &expected)
+                .unwrap_err()
+                .contains("prompt")
+        );
+
+        let mut wrong_max_tokens = bundle;
+        wrong_max_tokens.request.config.max_tokens += 1;
+        assert!(
+            validate_benchmark_request_contract(&wrong_max_tokens, &expected)
+                .unwrap_err()
+                .contains("max_tokens")
+        );
+    }
+
     fn status_test_dir(label: &str) -> PathBuf {
         use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -4925,7 +5104,7 @@ mod tests {
             &status_expected_hardware(),
             &status_expected_model(),
             &[],
-            kit.listen_port,
+            &status_expected_request(),
         )
         .unwrap_err();
         assert!(error.contains("parse existing bundle"));
@@ -5174,6 +5353,7 @@ mod tests {
         let candidate = &kit.candidates[0];
         let expected_hardware = status_expected_hardware();
         let expected_model = status_expected_model();
+        let expected_request = status_expected_request();
 
         assert_eq!(
             inspect_work_slot(
@@ -5182,7 +5362,7 @@ mod tests {
                 &expected_hardware,
                 &expected_model,
                 &[],
-                kit.listen_port,
+                &expected_request,
                 &lock_path,
             ),
             ("pending", None)
@@ -5195,7 +5375,7 @@ mod tests {
             &expected_hardware,
             &expected_model,
             &[],
-            kit.listen_port,
+            &expected_request,
             &lock_path,
         );
         assert_eq!(locked.0, "locked");
@@ -5209,7 +5389,7 @@ mod tests {
             &expected_hardware,
             &expected_model,
             &[],
-            kit.listen_port,
+            &expected_request,
             &lock_path,
         );
         assert_eq!(invalid.0, "invalid");
