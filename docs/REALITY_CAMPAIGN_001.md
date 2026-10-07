@@ -83,10 +83,17 @@ Do not independently build MeshFit on the paid benchmark hosts. Build one
 release executable from one clean source revision, record its commit, and
 distribute those exact bytes to every host.
 
-Before building, require the tracked workspace to match `HEAD` and reject
-untracked Rust source under `crates/`:
+For the current primary Lambda matrix, build on an x86_64 Linux environment
+whose userspace ABI is compatible with the benchmark hosts. Do not build the
+campaign binary on macOS or Windows and then copy it to Linux. A different CPU
+architecture is a different campaign artifact.
+
+Before building, fail closed on the builder architecture and require the tracked
+workspace to match `HEAD`; also reject untracked Rust source under `crates/`:
 
 ```bash
+test "$(uname -s)" = "Linux"
+test "$(uname -m)" = "x86_64"
 git diff --quiet HEAD --
 test -z "$(git ls-files --others --exclude-standard -- crates)"
 
@@ -120,7 +127,9 @@ command -v meshfit
 Do not rebuild the binary separately on node-a/node-b/node-c. If the frozen
 binary cannot run on one host, record that compatibility failure and fix the
 campaign environment; compiling a host-specific binary changes the software
-artifact being compared.
+artifact being compared. If a fallback provider changes the campaign
+architecture (for example, to ARM64), rebuild and freeze a new campaign artifact
+before any benchmark evidence is collected.
 
 The bundle runner also records the build-time MeshFit Git commit. Final
 publishability requires one source commit across every candidate/run, so the
