@@ -4606,7 +4606,11 @@ mod tests {
             serde_yaml::to_string(&expected_model).unwrap(),
         )
         .unwrap();
-        fs::write(dir.join("inputs/prompt.txt"), default_benchmark_prompt()).unwrap();
+        fs::write(
+            dir.join("inputs/prompt.txt"),
+            &baseline.request.config.prompt,
+        )
+        .unwrap();
 
         let kit = BenchmarkExecutionKit {
             benchmark_id: "benchmark-001-proof-test".into(),
@@ -4615,15 +4619,15 @@ mod tests {
             target: "inputs/target.yaml".into(),
             model_path: "demo".into(),
             model_identity: "inputs/model-identity.yaml".into(),
-            concurrency: 1,
-            measured_requests_per_run: 2,
-            prompt: default_benchmark_prompt(),
-            max_tokens: default_benchmark_max_tokens(),
-            warmup_requests: default_benchmark_warmup_requests(),
-            request_timeout_ms: default_benchmark_request_timeout_ms(),
-            startup_timeout_ms: default_benchmark_startup_timeout_ms(),
+            concurrency: baseline.request.concurrency,
+            measured_requests_per_run: baseline.request.config.measured_requests,
+            prompt: baseline.request.config.prompt.clone(),
+            max_tokens: baseline.request.config.max_tokens,
+            warmup_requests: baseline.request.config.warmup_requests,
+            request_timeout_ms: baseline.request.config.request_timeout_ms,
+            startup_timeout_ms: baseline.request.config.startup_timeout_ms,
             runs_per_candidate: 1,
-            listen_port: BENCHMARK_LISTEN_PORT,
+            listen_port: baseline.request.executable.service.port,
             candidates: vec![
                 BenchmarkExecutionCandidate {
                     name: "baseline".into(),
