@@ -582,24 +582,21 @@ failed shape. Terminate any instances that did launch, retain the failed launch
 receipt/error, refresh the authenticated capacity intersection, and make a new
 campaign decision.
 
-### D. Make TCP/5201 an explicit provider firewall gate
+### D. Make the intended network path explicit
 
-Lambda ODC does not open arbitrary inbound TCP ports by default. After all three
-instances are active, first capture their provider metadata and assigned
-addresses. Then update the already-attached same-region firewall ruleset so
-TCP/5201 is allowed only from the actual experiment peer source networks needed
-for the measured path. Keep SSH scoped as narrowly as practical and do not expose
-iperf3 to `0.0.0.0/0`.
+Lambda ODC does not open arbitrary inbound TCP ports by default. Its provider
+firewall rules use public IPv4/CIDR source networks, so do not treat a Lambda
+ruleset as a private-network ACL for the returned `private_ip` values.
 
-The Lambda API supports PATCH updates to a per-instance firewall ruleset, so this
-post-launch tightening does not require replacing the instances. Retain the
-ruleset response/receipt together with the exact source networks used by the
-campaign.
+Keep the attached provider ruleset focused on the public exposure surface needed
+for administration (for example, narrowly scoped SSH). Do **not** open
+TCP/5201 on the public interface merely to make the peer probe pass.
 
 The ODC API exposes both public and private instance addresses, but the campaign
-must not assume that a returned private address proves the required peer path.
-After all three instances are active, capture their provider metadata and test
-the exact private path that will be benchmarked:
+must not assume that a returned private address proves private peer
+reachability. After all three instances are active, capture their provider
+metadata, bind the iperf3 server to the host's private address as described in
+the main runbook, and test the exact private path that will be benchmarked:
 
 ```bash
 curl --fail --silent --show-error \
@@ -615,10 +612,13 @@ timeout 5 bash -c 'cat < /dev/null > /dev/tcp/<peer-private-ip>/5201'
 ```
 
 Start the bound iperf3 servers described in the main runbook before the
-TCP/5201 check. If the private path is not reachable, do not silently switch
-the experiment to public Internet addresses: that would change the network tier
-being measured. Stop, record the provider/network blocker, and choose a provider
-or topology whose intended experiment path can be demonstrated.
+TCP/5201 check. Binding to the private address keeps this measurement service off
+the public interface.
+
+If the private path is not reachable, do not add a public TCP/5201 rule and
+silently switch the experiment to public Internet addresses: that would change
+the network tier being measured. Stop, record the provider/network blocker, and
+choose a provider or topology whose intended experiment path can be demonstrated.
 
 ### E. Keep provider identity beside MeshFit identity
 
