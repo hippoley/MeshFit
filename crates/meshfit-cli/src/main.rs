@@ -1115,7 +1115,7 @@ fn run() -> Result<(), String> {
         }
         "benchmark-auto" => {
             let executable_path = args.get(2).ok_or_else(|| {
-                "usage: meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]"
+                "usage: meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT|--prompt-file PATH] [--max-tokens N] [--warmup-requests N] [--request-timeout-ms N] [--startup-timeout-ms N]"
                     .to_string()
             })?;
             let model_identity_path = args
@@ -1131,18 +1131,29 @@ fn run() -> Result<(), String> {
                 .transpose()?
                 .unwrap_or(1);
 
-            let prompt = option_value(&args[4..], "--prompt")?
-                .map(str::to_string)
-                .unwrap_or_else(|| "Explain MeshFit in one sentence.".to_string());
-
-            let measured_requests = option_value(&args[4..], "--measured-requests")?
-                .map(|value| {
-                    value
-                        .parse::<u32>()
-                        .map_err(|e| format!("invalid --measured-requests '{value}': {e}"))
-                })
-                .transpose()?
-                .unwrap_or_else(|| default_measured_requests(concurrency));
+            let prompt = benchmark_prompt_from_args(&args[4..])?;
+            let measured_requests = option_u32(
+                &args[4..],
+                "--measured-requests",
+                default_measured_requests(concurrency),
+            )?;
+            let max_tokens =
+                option_u32(&args[4..], "--max-tokens", default_benchmark_max_tokens())?;
+            let warmup_requests = option_u32(
+                &args[4..],
+                "--warmup-requests",
+                default_benchmark_warmup_requests(),
+            )?;
+            let request_timeout_ms = option_u64(
+                &args[4..],
+                "--request-timeout-ms",
+                default_benchmark_request_timeout_ms(),
+            )?;
+            let startup_timeout_ms = option_u64(
+                &args[4..],
+                "--startup-timeout-ms",
+                default_benchmark_startup_timeout_ms(),
+            )?;
 
             if measured_requests == 0 || measured_requests % concurrency != 0 {
                 return Err(format!(
@@ -1165,11 +1176,11 @@ fn run() -> Result<(), String> {
                 concurrency,
                 BenchmarkConfig {
                     prompt,
-                    max_tokens: 64,
-                    warmup_requests: 1,
+                    max_tokens,
+                    warmup_requests,
                     measured_requests,
-                    request_timeout_ms: 120_000,
-                    startup_timeout_ms: 300_000,
+                    request_timeout_ms,
+                    startup_timeout_ms,
                 },
             )?;
 
@@ -1239,7 +1250,7 @@ fn run() -> Result<(), String> {
         }
         "benchmark-kit" => {
             let snapshot_path = args.get(2).ok_or_else(|| {
-                "usage: meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--listen-port N] [--require-ready] [--write-dir DIR]"
+                "usage: meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--listen-port N] [--prompt TEXT|--prompt-file PATH] [--max-tokens N] [--warmup-requests N] [--measured-requests N] [--request-timeout-ms N] [--startup-timeout-ms N] [--require-ready] [--write-dir DIR]"
                     .to_string()
             })?;
             let target_path = args
@@ -1255,6 +1266,24 @@ fn run() -> Result<(), String> {
                 .get(6)
                 .ok_or_else(|| "missing model-identity.yaml".to_string())?;
             let listen_port = parse_benchmark_listen_port(&args[7..])?;
+            let prompt = benchmark_prompt_from_args(&args[7..])?;
+            let max_tokens =
+                option_u32(&args[7..], "--max-tokens", default_benchmark_max_tokens())?;
+            let warmup_requests = option_u32(
+                &args[7..],
+                "--warmup-requests",
+                default_benchmark_warmup_requests(),
+            )?;
+            let request_timeout_ms = option_u64(
+                &args[7..],
+                "--request-timeout-ms",
+                default_benchmark_request_timeout_ms(),
+            )?;
+            let startup_timeout_ms = option_u64(
+                &args[7..],
+                "--startup-timeout-ms",
+                default_benchmark_startup_timeout_ms(),
+            )?;
 
             let model_identity_raw = fs::read_to_string(model_identity_path)
                 .map_err(|e| format!("read {model_identity_path}: {e}"))?;
@@ -1293,7 +1322,22 @@ fn run() -> Result<(), String> {
             let mut warnings = benchmark_plan_warnings(&selected);
 
             let concurrency = target.workload.concurrency;
-            let measured_requests_per_run = default_measured_requests(concurrency);
+            let measured_requests_per_run = option_u32(
+                &args[7..],
+                "--measured-requests",
+                default_measured_requests(concurrency),
+            )?;
+            if measured_requests_per_run == 0 || measured_requests_per_run % concurrency != 0 {
+                return Err(format!(
+                    "--measured-requests must be greater than zero and divisible by concurrency ({concurrency})"
+                ));
+            }
+            if max_tokens == 0 {
+                return Err("--max-tokens must be greater than zero".to_string());
+            }
+            if request_timeout_ms == 0 || startup_timeout_ms == 0 {
+                return Err("benchmark timeout values must be greater than zero".to_string());
+            }
             let benchmark_id = "benchmark-001".to_string();
             let runs_per_candidate = 2_u32;
 
@@ -1398,6 +1442,11 @@ fn run() -> Result<(), String> {
                 model_identity: model_identity_path.clone(),
                 concurrency,
                 measured_requests_per_run,
+                prompt,
+                max_tokens,
+                warmup_requests,
+                request_timeout_ms,
+                startup_timeout_ms,
                 runs_per_candidate,
                 listen_port,
                 candidates: execution_candidates,
