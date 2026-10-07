@@ -868,6 +868,27 @@ fn load_expected_benchmark_local_topology(
     ))
 }
 
+fn positive_finite(value: f64) -> bool {
+    value.is_finite() && value > 0.0
+}
+
+fn conservative_bandwidth_matches(
+    forward_gbps: f64,
+    reverse_gbps: f64,
+    effective_gbps: f64,
+) -> bool {
+    if !positive_finite(forward_gbps)
+        || !positive_finite(reverse_gbps)
+        || !positive_finite(effective_gbps)
+    {
+        return false;
+    }
+
+    let expected = forward_gbps.min(reverse_gbps);
+    let tolerance = expected.abs().max(1.0) * 1e-9;
+    (effective_gbps - expected).abs() <= tolerance
+}
+
 fn benchmark_peer_evidence_check_at(
     snapshot: &InfrastructureSnapshot,
     nodes: &[String],
@@ -909,25 +930,43 @@ fn benchmark_peer_evidence_check_at(
                         measurement.source
                     ));
                 }
-                if measurement.latency_ms.is_none() {
-                    pair_issues.push(format!(
+                match measurement.latency_ms {
+                    Some(value) if positive_finite(value) => {}
+                    Some(value) => pair_issues.push(format!(
+                        "{from_node}<->{to_node} peer evidence RTT must be finite and > 0, got {value}"
+                    )),
+                    None => pair_issues.push(format!(
                         "{from_node}<->{to_node} peer evidence has no measured RTT"
-                    ));
+                    )),
                 }
-                if measurement.bandwidth_forward_gbps.is_none() {
-                    pair_issues.push(format!(
-                        "{from_node}<->{to_node} peer evidence has no measured forward bandwidth"
-                    ));
-                }
-                if measurement.bandwidth_reverse_gbps.is_none() {
-                    pair_issues.push(format!(
-                        "{from_node}<->{to_node} peer evidence has no measured reverse bandwidth"
-                    ));
-                }
-                if measurement.bandwidth_gbps.is_none() {
-                    pair_issues.push(format!(
-                        "{from_node}<->{to_node} peer evidence has no conservative effective bandwidth"
-                    ));
+
+                match (
+                    measurement.bandwidth_forward_gbps,
+                    measurement.bandwidth_reverse_gbps,
+                    measurement.bandwidth_gbps,
+                ) {
+                    (Some(forward), Some(reverse), Some(effective))
+                        if conservative_bandwidth_matches(forward, reverse, effective) => {}
+                    (Some(forward), Some(reverse), Some(effective)) => pair_issues.push(format!(
+                        "{from_node}<->{to_node} peer bandwidth evidence is invalid: forward={forward}, reverse={reverse}, effective={effective}; expected finite positive values with effective=min(forward, reverse)"
+                    )),
+                    (forward, reverse, effective) => {
+                        if forward.is_none() {
+                            pair_issues.push(format!(
+                                "{from_node}<->{to_node} peer evidence has no measured forward bandwidth"
+                            ));
+                        }
+                        if reverse.is_none() {
+                            pair_issues.push(format!(
+                                "{from_node}<->{to_node} peer evidence has no measured reverse bandwidth"
+                            ));
+                        }
+                        if effective.is_none() {
+                            pair_issues.push(format!(
+                                "{from_node}<->{to_node} peer evidence has no conservative effective bandwidth"
+                            ));
+                        }
+                    }
                 }
                 let age_seconds = measurement.captured_at_unix_ms.map(|captured_at| {
                     if captured_at > now_unix_ms.saturating_add(60_000) {
@@ -4921,6 +4960,52 @@ mod tests {
             .issues
             .iter()
             .any(|issue| issue.contains("no measured reverse bandwidth")));
+    }
+
+    #[test]
+    fn cross_node_candidate_rejects_inflated_effective_bandwidth() {
+        let mut tampered = peer_measurement(
+            Some(0.42),
+            Some(21.8),
+            Some(1_700_000_000_000),
+        );
+        tampered.bandwidth_forward_gbps = Some(24.1);
+        tampered.bandwidth_reverse_gbps = Some(21.8);
+        tampered.bandwidth_gbps = Some(100.0);
+        let snapshot = peer_evidence_snapshot(vec![tampered]);
+        let nodes = vec!["node-a".to_string(), "node-b".to_string()];
+        let check = benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_010_000);
+
+        assert!(!check.ready);
+        assert!(check
+            .issues
+            .iter()
+            .any(|issue| issue.contains("expected finite positive values with effective=min")));
+    }
+
+    #[test]
+    fn cross_node_candidate_rejects_non_positive_peer_values() {
+        let mut invalid = peer_measurement(
+            Some(0.0),
+            Some(21.8),
+            Some(1_700_000_000_000),
+        );
+        invalid.bandwidth_forward_gbps = Some(0.0);
+        invalid.bandwidth_reverse_gbps = Some(21.8);
+        invalid.bandwidth_gbps = Some(0.0);
+        let snapshot = peer_evidence_snapshot(vec![invalid]);
+        let nodes = vec!["node-a".to_string(), "node-b".to_string()];
+        let check = benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_010_000);
+
+        assert!(!check.ready);
+        assert!(check
+            .issues
+            .iter()
+            .any(|issue| issue.contains("RTT must be finite and > 0")));
+        assert!(check
+            .issues
+            .iter()
+            .any(|issue| issue.contains("peer bandwidth evidence is invalid")));
     }
 
     #[test]
