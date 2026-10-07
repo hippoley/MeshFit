@@ -4892,7 +4892,39 @@ mod tests {
         assert!(check
             .issues
             .iter()
-            .any(|issue| issue.contains("no measured bandwidth")));
+            .any(|issue| issue.contains("no measured forward bandwidth")));
+        assert!(check
+            .issues
+            .iter()
+            .any(|issue| issue.contains("no measured reverse bandwidth")));
+        assert!(check
+            .issues
+            .iter()
+            .any(|issue| issue.contains("no conservative effective bandwidth")));
+    }
+
+    #[test]
+    fn cross_node_candidate_rejects_legacy_single_direction_bandwidth() {
+        let mut legacy = peer_measurement(
+            Some(0.42),
+            Some(21.8),
+            Some(1_700_000_000_000),
+        );
+        legacy.bandwidth_forward_gbps = None;
+        legacy.bandwidth_reverse_gbps = None;
+        let snapshot = peer_evidence_snapshot(vec![legacy]);
+        let nodes = vec!["node-a".to_string(), "node-b".to_string()];
+        let check = benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_010_000);
+
+        assert!(!check.ready);
+        assert!(check
+            .issues
+            .iter()
+            .any(|issue| issue.contains("no measured forward bandwidth")));
+        assert!(check
+            .issues
+            .iter()
+            .any(|issue| issue.contains("no measured reverse bandwidth")));
     }
 
     #[test]
