@@ -3903,6 +3903,7 @@ mod tests {
                 links: Vec::new(),
             },
             hardware_identities,
+            peer_measurements: Vec::new(),
             warnings: Vec::new(),
         };
         fs::write(
@@ -4070,7 +4071,15 @@ mod tests {
         let bundle = dir.join("run-01.yaml");
         fs::write(&bundle, "not-valid-yaml: [").unwrap();
 
-        let error = validate_existing_candidate_bundle(&bundle, "plan-test").unwrap_err();
+        let kit = status_test_kit();
+        let error = validate_existing_candidate_bundle(
+            &bundle,
+            &kit.candidates[0],
+            &status_expected_hardware(),
+            &status_expected_model(),
+            kit.listen_port,
+        )
+        .unwrap_err();
         assert!(error.contains("parse existing bundle"));
 
         let _ = fs::remove_dir_all(dir);
@@ -4301,19 +4310,45 @@ mod tests {
         let bundle_path = dir.join("run-01.yaml");
         let lock_path = PathBuf::from(format!("{}.lock", bundle_path.display()));
 
+        let kit = status_test_kit();
+        let candidate = &kit.candidates[0];
+        let expected_hardware = status_expected_hardware();
+        let expected_model = status_expected_model();
+
         assert_eq!(
-            inspect_work_slot(&bundle_path, "plan-test", &lock_path),
+            inspect_work_slot(
+                &bundle_path,
+                candidate,
+                &expected_hardware,
+                &expected_model,
+                kit.listen_port,
+                &lock_path,
+            ),
             ("pending", None)
         );
 
         fs::write(&lock_path, "").unwrap();
-        let locked = inspect_work_slot(&bundle_path, "plan-test", &lock_path);
+        let locked = inspect_work_slot(
+            &bundle_path,
+            candidate,
+            &expected_hardware,
+            &expected_model,
+            kit.listen_port,
+            &lock_path,
+        );
         assert_eq!(locked.0, "locked");
         assert!(locked.1.unwrap().contains("may be stale"));
 
         fs::remove_file(&lock_path).unwrap();
         fs::write(&bundle_path, "not-valid-yaml: [").unwrap();
-        let invalid = inspect_work_slot(&bundle_path, "plan-test", &lock_path);
+        let invalid = inspect_work_slot(
+            &bundle_path,
+            candidate,
+            &expected_hardware,
+            &expected_model,
+            kit.listen_port,
+            &lock_path,
+        );
         assert_eq!(invalid.0, "invalid");
         assert!(invalid.1.unwrap().contains("parse failed"));
 
@@ -4324,6 +4359,7 @@ mod tests {
     fn benchmark_finalize_refuses_incomplete_kit() {
         let dir = status_test_dir("finalize-incomplete");
         fs::create_dir_all(&dir).unwrap();
+        write_status_contract_files(&dir);
         fs::write(
             dir.join("kit.yaml"),
             serde_yaml::to_string(&status_test_kit()).unwrap(),
@@ -4341,6 +4377,7 @@ mod tests {
     fn benchmark_status_reports_missing_bundle() {
         let dir = status_test_dir("missing");
         fs::create_dir_all(&dir).unwrap();
+        write_status_contract_files(&dir);
         fs::write(
             dir.join("kit.yaml"),
             serde_yaml::to_string(&status_test_kit()).unwrap(),
@@ -4363,6 +4400,7 @@ mod tests {
     fn benchmark_status_reports_corrupt_bundle() {
         let dir = status_test_dir("corrupt");
         fs::create_dir_all(dir.join("results/meshfit")).unwrap();
+        write_status_contract_files(&dir);
         fs::write(
             dir.join("kit.yaml"),
             serde_yaml::to_string(&status_test_kit()).unwrap(),
