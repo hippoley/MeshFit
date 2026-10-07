@@ -168,7 +168,22 @@ MESHFIT_NODE_ID=node-b \
 
 The report includes the current machine's discovered hardware identity plus every assigned candidate's runtime availability, host match, hardware-profile match, model verification, warnings, and preflight issues. `--require-ready` exits non-zero if any assigned candidate is not safe to run.
 
-For any candidate spanning more than one node, readiness also requires peer-link measurement provenance for every participating node pair. The materialized snapshot must contain a `meshfit-peer-probe` record with measured RTT, measured bandwidth, and a capture timestamp. Preflight exposes each pair's source, values, measurement age, readiness, and issues. Single-host candidates do not require peer probes. MeshFit currently reports age without inventing a fixed expiration threshold; operators can see whether a topology measurement is old while the first real benchmark establishes a defensible freshness policy.
+For any candidate spanning more than one node, readiness also requires peer-link measurement provenance for every participating node pair. The materialized snapshot must contain a `meshfit-peer-probe` record with measured RTT, measured bandwidth, and a capture timestamp. Preflight exposes each pair's source, values, measurement age, readiness, and issues. Single-host candidates do not require peer probes.
+
+MeshFit does **not** impose a hidden default TTL on those measurements. By default, age is diagnostic only. A Benchmark 001 experiment can declare its own freshness contract when the kit is created:
+
+```bash
+meshfit benchmark-kit \
+  cluster.yaml \
+  target.yaml \
+  <meshfit-plan-id> \
+  <model-path> \
+  model-identity.yaml \
+  --max-peer-probe-age-seconds 1800 \
+  --write-dir benchmark-001
+```
+
+The declared limit is serialized into `kit.yaml` and shown in the generated RUNBOOK. When present, a cross-node measurement older than that limit is a hard preflight failure. A value of zero is rejected rather than being interpreted ambiguously as unlimited freshness.
 
 For a real host, prefer configuring the local path once instead of repeating it on every command:
 
