@@ -361,6 +361,7 @@ fn evidence_qualification(
 ) -> (bool, String) {
     let mut all_ids = std::collections::HashSet::new();
     let mut compared_plan_ids = std::collections::HashSet::new();
+    let mut source_commit: Option<&str> = None;
 
     for candidate in candidates {
         let Some(first_bundle) = candidate.bundles.first() else {
@@ -468,7 +469,7 @@ fn evidence_qualification(
                     ),
                 );
             }
-            if bundle.provenance.commit.is_none() {
+            let Some(commit) = bundle.provenance.commit.as_deref() else {
                 return (
                     false,
                     format!(
@@ -476,6 +477,19 @@ fn evidence_qualification(
                         bundle.benchmark_id
                     ),
                 );
+            };
+            match source_commit {
+                Some(expected) if expected != commit => {
+                    return (
+                        false,
+                        format!(
+                            "benchmark_id '{}' uses MeshFit source commit '{}' but campaign is already bound to '{}'; publishable evidence must use one source revision across all candidates and runs",
+                            bundle.benchmark_id, commit, expected
+                        ),
+                    );
+                }
+                None => source_commit = Some(commit),
+                Some(_) => {}
             }
             if !candidate_ids.insert(bundle.benchmark_id.as_str()) {
                 return (
@@ -888,6 +902,74 @@ mod tests {
             evidence_qualification(&[candidate], ComparisonObjective::P95TtftMs);
         assert!(!publishable);
         assert!(status.contains("contains no benchmark bundles"));
+    }
+
+    fn publishable_test_bundle(
+        benchmark_id: &str,
+        plan_id: &str,
+        source_commit: &str,
+    ) -> BenchmarkBundle {
+        let mut bundle: BenchmarkBundle =
+            serde_yaml::from_str(include_str!("../../../examples/benchmark-bundle.yaml")).unwrap();
+        bundle.benchmark_id = benchmark_id.into();
+        bundle.request.executable.source_plan_id = plan_id.into();
+        bundle.provenance.source = "meshfit-local-runner".into();
+        bundle.provenance.commit = Some(source_commit.into());
+        bundle.provenance.captured_at = Some("unix_ms:1700000000000".into());
+        let measurement = bundle.measurements[0].clone();
+        bundle.measurements = vec![measurement; 10];
+        bundle
+    }
+
+    fn publishable_test_candidates(commits: [&str; 4]) -> Vec<BenchmarkCandidate> {
+        vec![
+            BenchmarkCandidate {
+                name: "baseline".into(),
+                strategy: "baseline".into(),
+                hourly_cost_usd: None,
+                bundles: vec![
+                    publishable_test_bundle("baseline-01", "plan-baseline", commits[0]),
+                    publishable_test_bundle("baseline-02", "plan-baseline", commits[1]),
+                ],
+            },
+            BenchmarkCandidate {
+                name: "meshfit".into(),
+                strategy: "meshfit".into(),
+                hourly_cost_usd: None,
+                bundles: vec![
+                    publishable_test_bundle("meshfit-01", "plan-meshfit", commits[2]),
+                    publishable_test_bundle("meshfit-02", "plan-meshfit", commits[3]),
+                ],
+            },
+        ]
+    }
+
+    #[test]
+    fn publication_requires_one_meshfit_source_commit_across_campaign() {
+        let candidates = publishable_test_candidates(["abc", "abc", "abc", "abc"]);
+        let (publishable, status) =
+            evidence_qualification(&candidates, ComparisonObjective::P95TtftMs);
+
+        assert!(publishable, "{status}");
+
+        let candidates = publishable_test_candidates(["abc", "abc", "def", "def"]);
+        let (publishable, status) =
+            evidence_qualification(&candidates, ComparisonObjective::P95TtftMs);
+
+        assert!(!publishable);
+        assert!(status.contains("campaign is already bound to 'abc'"));
+        assert!(status.contains("source commit 'def'"));
+    }
+
+    #[test]
+    fn publication_rejects_mixed_commits_within_one_candidate() {
+        let candidates = publishable_test_candidates(["abc", "def", "abc", "abc"]);
+        let (publishable, status) =
+            evidence_qualification(&candidates, ComparisonObjective::P95TtftMs);
+
+        assert!(!publishable);
+        assert!(status.contains("baseline-02"));
+        assert!(status.contains("source commit 'def'"));
     }
 
     #[test]
