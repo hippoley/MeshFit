@@ -25,10 +25,29 @@ pub struct SnapshotManifest {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
+pub struct PeerMeasurementEvidence {
+    pub from_node: String,
+    pub to_node: String,
+    pub kind: LinkKind,
+    #[serde(default)]
+    pub latency_ms: Option<f64>,
+    #[serde(default)]
+    pub jitter_ms: Option<f64>,
+    #[serde(default)]
+    pub bandwidth_gbps: Option<f64>,
+    #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub captured_at_unix_ms: Option<u128>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq)]
 pub struct InfrastructureSnapshot {
     pub infrastructure: InfrastructureIR,
     #[serde(default)]
     pub hardware_identities: BTreeMap<String, HardwareIdentity>,
+    #[serde(default)]
+    pub peer_measurements: Vec<PeerMeasurementEvidence>,
     #[serde(default)]
     pub warnings: Vec<String>,
 }
@@ -80,6 +99,7 @@ impl InfrastructureSnapshot {
         Ok(Self {
             infrastructure: InfrastructureIR { nodes, links },
             hardware_identities,
+            peer_measurements: Vec::new(),
             warnings,
         })
     }
@@ -101,6 +121,16 @@ impl InfrastructureSnapshot {
         self.infrastructure
             .links
             .push(probe.to_node_edge(from_node, to_node, kind));
+        self.peer_measurements.push(PeerMeasurementEvidence {
+            from_node: from_node.to_string(),
+            to_node: to_node.to_string(),
+            kind,
+            latency_ms: probe.latency_ms,
+            jitter_ms: probe.jitter_ms,
+            bandwidth_gbps: probe.bandwidth_gbps,
+            source: probe.source.clone(),
+            captured_at_unix_ms: probe.captured_at_unix_ms,
+        });
 
         self.warnings.extend(
             probe
@@ -160,6 +190,8 @@ mod tests {
                     latency_ms: Some(0.42),
                     jitter_ms: Some(0.03),
                     bandwidth_gbps: Some(21.8),
+                    source: Some("meshfit-peer-probe".into()),
+                    captured_at_unix_ms: Some(1_700_000_000_000),
                     warnings: vec![],
                 },
                 LinkKind::Ethernet,
@@ -177,6 +209,15 @@ mod tests {
             }
         );
         assert_eq!(link.bandwidth_gbps, Some(21.8));
+        assert_eq!(snapshot.peer_measurements.len(), 1);
+        assert_eq!(
+            snapshot.peer_measurements[0].source.as_deref(),
+            Some("meshfit-peer-probe")
+        );
+        assert_eq!(
+            snapshot.peer_measurements[0].captured_at_unix_ms,
+            Some(1_700_000_000_000)
+        );
     }
 
     #[test]
