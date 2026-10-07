@@ -4905,11 +4905,7 @@ mod tests {
 
     #[test]
     fn cross_node_candidate_rejects_legacy_single_direction_bandwidth() {
-        let mut legacy = peer_measurement(
-            Some(0.42),
-            Some(21.8),
-            Some(1_700_000_000_000),
-        );
+        let mut legacy = peer_measurement(Some(0.42), Some(21.8), Some(1_700_000_000_000));
         legacy.bandwidth_forward_gbps = None;
         legacy.bandwidth_reverse_gbps = None;
         let snapshot = peer_evidence_snapshot(vec![legacy]);
