@@ -81,7 +81,7 @@ MeshFit's roadmap is ordered by the shortest path to a real closed loop.
 
 ## 6. Ask for the missing evidence — v0.5
 
-- [ ] uncertainty-aware probe selection
+- [x] uncertainty-aware probe selection — evidence-gap rejections ranked by decision value, affected-candidate breadth, and blocked-decision state; real unmeasured-snapshot CLI Reality Verified on CI #1068/#1084
 - [ ] targeted network probe
 - [ ] targeted compute probe
 - [ ] decision-changing probe validation
