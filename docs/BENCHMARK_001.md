@@ -48,6 +48,24 @@ regret reduction vs best baseline
 
 This is only publishable when it comes from real benchmark bundles. Synthetic fixtures may test code paths but must never be presented as product evidence.
 
+## Real compute proxy
+
+Real discovery deliberately does not invent accelerator performance: newly discovered accelerators start with `relative_compute: 0`. Benchmark 001 therefore fails closed until the candidate hardware has a positive measured or explicitly sourced compute proxy.
+
+For the first Reality Campaign, use the same single-device model/runtime/workload on each GPU and retain at least three independent bundles per accelerator. Aggregate them with:
+
+```bash
+meshfit benchmark-compute-proxy \
+  probe-run-01.yaml \
+  probe-run-02.yaml \
+  probe-run-03.yaml \
+  --require-stable > compute-proxy.yaml
+```
+
+The command validates every bundle and requires the same model identity, hardware identity, runtime, source plan, context, concurrency, and BenchmarkConfig. It reports run-level mean decode throughput, sample standard deviation, CV, and a positive `relative_compute` equal to the observed mean decode tokens/second. `--require-stable` rejects CV above 20%.
+
+Use that measured value in the experiment discovery input and retain the raw bundles plus `compute-proxy.yaml` with the final proof artifacts. Do not replace this step with GPU-model marketing TFLOPS.
+
 ## CLI
 
 Start from a discovered snapshot and a placement target. The MeshFit-selected plan stays explicit; the CLI only derives the two naive baselines:
