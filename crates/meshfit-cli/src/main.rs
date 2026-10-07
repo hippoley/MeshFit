@@ -106,6 +106,20 @@ fn parse_benchmark_listen_port(args: &[String]) -> Result<u16, String> {
     Ok(port)
 }
 
+fn parse_max_peer_probe_age_seconds(args: &[String]) -> Result<Option<u64>, String> {
+    option_value(args, "--max-peer-probe-age-seconds")?
+        .map(|value| {
+            let seconds = value
+                .parse::<u64>()
+                .map_err(|e| format!("invalid --max-peer-probe-age-seconds '{value}': {e}"))?;
+            if seconds == 0 {
+                return Err("--max-peer-probe-age-seconds must be greater than zero".to_string());
+            }
+            Ok(seconds)
+        })
+        .transpose()
+}
+
 #[derive(Debug, Deserialize)]
 struct BenchmarkComparisonManifest {
     benchmark_id: String,
@@ -164,6 +178,8 @@ struct BenchmarkExecutionKit {
     runs_per_candidate: u32,
     #[serde(default = "default_benchmark_listen_port")]
     listen_port: u16,
+    #[serde(default)]
+    max_peer_probe_age_seconds: Option<u64>,
     candidates: Vec<BenchmarkExecutionCandidate>,
     comparison_manifest: BenchmarkExecutionComparison,
     warnings: Vec<String>,
@@ -483,6 +499,7 @@ struct BenchmarkPreflight {
     model_artifact_verified: bool,
     listen_port: u16,
     listen_port_available: bool,
+    max_peer_probe_age_seconds: Option<u64>,
     peer_measurements_ready: bool,
     peer_measurements: Vec<BenchmarkPeerMeasurementStatus>,
     existing_bundles: Vec<String>,
@@ -893,6 +910,7 @@ fn benchmark_peer_evidence_check_at(
     snapshot: &InfrastructureSnapshot,
     nodes: &[String],
     now_unix_ms: u128,
+    max_age_seconds: Option<u64>,
 ) -> BenchmarkPeerEvidenceCheck {
     if nodes.len() <= 1 {
         return BenchmarkPeerEvidenceCheck {
@@ -981,6 +999,14 @@ fn benchmark_peer_evidence_check_at(
                         "{from_node}<->{to_node} peer evidence has no capture timestamp"
                     ));
                 }
+                if let (Some(limit), Some(age)) = (max_age_seconds, age_seconds) {
+                    if age > limit as u128 {
+                        pair_issues.push(format!(
+                            "{from_node}<->{to_node} peer measurement age {}s exceeds declared freshness limit {}s",
+                            age, limit
+                        ));
+                    }
+                }
                 (
                     measurement.source.clone(),
                     measurement.latency_ms,
@@ -1055,7 +1081,12 @@ fn inspect_benchmark_peer_evidence(
         .ok()
         .map(|duration| duration.as_millis())
         .unwrap_or(0);
-    benchmark_peer_evidence_check_at(&snapshot, &candidate.nodes, now_unix_ms)
+    benchmark_peer_evidence_check_at(
+        &snapshot,
+        &candidate.nodes,
+        now_unix_ms,
+        kit.max_peer_probe_age_seconds,
+    )
 }
 
 fn benchmark_model_path_override(args: &[String]) -> Result<Option<String>, String> {
@@ -1336,7 +1367,7 @@ fn run() -> Result<(), String> {
         }
         "benchmark-kit" => {
             let snapshot_path = args.get(2).ok_or_else(|| {
-                "usage: meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--listen-port N] [--prompt TEXT|--prompt-file PATH] [--max-tokens N] [--warmup-requests N] [--measured-requests N] [--request-timeout-ms N] [--startup-timeout-ms N] [--require-ready] [--write-dir DIR]"
+                "usage: meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--listen-port N] [--prompt TEXT|--prompt-file PATH] [--max-tokens N] [--warmup-requests N] [--measured-requests N] [--request-timeout-ms N] [--startup-timeout-ms N] [--max-peer-probe-age-seconds N] [--require-ready] [--write-dir DIR]"
                     .to_string()
             })?;
             let target_path = args
@@ -1352,6 +1383,7 @@ fn run() -> Result<(), String> {
                 .get(6)
                 .ok_or_else(|| "missing model-identity.yaml".to_string())?;
             let listen_port = parse_benchmark_listen_port(&args[7..])?;
+            let max_peer_probe_age_seconds = parse_max_peer_probe_age_seconds(&args[7..])?;
             let prompt = benchmark_prompt_from_args(&args[7..])?;
             let max_tokens =
                 option_u32(&args[7..], "--max-tokens", default_benchmark_max_tokens())?;
@@ -1540,6 +1572,7 @@ fn run() -> Result<(), String> {
                 startup_timeout_ms,
                 runs_per_candidate,
                 listen_port,
+                max_peer_probe_age_seconds,
                 candidates: execution_candidates,
                 comparison_manifest: BenchmarkExecutionComparison {
                     benchmark_id,
@@ -3356,6 +3389,7 @@ fn inspect_benchmark_preflight(
         model_artifact_verified: model_check.verified,
         listen_port: kit.listen_port,
         listen_port_available,
+        max_peer_probe_age_seconds: kit.max_peer_probe_age_seconds,
         peer_measurements_ready: peer_evidence.ready,
         peer_measurements: peer_evidence.measurements,
         existing_bundles,
@@ -4256,6 +4290,11 @@ fn render_benchmark_runbook(kit: &BenchmarkExecutionKit) -> String {
         kit.runs_per_candidate,
         kit.listen_port
     ));
+    if let Some(max_age_seconds) = kit.max_peer_probe_age_seconds {
+        out.push_str(&format!(
+            "**Max peer probe age:** {max_age_seconds} seconds\n\n"
+        ));
+    }
     out.push_str(&format!(
         "**Model source recorded by coordinator:** `{}`  \n",
         kit.model_path
@@ -4877,7 +4916,7 @@ mod tests {
     fn single_host_candidate_does_not_require_peer_measurement() {
         let snapshot = peer_evidence_snapshot(vec![]);
         let nodes = vec!["node-a".to_string()];
-        let check = benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_010_000);
+        let check = benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_010_000, None);
 
         assert!(check.ready);
         assert!(check.measurements.is_empty());
@@ -4885,10 +4924,26 @@ mod tests {
     }
 
     #[test]
+    fn peer_probe_freshness_policy_is_optional_and_rejects_zero() {
+        assert_eq!(parse_max_peer_probe_age_seconds(&[]).unwrap(), None);
+
+        let args = vec![
+            "--max-peer-probe-age-seconds".to_string(),
+            "1800".to_string(),
+        ];
+        assert_eq!(parse_max_peer_probe_age_seconds(&args).unwrap(), Some(1800));
+
+        let zero = vec!["--max-peer-probe-age-seconds".to_string(), "0".to_string()];
+        assert!(parse_max_peer_probe_age_seconds(&zero)
+            .unwrap_err()
+            .contains("greater than zero"));
+    }
+
+    #[test]
     fn cross_node_candidate_requires_peer_measurement_provenance() {
         let snapshot = peer_evidence_snapshot(vec![]);
         let nodes = vec!["node-a".to_string(), "node-b".to_string()];
-        let check = benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_010_000);
+        let check = benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_010_000, None);
 
         assert!(!check.ready);
         assert!(check
@@ -4905,7 +4960,7 @@ mod tests {
             Some(1_700_000_000_000),
         )]);
         let nodes = vec!["node-a".to_string(), "node-b".to_string()];
-        let check = benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_010_000);
+        let check = benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_010_000, None);
 
         assert!(check.ready);
         assert!(check.issues.is_empty());
@@ -4918,6 +4973,41 @@ mod tests {
     }
 
     #[test]
+    fn peer_measurement_age_is_diagnostic_without_declared_limit() {
+        let snapshot = peer_evidence_snapshot(vec![peer_measurement(
+            Some(0.42),
+            Some(21.8),
+            Some(1_700_000_000_000),
+        )]);
+        let nodes = vec!["node-a".to_string(), "node-b".to_string()];
+        let check =
+            benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_060_000, None);
+
+        assert!(check.ready);
+        assert!(check.issues.is_empty());
+        assert_eq!(check.measurements[0].age_seconds, Some(60));
+    }
+
+    #[test]
+    fn declared_peer_freshness_limit_rejects_stale_measurement() {
+        let snapshot = peer_evidence_snapshot(vec![peer_measurement(
+            Some(0.42),
+            Some(21.8),
+            Some(1_700_000_000_000),
+        )]);
+        let nodes = vec!["node-a".to_string(), "node-b".to_string()];
+        let check =
+            benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_060_000, Some(30));
+
+        assert!(!check.ready);
+        assert!(check
+            .issues
+            .iter()
+            .any(|issue| issue.contains("exceeds declared freshness limit 30s")));
+        assert_eq!(check.measurements[0].age_seconds, Some(60));
+    }
+
+    #[test]
     fn cross_node_candidate_rejects_rtt_without_bandwidth() {
         let snapshot = peer_evidence_snapshot(vec![peer_measurement(
             Some(0.42),
@@ -4925,7 +5015,7 @@ mod tests {
             Some(1_700_000_000_000),
         )]);
         let nodes = vec!["node-a".to_string(), "node-b".to_string()];
-        let check = benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_010_000);
+        let check = benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_010_000, None);
 
         assert!(!check.ready);
         assert!(check
@@ -4949,7 +5039,7 @@ mod tests {
         legacy.bandwidth_reverse_gbps = None;
         let snapshot = peer_evidence_snapshot(vec![legacy]);
         let nodes = vec!["node-a".to_string(), "node-b".to_string()];
-        let check = benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_010_000);
+        let check = benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_010_000, None);
 
         assert!(!check.ready);
         assert!(check
@@ -4970,7 +5060,7 @@ mod tests {
         tampered.bandwidth_gbps = Some(100.0);
         let snapshot = peer_evidence_snapshot(vec![tampered]);
         let nodes = vec!["node-a".to_string(), "node-b".to_string()];
-        let check = benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_010_000);
+        let check = benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_010_000, None);
 
         assert!(!check.ready);
         assert!(check
@@ -4987,7 +5077,7 @@ mod tests {
         invalid.bandwidth_gbps = Some(0.0);
         let snapshot = peer_evidence_snapshot(vec![invalid]);
         let nodes = vec!["node-a".to_string(), "node-b".to_string()];
-        let check = benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_010_000);
+        let check = benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_010_000, None);
 
         assert!(!check.ready);
         assert!(check
@@ -5105,6 +5195,7 @@ mod tests {
             startup_timeout_ms: baseline.request.config.startup_timeout_ms,
             runs_per_candidate: 1,
             listen_port: baseline.request.executable.service.port,
+            max_peer_probe_age_seconds: None,
             candidates: vec![
                 BenchmarkExecutionCandidate {
                     name: "baseline".into(),
@@ -5262,6 +5353,7 @@ mod tests {
             startup_timeout_ms: default_benchmark_startup_timeout_ms(),
             runs_per_candidate: 1,
             listen_port: BENCHMARK_LISTEN_PORT,
+            max_peer_probe_age_seconds: None,
             candidates: vec![BenchmarkExecutionCandidate {
                 name: "meshfit".into(),
                 plan_id: "plan-test".into(),
