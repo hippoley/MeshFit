@@ -2104,24 +2104,23 @@ fn inspect_benchmark_run_one_plan(
 
 fn validate_existing_candidate_bundle(
     bundle_path: &Path,
-    expected_plan_id: &str,
+    candidate: &BenchmarkExecutionCandidate,
+    expected_hardware: &HardwareIdentity,
+    expected_model: &ModelArtifactIdentity,
+    expected_listen_port: u16,
 ) -> Result<(), String> {
     let raw = fs::read_to_string(bundle_path)
         .map_err(|e| format!("read existing bundle {}: {e}", bundle_path.display()))?;
     let bundle: BenchmarkBundle = serde_yaml::from_str(&raw)
         .map_err(|e| format!("parse existing bundle {}: {e}", bundle_path.display()))?;
-    bundle
-        .validate()
-        .map_err(|e| format!("invalid existing bundle {}: {e}", bundle_path.display()))?;
-    if bundle.request.executable.source_plan_id != expected_plan_id {
-        return Err(format!(
-            "existing bundle '{}' belongs to plan '{}' instead of expected plan '{}'",
-            bundle_path.display(),
-            bundle.request.executable.source_plan_id,
-            expected_plan_id
-        ));
-    }
-    Ok(())
+    validate_benchmark_bundle_for_candidate(
+        &bundle,
+        candidate,
+        expected_hardware,
+        expected_model,
+        expected_listen_port,
+    )
+    .map_err(|e| format!("invalid existing bundle {}: {e}", bundle_path.display()))
 }
 
 fn plan_benchmark_candidate_runs(
@@ -2157,6 +2156,15 @@ fn plan_benchmark_candidate_runs(
         model_path_override,
         true,
     )?;
+    let resume_contract = if resume {
+        Some((
+            load_expected_benchmark_hardware(kit_dir, &kit, &candidate.benchmark_host)?,
+            load_expected_benchmark_model(kit_dir, &kit)?,
+        ))
+    } else {
+        None
+    };
+
     let mut existing_valid_runs = Vec::new();
     let mut pending_runs = Vec::new();
 
@@ -2172,7 +2180,16 @@ fn plan_benchmark_candidate_runs(
             continue;
         }
         if resume {
-            validate_existing_candidate_bundle(&bundle_path, &candidate.plan_id)?;
+            let (expected_hardware, expected_model) = resume_contract
+                .as_ref()
+                .ok_or_else(|| "resume evidence contract is unavailable".to_string())?;
+            validate_existing_candidate_bundle(
+                &bundle_path,
+                candidate,
+                expected_hardware,
+                expected_model,
+                kit.listen_port,
+            )?;
             existing_valid_runs.push(run_number);
             continue;
         }
@@ -2892,6 +2909,89 @@ fn inspect_benchmark_preflight(
     })
 }
 
+fn load_expected_benchmark_hardware(
+    kit_dir: &Path,
+    kit: &BenchmarkExecutionKit,
+    benchmark_host: &str,
+) -> Result<HardwareIdentity, String> {
+    let snapshot_path = kit_dir.join(&kit.snapshot);
+    let raw = fs::read_to_string(&snapshot_path)
+        .map_err(|e| format!("read {}: {e}", snapshot_path.display()))?;
+    let snapshot: InfrastructureSnapshot = serde_yaml::from_str(&raw)
+        .map_err(|e| format!("parse {}: {e}", snapshot_path.display()))?;
+    snapshot
+        .hardware_identities
+        .get(benchmark_host)
+        .cloned()
+        .ok_or_else(|| {
+            format!("snapshot has no hardware identity for benchmark host '{benchmark_host}'")
+        })
+}
+
+fn load_expected_benchmark_model(
+    kit_dir: &Path,
+    kit: &BenchmarkExecutionKit,
+) -> Result<ModelArtifactIdentity, String> {
+    let identity_path = kit_dir.join(&kit.model_identity);
+    let raw = fs::read_to_string(&identity_path)
+        .map_err(|e| format!("read {}: {e}", identity_path.display()))?;
+    serde_yaml::from_str(&raw).map_err(|e| format!("parse {}: {e}", identity_path.display()))
+}
+
+fn validate_benchmark_bundle_for_candidate(
+    bundle: &BenchmarkBundle,
+    candidate: &BenchmarkExecutionCandidate,
+    expected_hardware: &HardwareIdentity,
+    expected_model: &ModelArtifactIdentity,
+    expected_listen_port: u16,
+) -> Result<(), String> {
+    bundle.validate()?;
+
+    if bundle.request.executable.source_plan_id != candidate.plan_id {
+        return Err(format!(
+            "source plan '{}' does not match candidate plan '{}'",
+            bundle.request.executable.source_plan_id, candidate.plan_id
+        ));
+    }
+    if bundle.request.executable.working_node != candidate.benchmark_host {
+        return Err(format!(
+            "bundle working node '{}' does not match candidate benchmark host '{}'",
+            bundle.request.executable.working_node, candidate.benchmark_host
+        ));
+    }
+    if bundle.request.executable.runtime != candidate.runtime {
+        return Err(format!(
+            "bundle runtime '{}' does not match candidate runtime '{}'",
+            bundle.request.executable.runtime, candidate.runtime
+        ));
+    }
+    if bundle.request.executable.service.port != expected_listen_port {
+        return Err(format!(
+            "bundle service port {} does not match kit listen port {}",
+            bundle.request.executable.service.port, expected_listen_port
+        ));
+    }
+    if &bundle.request.identity.model != expected_model {
+        return Err(
+            "bundle model identity does not match materialized kit model identity".to_string(),
+        );
+    }
+
+    let attestation = benchmark_hardware_profile_attestation(
+        expected_hardware,
+        &bundle.request.identity.hardware,
+    );
+    if !attestation.matches {
+        return Err(format!(
+            "bundle hardware identity does not match snapshot benchmark host '{}': {}",
+            candidate.benchmark_host,
+            attestation.issues.join("; ")
+        ));
+    }
+
+    Ok(())
+}
+
 fn inspect_benchmark_worklist(
     kit_dir: &Path,
     host_filter: Option<&str>,
@@ -2917,11 +3017,22 @@ fn inspect_benchmark_worklist(
                 )
             })?;
 
+        let expected_hardware =
+            load_expected_benchmark_hardware(kit_dir, &kit, &candidate.benchmark_host)?;
+        let expected_model = load_expected_benchmark_model(kit_dir, &kit)?;
+
         for (index, bundle_rel) in comparison.bundles.iter().enumerate() {
             let run_number = index + 1;
             let bundle_path = kit_dir.join(bundle_rel);
             let lock_path = PathBuf::from(format!("{}.lock", bundle_path.display()));
-            let (state, error) = inspect_work_slot(&bundle_path, &candidate.plan_id, &lock_path);
+            let (state, error) = inspect_work_slot(
+                &bundle_path,
+                candidate,
+                &expected_hardware,
+                &expected_model,
+                kit.listen_port,
+                &lock_path,
+            );
 
             let host = hosts
                 .entry(candidate.benchmark_host.clone())
@@ -2996,7 +3107,10 @@ fn inspect_benchmark_worklist(
 
 fn inspect_work_slot(
     bundle_path: &Path,
-    expected_plan_id: &str,
+    candidate: &BenchmarkExecutionCandidate,
+    expected_hardware: &HardwareIdentity,
+    expected_model: &ModelArtifactIdentity,
+    expected_listen_port: u16,
     lock_path: &Path,
 ) -> (&'static str, Option<String>) {
     if bundle_path.is_file() {
@@ -3008,17 +3122,14 @@ fn inspect_work_slot(
             Ok(bundle) => bundle,
             Err(error) => return ("invalid", Some(format!("parse failed: {error}"))),
         };
-        if let Err(error) = bundle.validate() {
+        if let Err(error) = validate_benchmark_bundle_for_candidate(
+            &bundle,
+            candidate,
+            expected_hardware,
+            expected_model,
+            expected_listen_port,
+        ) {
             return ("invalid", Some(error));
-        }
-        if bundle.request.executable.source_plan_id != expected_plan_id {
-            return (
-                "invalid",
-                Some(format!(
-                    "source plan '{}' does not match candidate plan '{}'",
-                    bundle.request.executable.source_plan_id, expected_plan_id
-                )),
-            );
         }
         return ("valid", None);
     }
@@ -3087,6 +3198,10 @@ fn inspect_benchmark_kit(kit_dir: &Path) -> Result<BenchmarkKitStatus, String> {
             continue;
         };
 
+        let expected_hardware =
+            load_expected_benchmark_hardware(kit_dir, &kit, &candidate.benchmark_host)?;
+        let expected_model = load_expected_benchmark_model(kit_dir, &kit)?;
+
         expected_bundles += comparison.bundles.len();
         let mut valid_runs = 0_usize;
         let mut missing_bundles = Vec::new();
@@ -3121,21 +3236,16 @@ fn inspect_benchmark_kit(kit_dir: &Path) -> Result<BenchmarkKitStatus, String> {
                 }
             };
 
-            if let Err(error) = bundle.validate() {
+            if let Err(error) = validate_benchmark_bundle_for_candidate(
+                &bundle,
+                candidate,
+                &expected_hardware,
+                &expected_model,
+                kit.listen_port,
+            ) {
                 invalid_bundles.push(BenchmarkInvalidBundle {
                     path: bundle_rel.clone(),
                     error,
-                });
-                continue;
-            }
-
-            if bundle.request.executable.source_plan_id != candidate.plan_id {
-                invalid_bundles.push(BenchmarkInvalidBundle {
-                    path: bundle_rel.clone(),
-                    error: format!(
-                        "source plan '{}' does not match candidate plan '{}'",
-                        bundle.request.executable.source_plan_id, candidate.plan_id
-                    ),
                 });
                 continue;
             }
