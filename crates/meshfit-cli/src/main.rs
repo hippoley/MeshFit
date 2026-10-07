@@ -3292,6 +3292,11 @@ fn render_benchmark_runbook(kit: &BenchmarkExecutionKit) -> String {
         kit.runs_per_candidate,
         kit.listen_port
     ));
+    if let Some(max_age_seconds) = kit.max_peer_probe_age_seconds {
+        out.push_str(&format!(
+            "**Max peer probe age:** {max_age_seconds} seconds\n\n"
+        ));
+    }
     out.push_str(&format!(
         "**Model source recorded by coordinator:** `{}`  \n",
         kit.model_path
@@ -3319,7 +3324,7 @@ fn render_benchmark_runbook(kit: &BenchmarkExecutionKit) -> String {
 
     out.push_str("## Real-host execution\n\n");
     out.push_str(
-        "Use one host-level command per machine. `MESHFIT_NODE_ID` selects the logical host, but it is not trusted as physical proof: preflight also compares this machine's discovered hardware profile with the snapshot identity for that host. If the immutable model lives at a different local path, set `MESHFIT_MODEL_PATH`; MeshFit verifies its SHA-256 before execution.\n\n",
+        "Use one host-level command per machine. `MESHFIT_NODE_ID` selects the logical host, but it is not trusted as physical proof: preflight also compares this machine's discovered hardware profile with the snapshot identity for that host. Cross-node candidates also enforce the kit's declared peer-probe freshness policy when one is configured. If the immutable model lives at a different local path, set `MESHFIT_MODEL_PATH`; MeshFit verifies its SHA-256 before execution.\n\n",
     );
 
     for (host, candidates) in &by_host {
