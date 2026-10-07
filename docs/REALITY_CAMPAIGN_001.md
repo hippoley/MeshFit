@@ -611,11 +611,11 @@ curl --fail --silent --show-error \
 
 # On each host, using the peer private IP recorded above:
 ping -c 1 <peer-private-ip>
-nc -vz <peer-private-ip> 5201
+timeout 5 bash -c 'cat < /dev/null > /dev/tcp/<peer-private-ip>/5201'
 ```
 
 Start the bound iperf3 servers described in the main runbook before the
-`nc -vz` check. If the private path is not reachable, do not silently switch
+TCP/5201 check. If the private path is not reachable, do not silently switch
 the experiment to public Internet addresses: that would change the network tier
 being measured. Stop, record the provider/network blocker, and choose a provider
 or topology whose intended experiment path can be demonstrated.
