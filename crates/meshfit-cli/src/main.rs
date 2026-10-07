@@ -41,6 +41,20 @@ fn parse_benchmark_listen_port(args: &[String]) -> Result<u16, String> {
     Ok(port)
 }
 
+fn parse_max_peer_probe_age_seconds(args: &[String]) -> Result<Option<u64>, String> {
+    option_value(args, "--max-peer-probe-age-seconds")?
+        .map(|value| {
+            let seconds = value.parse::<u64>().map_err(|e| {
+                format!("invalid --max-peer-probe-age-seconds '{value}': {e}")
+            })?;
+            if seconds == 0 {
+                return Err("--max-peer-probe-age-seconds must be greater than zero".to_string());
+            }
+            Ok(seconds)
+        })
+        .transpose()
+}
+
 #[derive(Debug, Deserialize)]
 struct BenchmarkComparisonManifest {
     benchmark_id: String,
@@ -89,6 +103,8 @@ struct BenchmarkExecutionKit {
     runs_per_candidate: u32,
     #[serde(default = "default_benchmark_listen_port")]
     listen_port: u16,
+    #[serde(default)]
+    max_peer_probe_age_seconds: Option<u64>,
     candidates: Vec<BenchmarkExecutionCandidate>,
     comparison_manifest: BenchmarkExecutionComparison,
     warnings: Vec<String>,
@@ -364,6 +380,7 @@ struct BenchmarkPreflight {
     listen_port: u16,
     listen_port_available: bool,
     peer_measurements_ready: bool,
+    max_peer_probe_age_seconds: Option<u64>,
     peer_measurements: Vec<BenchmarkPeerMeasurementStatus>,
     existing_bundles: Vec<String>,
     issues: Vec<String>,
@@ -568,6 +585,7 @@ fn benchmark_peer_evidence_check_at(
     snapshot: &InfrastructureSnapshot,
     nodes: &[String],
     now_unix_ms: u128,
+    max_age_seconds: Option<u64>,
 ) -> BenchmarkPeerEvidenceCheck {
     if nodes.len() <= 1 {
         return BenchmarkPeerEvidenceCheck {
@@ -627,6 +645,14 @@ fn benchmark_peer_evidence_check_at(
                     pair_issues.push(format!(
                         "{from_node}<->{to_node} peer evidence has no capture timestamp"
                     ));
+                }
+                if let (Some(limit), Some(age)) = (max_age_seconds, age_seconds) {
+                    if age > limit as u128 {
+                        pair_issues.push(format!(
+                            "{from_node}<->{to_node} peer measurement age {}s exceeds declared freshness limit {}s",
+                            age, limit
+                        ));
+                    }
                 }
                 (
                     measurement.source.clone(),
@@ -702,7 +728,12 @@ fn inspect_benchmark_peer_evidence(
         .ok()
         .map(|duration| duration.as_millis())
         .unwrap_or(0);
-    benchmark_peer_evidence_check_at(&snapshot, &candidate.nodes, now_unix_ms)
+    benchmark_peer_evidence_check_at(
+        &snapshot,
+        &candidate.nodes,
+        now_unix_ms,
+        kit.max_peer_probe_age_seconds,
+    )
 }
 
 fn benchmark_model_path_override(args: &[String]) -> Result<Option<String>, String> {
@@ -972,7 +1003,7 @@ fn run() -> Result<(), String> {
         }
         "benchmark-kit" => {
             let snapshot_path = args.get(2).ok_or_else(|| {
-                "usage: meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--listen-port N] [--require-ready] [--write-dir DIR]"
+                "usage: meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--listen-port N] [--max-peer-probe-age-seconds N] [--require-ready] [--write-dir DIR]"
                     .to_string()
             })?;
             let target_path = args
@@ -988,6 +1019,7 @@ fn run() -> Result<(), String> {
                 .get(6)
                 .ok_or_else(|| "missing model-identity.yaml".to_string())?;
             let listen_port = parse_benchmark_listen_port(&args[7..])?;
+            let max_peer_probe_age_seconds = parse_max_peer_probe_age_seconds(&args[7..])?;
 
             let model_identity_raw = fs::read_to_string(model_identity_path)
                 .map_err(|e| format!("read {model_identity_path}: {e}"))?;
@@ -1132,6 +1164,7 @@ fn run() -> Result<(), String> {
                 measured_requests_per_run,
                 runs_per_candidate,
                 listen_port,
+                max_peer_probe_age_seconds,
                 candidates: execution_candidates,
                 comparison_manifest: BenchmarkExecutionComparison {
                     benchmark_id,
@@ -2862,6 +2895,7 @@ fn inspect_benchmark_preflight(
         listen_port: kit.listen_port,
         listen_port_available,
         peer_measurements_ready: peer_evidence.ready,
+        max_peer_probe_age_seconds: kit.max_peer_probe_age_seconds,
         peer_measurements: peer_evidence.measurements,
         existing_bundles,
         issues,
@@ -3572,7 +3606,7 @@ fn print_prediction(prediction: &Prediction) {
 
 fn print_help() {
     println!(
-        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit calibrate-performance <bundle.yaml> [bundle.yaml ...] [--predicted-p95-ttft-ms N] [--predicted-decode-tps N]\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--listen-port N] [--require-ready] [--write-dir DIR]\n  meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--host NODE] [--model-path PATH] [--dry-run] [--overwrite]\n  meshfit benchmark-run-candidate <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  meshfit benchmark-host-check <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--require-ready]\n  meshfit benchmark-run-host <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  env MESHFIT_MODEL_PATH may provide the host-local model path when --model-path is omitted\n  meshfit benchmark-worklist <kit-dir> [--host NODE | --current-host] [--pending-only]\n  meshfit benchmark-status <kit-dir> [--require-complete]\n  meshfit benchmark-finalize <kit-dir> [--markdown] [--require-publishable]\n  meshfit benchmark-proof <kit-dir> [--require-publishable]\n  meshfit benchmark-preflight <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--allow-existing] [--require-ready]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
+        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit calibrate-performance <bundle.yaml> [bundle.yaml ...] [--predicted-p95-ttft-ms N] [--predicted-decode-tps N]\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--listen-port N] [--max-peer-probe-age-seconds N] [--require-ready] [--write-dir DIR]\n  meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--host NODE] [--model-path PATH] [--dry-run] [--overwrite]\n  meshfit benchmark-run-candidate <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  meshfit benchmark-host-check <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--require-ready]\n  meshfit benchmark-run-host <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  env MESHFIT_MODEL_PATH may provide the host-local model path when --model-path is omitted\n  meshfit benchmark-worklist <kit-dir> [--host NODE | --current-host] [--pending-only]\n  meshfit benchmark-status <kit-dir> [--require-complete]\n  meshfit benchmark-finalize <kit-dir> [--markdown] [--require-publishable]\n  meshfit benchmark-proof <kit-dir> [--require-publishable]\n  meshfit benchmark-preflight <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--allow-existing] [--require-ready]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
     );
 }
 
@@ -3999,6 +4033,7 @@ mod tests {
             measured_requests_per_run: 10,
             runs_per_candidate: 1,
             listen_port: BENCHMARK_LISTEN_PORT,
+            max_peer_probe_age_seconds: None,
             candidates: vec![BenchmarkExecutionCandidate {
                 name: "meshfit".into(),
                 plan_id: "plan-test".into(),
