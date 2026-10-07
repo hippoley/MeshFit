@@ -1378,11 +1378,16 @@ fn run() -> Result<(), String> {
                                 .iter()
                                 .map(|bundle| {
                                     format!(
-                                        "meshfit benchmark-auto {} {} --concurrency {} --measured-requests {} > {}",
+                                        "meshfit benchmark-auto {} {} --concurrency {} --measured-requests {} --prompt {} --max-tokens {} --warmup-requests {} --request-timeout-ms {} --startup-timeout-ms {} > {}",
                                         executable_path,
                                         model_identity_path,
                                         concurrency,
                                         measured_requests_per_run,
+                                        shell_quote(&prompt),
+                                        max_tokens,
+                                        warmup_requests,
+                                        request_timeout_ms,
+                                        startup_timeout_ms,
                                         bundle
                                     )
                                 })
@@ -2765,12 +2770,12 @@ fn execute_benchmark_run_one_prevalidated(
         model_identity,
         kit.concurrency,
         BenchmarkConfig {
-            prompt: "Explain MeshFit in one sentence.".to_string(),
-            max_tokens: 64,
-            warmup_requests: 1,
+            prompt: kit.prompt.clone(),
+            max_tokens: kit.max_tokens,
+            warmup_requests: kit.warmup_requests,
             measured_requests: kit.measured_requests_per_run,
-            request_timeout_ms: 120_000,
-            startup_timeout_ms: 300_000,
+            request_timeout_ms: kit.request_timeout_ms,
+            startup_timeout_ms: kit.startup_timeout_ms,
         },
     )?;
     let bundle = run_local_benchmark(request)?;
@@ -3658,6 +3663,8 @@ fn materialize_benchmark_kit(
         .map_err(|e| format!("write target input: {e}"))?;
     fs::write(inputs_dir.join("model-identity.yaml"), model_identity_raw)
         .map_err(|e| format!("write model identity input: {e}"))?;
+    fs::write(inputs_dir.join("prompt.txt"), &kit.prompt)
+        .map_err(|e| format!("write benchmark prompt input: {e}"))?;
 
     let mut localized = kit.clone();
     localized.snapshot = "inputs/snapshot.yaml".to_string();
@@ -3689,11 +3696,16 @@ fn materialize_benchmark_kit(
                 .map(|run| {
                     let bundle = format!("{}/run-{run:02}.yaml", candidate.result_dir);
                     format!(
-                        "meshfit benchmark-auto {} {} --concurrency {} --measured-requests {} > {}",
+                        "meshfit benchmark-auto {} {} --concurrency {} --measured-requests {} --prompt-file {} --max-tokens {} --warmup-requests {} --request-timeout-ms {} --startup-timeout-ms {} > {}",
                         shell_quote(&candidate.executable_path),
                         shell_quote(&localized.model_identity),
                         localized.concurrency,
                         localized.measured_requests_per_run,
+                        shell_quote("inputs/prompt.txt"),
+                        localized.max_tokens,
+                        localized.warmup_requests,
+                        localized.request_timeout_ms,
+                        localized.startup_timeout_ms,
                         shell_quote(&bundle),
                     )
                 })
@@ -3743,16 +3755,24 @@ fn render_benchmark_runbook(kit: &BenchmarkExecutionKit) -> String {
     let mut out = String::new();
     out.push_str("# MeshFit Benchmark 001 Runbook\n\n");
     out.push_str(&format!(
-        "**Ready:** {}  \n**Concurrency:** {}  \n**Measured requests/run:** {}  \n**Runs/candidate:** {}  \n**Listen port:** {}\n\n",
+        "**Ready:** {}  \n**Concurrency:** {}  \n**Measured requests/run:** {}  \n**Warmup requests:** {}  \n**Max output tokens:** {}  \n**Request timeout:** {} ms  \n**Startup timeout:** {} ms  \n**Runs/candidate:** {}  \n**Listen port:** {}\n\n",
         kit.ready,
         kit.concurrency,
         kit.measured_requests_per_run,
+        kit.warmup_requests,
+        kit.max_tokens,
+        kit.request_timeout_ms,
+        kit.startup_timeout_ms,
         kit.runs_per_candidate,
         kit.listen_port
     ));
     out.push_str(&format!(
         "**Model source recorded by coordinator:** `{}`  \n",
         kit.model_path
+    ));
+    out.push_str(&format!(
+        "**Benchmark prompt bytes:** {}  \n**Materialized prompt:** `inputs/prompt.txt`  \n\n",
+        kit.prompt.len()
     ));
     out.push_str(
         "Run commands from this materialized directory. Each real machine should execute only the candidates assigned to its logical benchmark host.\n\n",
