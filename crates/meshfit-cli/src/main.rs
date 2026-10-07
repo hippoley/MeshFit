@@ -4998,8 +4998,7 @@ mod tests {
             Some(1_700_000_000_000),
         )]);
         let nodes = vec!["node-a".to_string(), "node-b".to_string()];
-        let check =
-            benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_060_000, None);
+        let check = benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_060_000, None);
 
         assert!(check.ready);
         assert!(check.issues.is_empty());
