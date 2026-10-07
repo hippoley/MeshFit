@@ -26,8 +26,8 @@ jobs:
       - run: grep -q 'node-ci' /tmp/meshfit-discover-node-id.yaml
       - run: cargo run -p meshfit -- runtimes
       - run: cargo run -p meshfit -- probe 127.0.0.1 > /tmp/meshfit-peer-probe-provenance.yaml
-      - run: grep -q 'source: meshfit-peer-probe' /tmp/meshfit-peer-probe-provenance.yaml
-      - run: grep -Eq 'captured_at_unix_ms: [0-9]+' /tmp/meshfit-peer-probe-provenance.yaml
+      - run: 'grep -q "source: meshfit-peer-probe" /tmp/meshfit-peer-probe-provenance.yaml'
+      - run: 'grep -Eq "captured_at_unix_ms: [0-9]+" /tmp/meshfit-peer-probe-provenance.yaml'
       - run: cargo run -p meshfit -- inspect-model examples/model-artifact-demo.bin demo gguf q4_k_m test
       - run: cargo run -p meshfit -- inspect-model examples/model-artifact-demo.bin qwen-72b-class-q4 gguf q4_k_m test > /tmp/meshfit-model-identity.yaml
       - run: cargo run -p meshfit -- snapshot examples/discovery-node-a.yaml examples/discovery-node-b.yaml examples/probe-a-b.yaml > /tmp/meshfit-snapshot.yaml
