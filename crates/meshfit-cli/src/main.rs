@@ -3452,7 +3452,6 @@ fn inspect_benchmark_worklist(
     pending_only: bool,
 ) -> Result<BenchmarkWorklist, String> {
     let kit = load_benchmark_execution_kit(kit_dir)?;
-    let expected_request = load_expected_benchmark_request_contract(kit_dir, &kit)?;
     let mut hosts = std::collections::BTreeMap::<String, BenchmarkHostWork>::new();
 
     for candidate in &kit.candidates {
@@ -3477,6 +3476,7 @@ fn inspect_benchmark_worklist(
         let expected_model = load_expected_benchmark_model(kit_dir, &kit)?;
         let expected_local_topology =
             load_expected_benchmark_local_topology(kit_dir, &kit, &candidate.benchmark_host)?;
+        let expected_request = load_expected_benchmark_request_contract(kit_dir, &kit)?;
 
         for (index, bundle_rel) in comparison.bundles.iter().enumerate() {
             let run_number = index + 1;
@@ -4590,7 +4590,14 @@ mod tests {
             serde_yaml::to_string(&snapshot).unwrap(),
         )
         .unwrap();
-        fs::write(dir.join("inputs/target.yaml"), "target: fixture\n").unwrap();
+        let mut target: PlacementTargetIR =
+            serde_yaml::from_str(include_str!("../../../examples/placement-target.yaml")).unwrap();
+        target.workload.context_tokens = baseline.request.context_tokens;
+        fs::write(
+            dir.join("inputs/target.yaml"),
+            serde_yaml::to_string(&target).unwrap(),
+        )
+        .unwrap();
         fs::write(
             dir.join("inputs/model-identity.yaml"),
             serde_yaml::to_string(&expected_model).unwrap(),
@@ -4839,6 +4846,42 @@ mod tests {
             serde_yaml::to_string(&status_expected_model()).unwrap(),
         )
         .unwrap();
+
+        let target: PlacementTargetIR =
+            serde_yaml::from_str(include_str!("../../../examples/placement-target.yaml")).unwrap();
+        fs::write(
+            inputs.join("target.yaml"),
+            serde_yaml::to_string(&target).unwrap(),
+        )
+        .unwrap();
+    }
+
+    fn expected_request_from_bundle(
+        bundle: &BenchmarkBundle,
+    ) -> BenchmarkExpectedRequestContract {
+        BenchmarkExpectedRequestContract {
+            context_tokens: bundle.request.context_tokens,
+            concurrency: bundle.request.concurrency,
+            config: bundle.request.config.clone(),
+        }
+    }
+
+    fn status_expected_request() -> BenchmarkExpectedRequestContract {
+        let target: PlacementTargetIR =
+            serde_yaml::from_str(include_str!("../../../examples/placement-target.yaml")).unwrap();
+        let kit = status_test_kit();
+        BenchmarkExpectedRequestContract {
+            context_tokens: target.workload.context_tokens,
+            concurrency: kit.concurrency,
+            config: BenchmarkConfig {
+                prompt: kit.prompt,
+                max_tokens: kit.max_tokens,
+                warmup_requests: kit.warmup_requests,
+                measured_requests: kit.measured_requests_per_run,
+                request_timeout_ms: kit.request_timeout_ms,
+                startup_timeout_ms: kit.startup_timeout_ms,
+            },
+        }
     }
 
     fn example_bundle_contract() -> (
@@ -4949,6 +4992,26 @@ mod tests {
         .contains("bundle local topology"));
     }
 
+    #[test]
+    fn persisted_request_contract_rejects_prompt_and_output_drift() {
+        let (bundle, _, _, _) = example_bundle_contract();
+        let expected = expected_request_from_bundle(&bundle);
+
+        validate_benchmark_request_contract(&bundle, &expected).unwrap();
+
+        let mut wrong_prompt = bundle.clone();
+        wrong_prompt.request.config.prompt.push_str(" tampered");
+        assert!(validate_benchmark_request_contract(&wrong_prompt, &expected)
+            .unwrap_err()
+            .contains("prompt"));
+
+        let mut wrong_max_tokens = bundle;
+        wrong_max_tokens.request.config.max_tokens += 1;
+        assert!(validate_benchmark_request_contract(&wrong_max_tokens, &expected)
+            .unwrap_err()
+            .contains("max_tokens"));
+    }
+
     fn status_test_dir(label: &str) -> PathBuf {
         use std::time::{SystemTime, UNIX_EPOCH};
 
@@ -5030,6 +5093,7 @@ mod tests {
             &status_expected_hardware(),
             &status_expected_model(),
             &[],
+            &status_expected_request(),
             kit.listen_port,
         )
         .unwrap_err();
@@ -5279,6 +5343,7 @@ mod tests {
         let candidate = &kit.candidates[0];
         let expected_hardware = status_expected_hardware();
         let expected_model = status_expected_model();
+        let expected_request = status_expected_request();
 
         assert_eq!(
             inspect_work_slot(
@@ -5300,6 +5365,7 @@ mod tests {
             &expected_hardware,
             &expected_model,
             &[],
+            &expected_request,
             kit.listen_port,
             &lock_path,
         );
@@ -5314,6 +5380,7 @@ mod tests {
             &expected_hardware,
             &expected_model,
             &[],
+            &expected_request,
             kit.listen_port,
             &lock_path,
         );
