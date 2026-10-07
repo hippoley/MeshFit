@@ -26,7 +26,10 @@ Compare at least:
 
 Run each candidate repeatedly. Keep the raw `BenchmarkBundle` files. Every
 publishable bundle in one comparison must come from the same MeshFit source
-commit; mixed builds across hosts or repeated runs are rejected.
+commit; mixed builds across hosts or repeated runs are rejected. Repeated runs
+within one candidate must also preserve one canonical `ExecutionIdentity`
+fingerprint, so runtime-version, hardware/driver, topology, model, or placement
+drift starts a new experiment instead of being aggregated into the old one.
 
 ## Primary number
 
