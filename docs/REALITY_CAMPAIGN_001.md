@@ -490,8 +490,11 @@ provisioning.
 ### C. Launch exactly the frozen provider shape
 
 Create or select a Lambda firewall ruleset in the chosen region before launch.
-It must preserve the SSH access you need and allow TCP/5201 only from the
-experiment peers. Export the chosen region, SSH key name, and ruleset ID:
+At this point the peer instance addresses do not exist yet, so the pre-launch
+ruleset should preserve only the SSH access you actually need; do not pre-open
+TCP/5201 broadly just to make launch convenient. Attach this same-region ruleset
+to the campaign instances, then tighten/update it after the provider assigns the
+real peer addresses. Export the chosen region, SSH key name, and ruleset ID:
 
 ```bash
 export MESHFIT_LAMBDA_REGION=<region-from-the-live-intersection>
@@ -574,13 +577,17 @@ campaign decision.
 
 ### D. Make TCP/5201 an explicit provider firewall gate
 
-Lambda ODC does not open arbitrary inbound TCP ports by default. Before peer
-measurement, attach a Lambda firewall ruleset that permits TCP/5201 only from
-the experiment peers. Keep SSH scoped as narrowly as practical and do not expose
+Lambda ODC does not open arbitrary inbound TCP ports by default. After all three
+instances are active, first capture their provider metadata and assigned
+addresses. Then update the already-attached same-region firewall ruleset so
+TCP/5201 is allowed only from the actual experiment peer source networks needed
+for the measured path. Keep SSH scoped as narrowly as practical and do not expose
 iperf3 to `0.0.0.0/0`.
 
-Record the firewall ruleset ID and the source networks used in the campaign
-evidence directory.
+The Lambda API supports PATCH updates to a per-instance firewall ruleset, so this
+post-launch tightening does not require replacing the instances. Retain the
+ruleset response/receipt together with the exact source networks used by the
+campaign.
 
 The ODC API exposes both public and private instance addresses, but the campaign
 must not assume that a returned private address proves the required peer path.
