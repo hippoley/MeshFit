@@ -223,22 +223,40 @@ probes:
     kind: ethernet
 ```
 
-Then materialize exactly one coordinator snapshot:
+Then materialize exactly one coordinator snapshot and capture the structural
+placement report **before any performance benchmark runs**:
 
 ```bash
 meshfit snapshot-manifest snapshot-manifest.yaml > cluster.yaml
+meshfit plan-snapshot cluster.yaml target.yaml | tee placement-report.txt
+```
+
+`plan-snapshot` is audit output, not an automatic final selector. At this point,
+use the same MeshFit decision policy being evaluated by the campaign to choose
+the exact plan ID. Freeze that decision before looking at benchmark performance:
+
+```bash
+export MESHFIT_PLAN_ID='<exact-pre-benchmark-meshfit-plan-id>'
+printf '%s\n' "$MESHFIT_PLAN_ID" > meshfit-plan-id.txt
 
 meshfit benchmark-candidates \
   cluster.yaml \
   target.yaml \
-  <meshfit-plan-id> \
-  --require-distinct
+  "$MESHFIT_PLAN_ID" \
+  --require-distinct \
+  | tee benchmark-candidates.yaml
 ```
 
-Keep `snapshot-manifest.yaml` with the campaign inputs so the node/probe binding
-is explicit and replayable. The campaign should not proceed unless the selected
-MeshFit plan and baseline plans are genuinely distinct and all compute-ranked
-baselines have non-zero observed proxy scores.
+Do not change `meshfit-plan-id.txt` after any candidate has been benchmarked.
+Changing the MeshFit candidate after seeing performance results is a new
+experiment, not a continuation of this campaign.
+
+Keep `snapshot-manifest.yaml`, `placement-report.txt`,
+`meshfit-plan-id.txt`, and `benchmark-candidates.yaml` with the campaign
+inputs so the topology binding and pre-benchmark decision are replayable. The
+campaign should not proceed unless the selected MeshFit plan and baseline plans
+are genuinely distinct and all compute-ranked baselines have non-zero observed
+proxy scores.
 
 ### 5. Inspect and freeze the real model identity
 
@@ -263,10 +281,12 @@ Create the kit on the coordinator. Pick an unused service port explicitly so the
 runtime port becomes part of the frozen execution identity:
 
 ```bash
+export MESHFIT_PLAN_ID="$(cat meshfit-plan-id.txt)"
+
 meshfit benchmark-kit \
   cluster.yaml \
   target.yaml \
-  <meshfit-plan-id> \
+  "$MESHFIT_PLAN_ID" \
   /models/model.gguf \
   model-identity.yaml \
   --listen-port 18181 \
@@ -453,6 +473,7 @@ following occurs:
 - the selected runtime is unavailable on its assigned host;
 - the service port is occupied;
 - candidate plans collapse to the same effective placement;
+- the frozen `meshfit-plan-id.txt` is changed after benchmark execution begins;
 - any persisted bundle fails re-attestation;
 - repeated evidence is incomplete or non-publishable.
 
