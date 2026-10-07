@@ -15,6 +15,10 @@ pub struct PeerProbeResult {
     #[serde(default)]
     pub bandwidth_gbps: Option<f64>,
     #[serde(default)]
+    pub bandwidth_forward_gbps: Option<f64>,
+    #[serde(default)]
+    pub bandwidth_reverse_gbps: Option<f64>,
+    #[serde(default)]
     pub source: Option<String>,
     #[serde(default)]
     pub captured_at_unix_ms: Option<u128>,
@@ -55,6 +59,8 @@ pub fn probe_peer(peer: &str, measure_bandwidth: bool) -> PeerProbeResult {
         latency_ms: None,
         jitter_ms: None,
         bandwidth_gbps: None,
+        bandwidth_forward_gbps: None,
+        bandwidth_reverse_gbps: None,
         source: Some("meshfit-peer-probe".into()),
         captured_at_unix_ms,
         warnings: Vec::new(),
@@ -74,14 +80,35 @@ pub fn probe_peer(peer: &str, measure_bandwidth: bool) -> PeerProbeResult {
     }
 
     if measure_bandwidth {
-        match run_iperf3(peer) {
+        match run_iperf3(peer, false) {
             Ok(raw) => match parse_iperf3_json(&raw) {
-                Some(gbps) => result.bandwidth_gbps = Some(gbps),
+                Some(gbps) => result.bandwidth_forward_gbps = Some(gbps),
                 None => result
                     .warnings
-                    .push("iperf3 completed but throughput could not be parsed".into()),
+                    .push("forward iperf3 completed but throughput could not be parsed".into()),
             },
-            Err(reason) => result.warnings.push(reason),
+            Err(reason) => result.warnings.push(format!("forward {reason}")),
+        }
+
+        match run_iperf3(peer, true) {
+            Ok(raw) => match parse_iperf3_json(&raw) {
+                Some(gbps) => result.bandwidth_reverse_gbps = Some(gbps),
+                None => result
+                    .warnings
+                    .push("reverse iperf3 completed but throughput could not be parsed".into()),
+            },
+            Err(reason) => result.warnings.push(format!("reverse {reason}")),
+        }
+
+        result.bandwidth_gbps = conservative_bidirectional_bandwidth(
+            result.bandwidth_forward_gbps,
+            result.bandwidth_reverse_gbps,
+        );
+        if result.bandwidth_gbps.is_none() {
+            result.warnings.push(
+                "bidirectional bandwidth evidence incomplete; conservative effective bandwidth omitted"
+                    .into(),
+            );
         }
     }
 
@@ -101,9 +128,13 @@ fn run_ping(peer: &str) -> Result<String, String> {
     String::from_utf8(output.stdout).map_err(|e| format!("ping output is not UTF-8: {e}"))
 }
 
-fn run_iperf3(peer: &str) -> Result<String, String> {
-    let output = Command::new("iperf3")
-        .args(["-c", peer, "-J"])
+fn run_iperf3(peer: &str, reverse: bool) -> Result<String, String> {
+    let mut command = Command::new("iperf3");
+    command.args(["-c", peer, "-J"]);
+    if reverse {
+        command.arg("-R");
+    }
+    let output = command
         .output()
         .map_err(|e| format!("iperf3 unavailable: {e}"))?;
 
@@ -115,6 +146,13 @@ fn run_iperf3(peer: &str) -> Result<String, String> {
     }
 
     String::from_utf8(output.stdout).map_err(|e| format!("iperf3 output is not UTF-8: {e}"))
+}
+
+fn conservative_bidirectional_bandwidth(
+    forward_gbps: Option<f64>,
+    reverse_gbps: Option<f64>,
+) -> Option<f64> {
+    Some(forward_gbps?.min(reverse_gbps?))
 }
 
 pub fn parse_ping_summary(raw: &str) -> Option<(f64, f64)> {
@@ -170,6 +208,8 @@ mod tests {
             latency_ms: Some(0.42),
             jitter_ms: Some(0.03),
             bandwidth_gbps: Some(21.8),
+            bandwidth_forward_gbps: Some(24.1),
+            bandwidth_reverse_gbps: Some(21.8),
             source: Some("meshfit-peer-probe".into()),
             captured_at_unix_ms: Some(1_700_000_000_000),
             warnings: vec![],
@@ -183,6 +223,18 @@ mod tests {
         );
         assert_eq!(edge.bandwidth_gbps, Some(21.8));
         assert_eq!(edge.latency_ms, Some(0.42));
+    }
+
+    #[test]
+    fn uses_slower_direction_as_conservative_bandwidth() {
+        assert_eq!(
+            conservative_bidirectional_bandwidth(Some(24.1), Some(21.8)),
+            Some(21.8)
+        );
+        assert_eq!(
+            conservative_bidirectional_bandwidth(Some(24.1), None),
+            None
+        );
     }
 
     #[test]
