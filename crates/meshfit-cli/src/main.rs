@@ -10,7 +10,8 @@ use sha2::{Digest, Sha256};
 use meshfit_core::{
     calibrate_plan_memory, calibrate_plan_performance, compare_benchmarks, compile_plan,
     discover_local, discover_runtimes, estimate_plan_cost, inspect_model_artifact,
-    prepare_local_benchmark_request, probe_peer, run_local_benchmark, solve, BenchmarkBundle,
+    prepare_local_benchmark_request, probe_peer, recommend_probes, run_local_benchmark, solve,
+    BenchmarkBundle,
     BenchmarkCandidate, BenchmarkComparisonReport, BenchmarkComparisonRequest, BenchmarkConfig,
     BenchmarkRequestIR, ComparisonObjective, CompileRequest, EvidenceStore, ExecutablePlanIR,
     HardwareIdentity, InfrastructureSnapshot, LinkKind, LocalDiscovery, ModelArtifactIdentity,
@@ -1556,6 +1557,28 @@ fn run() -> Result<(), String> {
             let scenario = target.into_scenario(snapshot.infrastructure);
             let report = solve(&scenario);
             print_report(&report);
+        }
+        "recommend-probes" => {
+            let snapshot_path = args.get(2).ok_or_else(|| {
+                "usage: meshfit recommend-probes <snapshot.yaml> <target.yaml>".to_string()
+            })?;
+            let target_path = args.get(3).ok_or_else(|| {
+                "usage: meshfit recommend-probes <snapshot.yaml> <target.yaml>".to_string()
+            })?;
+
+            let snapshot_raw = fs::read_to_string(snapshot_path)
+                .map_err(|e| format!("read {snapshot_path}: {e}"))?;
+            let target_raw =
+                fs::read_to_string(target_path).map_err(|e| format!("read {target_path}: {e}"))?;
+            let snapshot: InfrastructureSnapshot = serde_yaml::from_str(&snapshot_raw)
+                .map_err(|e| format!("parse {snapshot_path}: {e}"))?;
+            let target: PlacementTargetIR = serde_yaml::from_str(&target_raw)
+                .map_err(|e| format!("parse {target_path}: {e}"))?;
+
+            let report = solve(&target.into_scenario(snapshot.infrastructure));
+            let probe_plan = recommend_probes(&report);
+            let yaml = serde_yaml::to_string(&probe_plan).map_err(|e| e.to_string())?;
+            print!("{yaml}");
         }
         "plan" => {
             let path = args
