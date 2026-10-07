@@ -487,7 +487,92 @@ launch. Keep the existing Reality Campaign budget ceiling explicit; if the
 required instance types or expected wall-clock time would cross it, stop before
 provisioning.
 
-### C. Make TCP/5201 an explicit provider firewall gate
+### C. Launch exactly the frozen provider shape
+
+Create or select a Lambda firewall ruleset in the chosen region before launch.
+It must preserve the SSH access you need and allow TCP/5201 only from the
+experiment peers. Export the chosen region, SSH key name, and ruleset ID:
+
+```bash
+export MESHFIT_LAMBDA_REGION=<region-from-the-live-intersection>
+export MESHFIT_LAMBDA_SSH_KEY_NAME=<existing-lambda-ssh-key-name>
+export MESHFIT_LAMBDA_FIREWALL_RULESET_ID=<same-region-ruleset-id>
+```
+
+Launch each distinct shape separately and retain every provider response. The
+Lambda launch endpoint is rate-limited, so keep at least 12 seconds between
+these calls:
+
+```bash
+launch_meshfit_lambda() {
+  local instance_type="$1"
+  local instance_name="$2"
+  local receipt="$3"
+
+  jq -cn \
+    --arg region "$MESHFIT_LAMBDA_REGION" \
+    --arg type "$instance_type" \
+    --arg ssh_key "$MESHFIT_LAMBDA_SSH_KEY_NAME" \
+    --arg ruleset "$MESHFIT_LAMBDA_FIREWALL_RULESET_ID" \
+    --arg name "$instance_name" '
+      {
+        region_name: $region,
+        instance_type_name: $type,
+        ssh_key_names: [$ssh_key],
+        file_system_names: [],
+        name: $name,
+        firewall_rulesets: [{id: $ruleset}],
+        tags: [{key: "meshfit-campaign", value: "reality-001"}]
+      }
+    ' \
+  | curl --fail --silent --show-error \
+      --request POST \
+      --url 'https://cloud.lambda.ai/api/v1/instance-operations/launch' \
+      --header 'accept: application/json' \
+      --header 'content-type: application/json' \
+      --header "Authorization: Bearer ${LAMBDA_API_KEY}" \
+      --data-binary @- \
+      > "$receipt"
+}
+
+launch_meshfit_lambda \
+  "$MESHFIT_NODE_A_TYPE" meshfit-reality-001-a lambda-launch-node-a.json
+sleep 12
+launch_meshfit_lambda \
+  "$MESHFIT_NODE_B_TYPE" meshfit-reality-001-b lambda-launch-node-b.json
+sleep 12
+launch_meshfit_lambda \
+  "$MESHFIT_NODE_C_TYPE" meshfit-reality-001-c lambda-launch-node-c.json
+```
+
+Extract and freeze the returned instance IDs immediately:
+
+```bash
+export MESHFIT_NODE_A_INSTANCE_ID="$(
+  jq -er '.data.instance_ids[0]' lambda-launch-node-a.json
+)"
+export MESHFIT_NODE_B_INSTANCE_ID="$(
+  jq -er '.data.instance_ids[0]' lambda-launch-node-b.json
+)"
+export MESHFIT_NODE_C_INSTANCE_ID="$(
+  jq -er '.data.instance_ids[0]' lambda-launch-node-c.json
+)"
+
+export MESHFIT_LAMBDA_INSTANCE_IDS_JSON="$(
+  jq -cn \
+    --arg a "$MESHFIT_NODE_A_INSTANCE_ID" \
+    --arg b "$MESHFIT_NODE_B_INSTANCE_ID" \
+    --arg c "$MESHFIT_NODE_C_INSTANCE_ID" \
+    '[$a, $b, $c]'
+)"
+```
+
+If any launch fails with insufficient capacity, do not silently replace the
+failed shape. Terminate any instances that did launch, retain the failed launch
+receipt/error, refresh the authenticated capacity intersection, and make a new
+campaign decision.
+
+### D. Make TCP/5201 an explicit provider firewall gate
 
 Lambda ODC does not open arbitrary inbound TCP ports by default. Before peer
 measurement, attach a Lambda firewall ruleset that permits TCP/5201 only from
@@ -521,7 +606,7 @@ the experiment to public Internet addresses: that would change the network tier
 being measured. Stop, record the provider/network blocker, and choose a provider
 or topology whose intended experiment path can be demonstrated.
 
-### D. Keep provider identity beside MeshFit identity
+### E. Keep provider identity beside MeshFit identity
 
 For each launched host, retain at least:
 
@@ -536,7 +621,7 @@ For each launched host, retain at least:
 Provider metadata is not a substitute for MeshFit's hardware attestation. It is
 the external receipt that ties the paid resource to the experiment window.
 
-### E. Terminate through Lambda, not through the guest OS
+### F. Terminate through Lambda, not through the guest OS
 
 As soon as host evidence has been exported and copied off the paid instances,
 terminate every campaign instance through the Lambda control plane:
@@ -568,7 +653,7 @@ After termination, query the provider again and confirm that none of the
 campaign instance IDs remains active. Also remove any campaign-only firewall
 ruleset after the instances are gone.
 
-### F. Provider stop conditions
+### G. Provider stop conditions
 
 Abort the paid campaign before benchmark execution if any of these is true:
 
