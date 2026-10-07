@@ -25,6 +25,70 @@ fn default_benchmark_listen_port() -> u16 {
     BENCHMARK_LISTEN_PORT
 }
 
+fn default_benchmark_prompt() -> String {
+    "Explain MeshFit in one sentence.".to_string()
+}
+
+fn default_benchmark_max_tokens() -> u32 {
+    64
+}
+
+fn default_benchmark_warmup_requests() -> u32 {
+    1
+}
+
+fn default_benchmark_request_timeout_ms() -> u64 {
+    120_000
+}
+
+fn default_benchmark_startup_timeout_ms() -> u64 {
+    300_000
+}
+
+fn option_u32(args: &[String], option: &str, default: u32) -> Result<u32, String> {
+    option_value(args, option)?
+        .map(|value| {
+            value
+                .parse::<u32>()
+                .map_err(|e| format!("invalid {option} '{value}': {e}"))
+        })
+        .transpose()
+        .map(|value| value.unwrap_or(default))
+}
+
+fn option_u64(args: &[String], option: &str, default: u64) -> Result<u64, String> {
+    option_value(args, option)?
+        .map(|value| {
+            value
+                .parse::<u64>()
+                .map_err(|e| format!("invalid {option} '{value}': {e}"))
+        })
+        .transpose()
+        .map(|value| value.unwrap_or(default))
+}
+
+fn benchmark_prompt_from_args(args: &[String]) -> Result<String, String> {
+    let inline = option_value(args, "--prompt")?;
+    let file = option_value(args, "--prompt-file")?;
+    if inline.is_some() && file.is_some() {
+        return Err("--prompt and --prompt-file are mutually exclusive".to_string());
+    }
+
+    let prompt = match (inline, file) {
+        (Some(prompt), None) => prompt.to_string(),
+        (None, Some(path)) => fs::read_to_string(path)
+            .map_err(|e| format!("read benchmark prompt file '{path}': {e}"))?,
+        (None, None) => default_benchmark_prompt(),
+        (Some(_), Some(_)) => unreachable!(),
+    };
+
+    if prompt.trim().is_empty() {
+        return Err("benchmark prompt must not be empty".to_string());
+    }
+
+    Ok(prompt)
+}
+
 fn parse_benchmark_listen_port(args: &[String]) -> Result<u16, String> {
     let port = option_value(args, "--listen-port")?
         .map(|value| {
@@ -87,6 +151,16 @@ struct BenchmarkExecutionKit {
     model_identity: String,
     concurrency: u32,
     measured_requests_per_run: u32,
+    #[serde(default = "default_benchmark_prompt")]
+    prompt: String,
+    #[serde(default = "default_benchmark_max_tokens")]
+    max_tokens: u32,
+    #[serde(default = "default_benchmark_warmup_requests")]
+    warmup_requests: u32,
+    #[serde(default = "default_benchmark_request_timeout_ms")]
+    request_timeout_ms: u64,
+    #[serde(default = "default_benchmark_startup_timeout_ms")]
+    startup_timeout_ms: u64,
     runs_per_candidate: u32,
     #[serde(default = "default_benchmark_listen_port")]
     listen_port: u16,
