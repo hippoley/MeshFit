@@ -15,6 +15,10 @@ pub struct PeerProbeResult {
     #[serde(default)]
     pub bandwidth_gbps: Option<f64>,
     #[serde(default)]
+    pub source: Option<String>,
+    #[serde(default)]
+    pub captured_at_unix_ms: Option<u128>,
+    #[serde(default)]
     pub warnings: Vec<String>,
 }
 
@@ -42,11 +46,17 @@ impl PeerProbeResult {
 }
 
 pub fn probe_peer(peer: &str, measure_bandwidth: bool) -> PeerProbeResult {
+    let captured_at_unix_ms = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .ok()
+        .map(|duration| duration.as_millis());
     let mut result = PeerProbeResult {
         peer: peer.to_string(),
         latency_ms: None,
         jitter_ms: None,
         bandwidth_gbps: None,
+        source: Some("meshfit-peer-probe".into()),
+        captured_at_unix_ms,
         warnings: Vec::new(),
     };
 
@@ -160,6 +170,8 @@ mod tests {
             latency_ms: Some(0.42),
             jitter_ms: Some(0.03),
             bandwidth_gbps: Some(21.8),
+            source: Some("meshfit-peer-probe".into()),
+            captured_at_unix_ms: Some(1_700_000_000_000),
             warnings: vec![],
         };
         let edge = probe.to_node_edge("node-a", "node-b", LinkKind::Ethernet);
