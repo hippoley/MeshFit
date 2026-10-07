@@ -2,8 +2,8 @@ use std::collections::{HashMap, HashSet};
 
 use crate::ir::{
     AcceleratorBackend, AcceleratorIR, AcceleratorRefIR, CommunicationEstimateIR, EvidenceGapIR,
-    EvidenceGapKind, ExclusionIR, InfrastructureIR, ModelIR, PlacementKind, PlacementReport, PlanIR,
-    RejectionIR, RuntimeIR, ScenarioIR, WorkloadIR,
+    EvidenceGapKind, ExclusionIR, InfrastructureIR, ModelIR, PlacementKind, PlacementReport,
+    PlanIR, RejectionIR, RuntimeIR, ScenarioIR, WorkloadIR,
 };
 
 const TP_EFFECTIVE_BANDWIDTH_FACTOR: f64 = 0.70;
@@ -1090,14 +1090,16 @@ mod tests {
             .infrastructure
             .links
             .iter_mut()
-            .find(|link| matches!(
-                (&link.from, &link.to),
-                (
-                    crate::ir::FabricEndpointIR::Node { node: left },
-                    crate::ir::FabricEndpointIR::Node { node: right }
-                ) if (left == "local" && right == "remote")
-                    || (left == "remote" && right == "local")
-            ))
+            .find(|link| {
+                matches!(
+                    (&link.from, &link.to),
+                    (
+                        crate::ir::FabricEndpointIR::Node { node: left },
+                        crate::ir::FabricEndpointIR::Node { node: right }
+                    ) if (left == "local" && right == "remote")
+                        || (left == "remote" && right == "local")
+                )
+            })
             .unwrap();
         link.bandwidth_gbps = None;
         link.latency_ms = Some(0.5);
