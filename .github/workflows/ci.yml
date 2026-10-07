@@ -66,6 +66,8 @@ jobs:
       - run: cargo run -p meshfit -- benchmark-kit /tmp/meshfit-snapshot-manifest.yaml examples/placement-target.yaml node-b:gpu0:vllm:SingleHost Qwen/Qwen3-32B /tmp/meshfit-model-identity.yaml --listen-port 18181 --write-dir /tmp/meshfit-benchmark-001-materialized
       - run: test -f /tmp/meshfit-benchmark-001-materialized/kit.yaml
       - run: 'grep -q "listen_port: 18181" /tmp/meshfit-benchmark-001-materialized/kit.yaml'
+      - run: 'grep -q "placement: single_host" /tmp/meshfit-benchmark-001-materialized/kit.yaml'
+      - run: 'grep -q "placement: tensor_parallel" /tmp/meshfit-benchmark-001-materialized/kit.yaml'
       - run: grep -q 'Listen port.*18181' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
       - run: test -f /tmp/meshfit-benchmark-001-materialized/comparison.yaml
       - run: test -f /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
@@ -95,7 +97,13 @@ jobs:
       - run: grep -q 'model_artifact_verified' /tmp/meshfit-model-override-preflight.yaml
       - run: 'grep -q "listen_port: 18181" /tmp/meshfit-model-override-preflight.yaml'
       - run: 'grep -q "hardware_profile_match: false" /tmp/meshfit-model-override-preflight.yaml'
+      - run: 'grep -q "local_topology_verified: false" /tmp/meshfit-model-override-preflight.yaml'
+      - run: 'grep -q "local_topology_match: true" /tmp/meshfit-model-override-preflight.yaml'
       - run: grep -q 'accelerator count mismatch\|hardware architecture mismatch\|hardware operating-system mismatch\|snapshot has no hardware identity' /tmp/meshfit-model-override-preflight.yaml
+      - run: cargo run -p meshfit -- benchmark-preflight /tmp/meshfit-benchmark-001-materialized max-aggregate-compute --host node-a --model-path examples/model-artifact-demo.bin > /tmp/meshfit-tp-topology-preflight.yaml
+      - run: 'grep -q "local_topology_verified: true" /tmp/meshfit-tp-topology-preflight.yaml'
+      - run: 'grep -q "local_topology_match: false" /tmp/meshfit-tp-topology-preflight.yaml'
+      - run: grep -q 'local accelerator topology mismatch' /tmp/meshfit-tp-topology-preflight.yaml
       - run: |
           python3 -m http.server 18181 >/tmp/meshfit-port-18181.log 2>&1 &
           pid=$!
