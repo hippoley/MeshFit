@@ -60,6 +60,23 @@ struct BenchmarkCandidateManifest {
 }
 
 #[derive(Debug, Serialize)]
+struct BenchmarkComputeProxyReport {
+    schema: String,
+    bundle_count: usize,
+    benchmark_ids: Vec<String>,
+    source_plan_id: String,
+    runtime: String,
+    context_tokens: u32,
+    concurrency: u32,
+    run_mean_decode_tokens_per_second: Vec<f64>,
+    mean_decode_tokens_per_second: f64,
+    sample_stddev_decode_tokens_per_second: f64,
+    coefficient_of_variation: f64,
+    stable: bool,
+    relative_compute: f64,
+}
+
+#[derive(Debug, Serialize)]
 struct BenchmarkPlanSet {
     candidates: Vec<BenchmarkPlanCandidate>,
     warnings: Vec<String>,
@@ -921,6 +938,39 @@ fn run() -> Result<(), String> {
                 serde_yaml::from_str(&raw).map_err(|e| format!("parse {request_path}: {e}"))?;
             let bundle = run_local_benchmark(request)?;
             let yaml = serde_yaml::to_string(&bundle).map_err(|e| e.to_string())?;
+            print!("{yaml}");
+        }
+        "benchmark-compute-proxy" => {
+            let require_stable = args.iter().any(|arg| arg == "--require-stable");
+            let bundle_paths = args[2..]
+                .iter()
+                .filter(|arg| arg.as_str() != "--require-stable")
+                .collect::<Vec<_>>();
+            if bundle_paths.len() < 3 {
+                return Err(
+                    "usage: meshfit benchmark-compute-proxy <bundle.yaml> <bundle.yaml> <bundle.yaml> [...] [--require-stable]"
+                        .to_string(),
+                );
+            }
+
+            let mut bundles = Vec::new();
+            for path in bundle_paths {
+                let raw = fs::read_to_string(path)
+                    .map_err(|e| format!("read compute-proxy bundle {path}: {e}"))?;
+                let bundle: BenchmarkBundle = serde_yaml::from_str(&raw)
+                    .map_err(|e| format!("parse compute-proxy bundle {path}: {e}"))?;
+                bundles.push(bundle);
+            }
+
+            let report = build_benchmark_compute_proxy(&bundles)?;
+            if require_stable && !report.stable {
+                return Err(format!(
+                    "compute proxy is unstable: run-level decode throughput CV {:.1}% exceeds 20%",
+                    report.coefficient_of_variation * 100.0
+                ));
+            }
+
+            let yaml = serde_yaml::to_string(&report).map_err(|e| e.to_string())?;
             print!("{yaml}");
         }
         "benchmark-candidates" => {
@@ -3501,6 +3551,132 @@ fn default_measured_requests(concurrency: u32) -> u32 {
     let waves = minimum_samples_per_run.div_ceil(concurrency);
     waves.max(1).saturating_mul(concurrency)
 }
+fn sample_stddev(values: &[f64], mean: f64) -> f64 {
+    if values.len() < 2 {
+        return 0.0;
+    }
+    let variance = values
+        .iter()
+        .map(|value| {
+            let delta = value - mean;
+            delta * delta
+        })
+        .sum::<f64>()
+        / (values.len() - 1) as f64;
+    variance.sqrt()
+}
+
+fn build_benchmark_compute_proxy(
+    bundles: &[BenchmarkBundle],
+) -> Result<BenchmarkComputeProxyReport, String> {
+    if bundles.len() < 3 {
+        return Err("compute proxy requires at least 3 independent benchmark bundles".to_string());
+    }
+
+    let first = &bundles[0];
+    first
+        .validate()
+        .map_err(|e| format!("invalid compute-proxy bundle 1: {e}"))?;
+
+    let expected_model = &first.request.identity.model;
+    let expected_hardware = &first.request.identity.hardware;
+    let expected_runtime = &first.request.executable.runtime;
+    let expected_plan = &first.request.executable.source_plan_id;
+    let expected_context = first.request.context_tokens;
+    let expected_concurrency = first.request.concurrency;
+    let expected_config = &first.request.config;
+
+    let mut benchmark_ids = Vec::with_capacity(bundles.len());
+    let mut run_means = Vec::with_capacity(bundles.len());
+
+    for (index, bundle) in bundles.iter().enumerate() {
+        bundle
+            .validate()
+            .map_err(|e| format!("invalid compute-proxy bundle {}: {e}", index + 1))?;
+
+        if &bundle.request.identity.model != expected_model {
+            return Err(format!(
+                "compute-proxy bundle {} has a different model identity",
+                index + 1
+            ));
+        }
+        if &bundle.request.identity.hardware != expected_hardware {
+            return Err(format!(
+                "compute-proxy bundle {} has a different hardware identity",
+                index + 1
+            ));
+        }
+        if &bundle.request.executable.runtime != expected_runtime {
+            return Err(format!(
+                "compute-proxy bundle {} has runtime '{}' instead of '{}'",
+                index + 1,
+                bundle.request.executable.runtime,
+                expected_runtime
+            ));
+        }
+        if &bundle.request.executable.source_plan_id != expected_plan {
+            return Err(format!(
+                "compute-proxy bundle {} has source plan '{}' instead of '{}'",
+                index + 1,
+                bundle.request.executable.source_plan_id,
+                expected_plan
+            ));
+        }
+        if bundle.request.context_tokens != expected_context
+            || bundle.request.concurrency != expected_concurrency
+            || &bundle.request.config != expected_config
+        {
+            return Err(format!(
+                "compute-proxy bundle {} does not match the frozen benchmark workload/config",
+                index + 1
+            ));
+        }
+
+        let decode = bundle
+            .measurements
+            .iter()
+            .map(|measurement| {
+                measurement.decode_tokens_per_second().ok_or_else(|| {
+                    format!(
+                        "compute-proxy bundle {} contains a measurement without decode throughput",
+                        index + 1
+                    )
+                })
+            })
+            .collect::<Result<Vec<_>, _>>()?;
+        let run_mean = decode.iter().sum::<f64>() / decode.len() as f64;
+        if !run_mean.is_finite() || run_mean <= 0.0 {
+            return Err(format!(
+                "compute-proxy bundle {} produced a non-positive decode throughput",
+                index + 1
+            ));
+        }
+
+        benchmark_ids.push(bundle.benchmark_id.clone());
+        run_means.push(run_mean);
+    }
+
+    let mean = run_means.iter().sum::<f64>() / run_means.len() as f64;
+    let stddev = sample_stddev(&run_means, mean);
+    let cv = stddev / mean;
+
+    Ok(BenchmarkComputeProxyReport {
+        schema: "meshfit.benchmark-compute-proxy/v1".to_string(),
+        bundle_count: bundles.len(),
+        benchmark_ids,
+        source_plan_id: expected_plan.clone(),
+        runtime: expected_runtime.clone(),
+        context_tokens: expected_context,
+        concurrency: expected_concurrency,
+        run_mean_decode_tokens_per_second: run_means,
+        mean_decode_tokens_per_second: mean,
+        sample_stddev_decode_tokens_per_second: stddev,
+        coefficient_of_variation: cv,
+        stable: cv <= 0.20,
+        relative_compute: mean,
+    })
+}
+
 fn select_benchmark_plans(
     report: &PlacementReport,
     meshfit_plan_id: &str,
@@ -3719,7 +3895,7 @@ fn print_prediction(prediction: &Prediction) {
 
 fn print_help() {
     println!(
-        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit calibrate-performance <bundle.yaml> [bundle.yaml ...] [--predicted-p95-ttft-ms N] [--predicted-decode-tps N]\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--listen-port N] [--require-ready] [--write-dir DIR]\n  meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--host NODE] [--model-path PATH] [--dry-run] [--overwrite]\n  meshfit benchmark-run-candidate <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  meshfit benchmark-host-check <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--require-ready]\n  meshfit benchmark-run-host <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  env MESHFIT_MODEL_PATH may provide the host-local model path when --model-path is omitted\n  meshfit benchmark-worklist <kit-dir> [--host NODE | --current-host] [--pending-only]\n  meshfit benchmark-status <kit-dir> [--require-complete]\n  meshfit benchmark-finalize <kit-dir> [--markdown] [--require-publishable]\n  meshfit benchmark-proof <kit-dir> [--require-publishable]\n  meshfit benchmark-preflight <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--allow-existing] [--require-ready]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
+        "MeshFit — placement intelligence for heterogeneous inference\n\nUsage:\n  meshfit discover\n  meshfit runtimes\n  meshfit inspect-model <path> <model-id> <format> <quantization> [revision]\n  meshfit probe <peer> [--bandwidth]\n  meshfit snapshot-manifest <manifest.yaml>\n  meshfit snapshot <local-discovery.yaml> <peer-discovery.yaml> [probe.yaml]\n  meshfit plan-snapshot <snapshot.yaml> <target.yaml>\n  meshfit compile <request.yaml>\n  meshfit compile-snapshot <snapshot.yaml> <target.yaml> <plan-id> <model-path> [gpu-layers]\n  meshfit benchmark-auto <executable.yaml> <model-identity.yaml> [--concurrency N] [--measured-requests N] [--prompt TEXT]\n  meshfit benchmark-local <request.yaml>\n  meshfit benchmark-compute-proxy <bundle.yaml> <bundle.yaml> <bundle.yaml> [...] [--require-stable]\n  meshfit calibrate-performance <bundle.yaml> [bundle.yaml ...] [--predicted-p95-ttft-ms N] [--predicted-decode-tps N]\n  meshfit evidence-from-benchmark <bundle.yaml>\n  meshfit benchmark-candidates <snapshot.yaml> <target.yaml> <meshfit-plan-id> [--require-distinct]\n  meshfit benchmark-kit <snapshot.yaml> <target.yaml> <meshfit-plan-id> <model-path> <model-identity.yaml> [--listen-port N] [--require-ready] [--write-dir DIR]\n  meshfit benchmark-run-one <kit-dir> <candidate> <run-number> [--host NODE] [--model-path PATH] [--dry-run] [--overwrite]\n  meshfit benchmark-run-candidate <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  meshfit benchmark-host-check <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--require-ready]\n  meshfit benchmark-run-host <kit-dir> (--host NODE | --current-host) [--model-path PATH] [--dry-run] [--resume|--overwrite]\n  env MESHFIT_MODEL_PATH may provide the host-local model path when --model-path is omitted\n  meshfit benchmark-worklist <kit-dir> [--host NODE | --current-host] [--pending-only]\n  meshfit benchmark-status <kit-dir> [--require-complete]\n  meshfit benchmark-finalize <kit-dir> [--markdown] [--require-publishable]\n  meshfit benchmark-proof <kit-dir> [--require-publishable]\n  meshfit benchmark-preflight <kit-dir> <candidate> [--host NODE] [--model-path PATH] [--allow-existing] [--require-ready]\n  meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]\n  meshfit plan <scenario.yaml>\n  meshfit predict <evidence.yaml> <query.yaml>\n"
     );
 }
 
