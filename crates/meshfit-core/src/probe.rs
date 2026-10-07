@@ -231,10 +231,7 @@ mod tests {
             conservative_bidirectional_bandwidth(Some(24.1), Some(21.8)),
             Some(21.8)
         );
-        assert_eq!(
-            conservative_bidirectional_bandwidth(Some(24.1), None),
-            None
-        );
+        assert_eq!(conservative_bidirectional_bandwidth(Some(24.1), None), None);
     }
 
     #[test]
