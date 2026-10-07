@@ -269,6 +269,35 @@ struct BenchmarkInvalidBundle {
     error: String,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct BenchmarkHostEvidenceTransfer {
+    schema: String,
+    benchmark_id: String,
+    host: String,
+    bundles: Vec<BenchmarkTransferredBundle>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct BenchmarkTransferredBundle {
+    candidate: String,
+    plan_id: String,
+    run_number: usize,
+    path: String,
+    sha256: String,
+    content: String,
+}
+
+#[derive(Debug, Serialize)]
+struct BenchmarkEvidenceImportResult {
+    benchmark_id: String,
+    host: String,
+    imported: usize,
+    already_present: usize,
+    total: usize,
+}
+
 #[derive(Debug, Clone)]
 struct BenchmarkExpectedRequestContract {
     context_tokens: u32,
@@ -1723,6 +1752,36 @@ fn run() -> Result<(), String> {
                 pending_only,
             )?;
             let yaml = serde_yaml::to_string(&worklist).map_err(|e| e.to_string())?;
+            print!("{yaml}");
+        }
+        "benchmark-export-host" => {
+            let kit_dir = args.get(2).ok_or_else(|| {
+                "usage: meshfit benchmark-export-host <kit-dir> (--host NODE | --current-host)"
+                    .to_string()
+            })?;
+            let explicit_host = option_value(&args[3..], "--host")?.map(str::to_string);
+            let current_host = args.iter().any(|arg| arg == "--current-host");
+            if explicit_host.is_some() == current_host {
+                return Err("exactly one of --host NODE or --current-host is required".to_string());
+            }
+            let host = explicit_host.unwrap_or_else(|| discover_local().node.id);
+            let transfer = export_benchmark_host_evidence(Path::new(kit_dir), &host)?;
+            let yaml = serde_yaml::to_string(&transfer).map_err(|e| e.to_string())?;
+            print!("{yaml}");
+        }
+        "benchmark-import-host" => {
+            let kit_dir = args.get(2).ok_or_else(|| {
+                "usage: meshfit benchmark-import-host <kit-dir> <host-evidence.yaml>".to_string()
+            })?;
+            let transfer_path = args
+                .get(3)
+                .ok_or_else(|| "missing host-evidence.yaml".to_string())?;
+            let raw = fs::read_to_string(transfer_path)
+                .map_err(|e| format!("read {transfer_path}: {e}"))?;
+            let transfer: BenchmarkHostEvidenceTransfer =
+                serde_yaml::from_str(&raw).map_err(|e| format!("parse {transfer_path}: {e}"))?;
+            let result = import_benchmark_host_evidence(Path::new(kit_dir), &transfer)?;
+            let yaml = serde_yaml::to_string(&result).map_err(|e| e.to_string())?;
             print!("{yaml}");
         }
         "benchmark-status" => {
@@ -3558,6 +3617,289 @@ fn inspect_benchmark_worklist(
     })
 }
 
+fn benchmark_expected_host_slots(
+    kit: &BenchmarkExecutionKit,
+    host: &str,
+) -> Result<Vec<(String, String, usize, String)>, String> {
+    let mut slots = Vec::new();
+
+    for candidate in kit
+        .candidates
+        .iter()
+        .filter(|candidate| candidate.benchmark_host == host)
+    {
+        let comparison = kit
+            .comparison_manifest
+            .candidates
+            .iter()
+            .find(|item| item.name == candidate.name)
+            .ok_or_else(|| {
+                format!(
+                    "candidate '{}' is missing from comparison manifest",
+                    candidate.name
+                )
+            })?;
+
+        for (index, path) in comparison.bundles.iter().enumerate() {
+            slots.push((
+                candidate.name.clone(),
+                candidate.plan_id.clone(),
+                index + 1,
+                path.clone(),
+            ));
+        }
+    }
+
+    if slots.is_empty() {
+        return Err(format!(
+            "benchmark host '{host}' has no assigned evidence slots in this kit"
+        ));
+    }
+
+    Ok(slots)
+}
+
+fn export_benchmark_host_evidence(
+    kit_dir: &Path,
+    host: &str,
+) -> Result<BenchmarkHostEvidenceTransfer, String> {
+    let kit = load_benchmark_execution_kit(kit_dir)?;
+    if !kit.ready {
+        return Err("Benchmark 001 execution kit is not marked ready".to_string());
+    }
+
+    let expected_request = load_expected_benchmark_request_contract(kit_dir, &kit)?;
+    let slots = benchmark_expected_host_slots(&kit, host)?;
+    let mut bundles = Vec::with_capacity(slots.len());
+
+    for (candidate_name, plan_id, run_number, path) in slots {
+        let candidate = kit
+            .candidates
+            .iter()
+            .find(|candidate| candidate.name == candidate_name)
+            .ok_or_else(|| format!("unknown benchmark candidate '{candidate_name}'"))?;
+        let expected_hardware =
+            load_expected_benchmark_hardware(kit_dir, &kit, &candidate.benchmark_host)?;
+        let expected_model = load_expected_benchmark_model(kit_dir, &kit)?;
+        let expected_local_topology =
+            load_expected_benchmark_local_topology(kit_dir, &kit, &candidate.benchmark_host)?;
+
+        let bundle_path = kit_dir.join(&path);
+        let bytes = fs::read(&bundle_path)
+            .map_err(|e| format!("read evidence bundle '{}': {e}", bundle_path.display()))?;
+        let content = String::from_utf8(bytes.clone()).map_err(|e| {
+            format!(
+                "evidence bundle '{}' is not UTF-8 YAML: {e}",
+                bundle_path.display()
+            )
+        })?;
+        let bundle: BenchmarkBundle = serde_yaml::from_slice(&bytes)
+            .map_err(|e| format!("parse evidence bundle '{}': {e}", bundle_path.display()))?;
+
+        validate_benchmark_bundle_for_candidate(
+            &bundle,
+            candidate,
+            &expected_hardware,
+            &expected_model,
+            &expected_local_topology,
+            expected_request.listen_port,
+        )
+        .and_then(|_| validate_benchmark_request_contract(&bundle, &expected_request))
+        .map_err(|error| format!("invalid evidence bundle '{path}': {error}"))?;
+
+        bundles.push(BenchmarkTransferredBundle {
+            candidate: candidate_name,
+            plan_id,
+            run_number,
+            path,
+            sha256: sha256_hex(&bytes),
+            content,
+        });
+    }
+
+    Ok(BenchmarkHostEvidenceTransfer {
+        schema: "meshfit.benchmark-host-evidence/v1".to_string(),
+        benchmark_id: kit.benchmark_id,
+        host: host.to_string(),
+        bundles,
+    })
+}
+
+fn import_benchmark_host_evidence(
+    kit_dir: &Path,
+    transfer: &BenchmarkHostEvidenceTransfer,
+) -> Result<BenchmarkEvidenceImportResult, String> {
+    if transfer.schema != "meshfit.benchmark-host-evidence/v1" {
+        return Err(format!(
+            "unsupported benchmark host evidence schema '{}'",
+            transfer.schema
+        ));
+    }
+
+    let kit = load_benchmark_execution_kit(kit_dir)?;
+    if !kit.ready {
+        return Err("Benchmark 001 execution kit is not marked ready".to_string());
+    }
+    if transfer.benchmark_id != kit.benchmark_id {
+        return Err(format!(
+            "benchmark evidence package id '{}' does not match kit '{}'",
+            transfer.benchmark_id, kit.benchmark_id
+        ));
+    }
+
+    let slots = benchmark_expected_host_slots(&kit, &transfer.host)?;
+    if transfer.bundles.len() != slots.len() {
+        return Err(format!(
+            "benchmark host '{}' evidence package has {} bundle(s); kit requires {}",
+            transfer.host,
+            transfer.bundles.len(),
+            slots.len()
+        ));
+    }
+
+    let expected_request = load_expected_benchmark_request_contract(kit_dir, &kit)?;
+    let expected_model = load_expected_benchmark_model(kit_dir, &kit)?;
+    let mut seen = std::collections::HashSet::new();
+    let mut validated = Vec::with_capacity(slots.len());
+
+    for (candidate_name, plan_id, run_number, expected_path) in slots {
+        let item = transfer
+            .bundles
+            .iter()
+            .find(|item| item.candidate == candidate_name && item.run_number == run_number)
+            .ok_or_else(|| {
+                format!(
+                    "benchmark host '{}' evidence package is missing candidate '{}' run {}",
+                    transfer.host, candidate_name, run_number
+                )
+            })?;
+
+        if !seen.insert((item.candidate.clone(), item.run_number)) {
+            return Err(format!(
+                "duplicate transferred evidence for candidate '{}' run {}",
+                item.candidate, item.run_number
+            ));
+        }
+        if item.plan_id != plan_id {
+            return Err(format!(
+                "transferred candidate '{}' run {} plan '{}' does not match kit plan '{}'",
+                candidate_name, run_number, item.plan_id, plan_id
+            ));
+        }
+        if item.path != expected_path {
+            return Err(format!(
+                "transferred candidate '{}' run {} path '{}' does not match kit slot '{}'",
+                candidate_name, run_number, item.path, expected_path
+            ));
+        }
+
+        let bytes = item.content.as_bytes();
+        let observed_sha = sha256_hex(bytes);
+        if observed_sha != item.sha256 {
+            return Err(format!(
+                "transferred candidate '{}' run {} SHA-256 mismatch: declared={} observed={}",
+                candidate_name, run_number, item.sha256, observed_sha
+            ));
+        }
+
+        let candidate = kit
+            .candidates
+            .iter()
+            .find(|candidate| candidate.name == candidate_name)
+            .ok_or_else(|| format!("unknown benchmark candidate '{candidate_name}'"))?;
+        let expected_hardware =
+            load_expected_benchmark_hardware(kit_dir, &kit, &candidate.benchmark_host)?;
+        let expected_local_topology =
+            load_expected_benchmark_local_topology(kit_dir, &kit, &candidate.benchmark_host)?;
+        let bundle: BenchmarkBundle = serde_yaml::from_slice(bytes).map_err(|e| {
+            format!(
+                "parse transferred candidate '{}' run {}: {e}",
+                candidate_name, run_number
+            )
+        })?;
+
+        validate_benchmark_bundle_for_candidate(
+            &bundle,
+            candidate,
+            &expected_hardware,
+            &expected_model,
+            &expected_local_topology,
+            expected_request.listen_port,
+        )
+        .and_then(|_| validate_benchmark_request_contract(&bundle, &expected_request))
+        .map_err(|error| {
+            format!(
+                "transferred candidate '{}' run {} failed coordinator re-attestation: {error}",
+                candidate_name, run_number
+            )
+        })?;
+
+        let destination = kit_dir.join(&expected_path);
+        if destination.exists() {
+            let existing = fs::read(&destination)
+                .map_err(|e| format!("read existing evidence '{}': {e}", destination.display()))?;
+            if sha256_hex(&existing) != item.sha256 {
+                return Err(format!(
+                    "evidence slot '{}' already exists with different content; refusing import",
+                    expected_path
+                ));
+            }
+        }
+
+        validated.push((expected_path, item.content.clone(), item.sha256.clone()));
+    }
+
+    let mut imported = 0_usize;
+    let mut already_present = 0_usize;
+
+    for (expected_path, content, expected_sha) in validated {
+        let destination = kit_dir.join(&expected_path);
+        if destination.exists() {
+            already_present += 1;
+            continue;
+        }
+
+        if let Some(parent) = destination.parent() {
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("create evidence directory '{}': {e}", parent.display()))?;
+        }
+
+        let temp_path = PathBuf::from(format!("{}.meshfit-import.tmp", destination.display()));
+        if temp_path.exists() {
+            return Err(format!(
+                "stale evidence import staging file '{}' exists; refusing import",
+                temp_path.display()
+            ));
+        }
+
+        fs::write(&temp_path, content.as_bytes())
+            .map_err(|e| format!("stage evidence import '{}': {e}", temp_path.display()))?;
+        let staged = fs::read(&temp_path)
+            .map_err(|e| format!("verify staged evidence '{}': {e}", temp_path.display()))?;
+        if sha256_hex(&staged) != expected_sha {
+            let _ = fs::remove_file(&temp_path);
+            return Err(format!(
+                "staged evidence '{}' failed SHA-256 verification",
+                temp_path.display()
+            ));
+        }
+
+        if let Err(error) = commit_benchmark_bundle(&temp_path, &destination, false) {
+            let _ = fs::remove_file(&temp_path);
+            return Err(error);
+        }
+        imported += 1;
+    }
+
+    Ok(BenchmarkEvidenceImportResult {
+        benchmark_id: kit.benchmark_id,
+        host: transfer.host.clone(),
+        imported,
+        already_present,
+        total: transfer.bundles.len(),
+    })
+}
+
 fn inspect_work_slot(
     bundle_path: &Path,
     candidate: &BenchmarkExecutionCandidate,
@@ -3922,9 +4264,27 @@ fn render_benchmark_runbook(kit: &BenchmarkExecutionKit) -> String {
         out.push_str("# Inspect the exact execution plan.\n");
         out.push_str("meshfit benchmark-run-host . --current-host --resume --dry-run\n\n");
         out.push_str("# Execute every pending candidate/run assigned to this host.\n");
-        out.push_str("meshfit benchmark-run-host . --current-host --resume\n");
+        out.push_str("meshfit benchmark-run-host . --current-host --resume\n\n");
+        out.push_str("# If this host does not share the coordinator's writable kit, export only its assigned validated evidence.\n");
+        out.push_str(&format!(
+            "meshfit benchmark-export-host . --current-host > {}\n",
+            shell_quote(&format!("{host}-evidence.yaml"))
+        ));
         out.push_str("```\n\n");
     }
+
+    out.push_str("## Bounded evidence transfer\n\n");
+    out.push_str(
+        "Use this only when benchmark hosts do not share the coordinator's writable kit directory. Each package is limited to the exact result slots assigned to one host, carries SHA-256 for every bundle, and is fully re-attested against the coordinator's local hardware/model/topology/request contract before any write.\n\n",
+    );
+    out.push_str("After copying each host evidence YAML to the coordinator:\n\n```bash\n");
+    for host in by_host.keys() {
+        out.push_str(&format!(
+            "meshfit benchmark-import-host . {}\n",
+            shell_quote(&format!("{host}-evidence.yaml"))
+        ));
+    }
+    out.push_str("```\n\n");
 
     out.push_str("## Recovery and debugging\n\n");
     out.push_str(
@@ -5031,6 +5391,166 @@ mod tests {
             .unwrap()
             .as_nanos();
         std::env::temp_dir().join(format!("meshfit-{label}-{}-{nonce}", std::process::id()))
+    }
+
+    fn write_transfer_test_kit(dir: &Path, include_bundle: bool) -> BenchmarkExecutionKit {
+        let kit = status_test_kit();
+        fs::create_dir_all(dir.join("results/meshfit")).unwrap();
+        fs::write(dir.join("kit.yaml"), serde_yaml::to_string(&kit).unwrap()).unwrap();
+        write_status_contract_files(dir);
+
+        if include_bundle {
+            let fixture_raw = include_str!("../../../examples/benchmark-bundle.yaml");
+            let mut bundle: BenchmarkBundle = serde_yaml::from_str(fixture_raw).unwrap();
+            let expected = status_expected_request();
+            bundle.benchmark_id = "transfer-run-01".into();
+            bundle.request.executable.source_plan_id = "plan-test".into();
+            bundle.request.executable.working_node = "node-a".into();
+            bundle.request.executable.runtime = "vllm".into();
+            bundle.request.executable.placement = PlacementKind::SingleHost;
+            bundle.request.executable.service.port = kit.listen_port;
+            bundle.request.executable.context_tokens = expected.context_tokens;
+            let expected_context = expected.context_tokens.to_string();
+            for arg in &mut bundle.request.executable.args {
+                if arg == "4096" {
+                    *arg = expected_context.clone();
+                }
+            }
+            for flag in &mut bundle.request.executable.identity_flags {
+                if flag == "4096" {
+                    *flag = expected_context.clone();
+                }
+            }
+            for flag in &mut bundle.request.identity.runtime.flags {
+                if flag == "4096" {
+                    *flag = expected_context.clone();
+                }
+            }
+            bundle.request.identity.hardware = status_expected_hardware();
+            bundle.request.identity.model = status_expected_model();
+            bundle.request.identity.placement = PlacementKind::SingleHost;
+            bundle.request.identity.topology.links.clear();
+            bundle.request.context_tokens = expected.context_tokens;
+            bundle.request.concurrency = expected.concurrency;
+            bundle.request.config = expected.config;
+            let seed_measurements = bundle.measurements.clone();
+            while bundle.measurements.len() < kit.measured_requests_per_run as usize {
+                let next =
+                    seed_measurements[bundle.measurements.len() % seed_measurements.len()].clone();
+                bundle.measurements.push(next);
+            }
+            let seed_waves = bundle.waves.clone();
+            while bundle.waves.len() < kit.measured_requests_per_run as usize {
+                let next = seed_waves[bundle.waves.len() % seed_waves.len()].clone();
+                bundle.waves.push(next);
+            }
+            fs::write(
+                dir.join("results/meshfit/run-01.yaml"),
+                serde_yaml::to_string(&bundle).unwrap(),
+            )
+            .unwrap();
+        }
+
+        kit
+    }
+
+    #[test]
+    fn bounded_evidence_transfer_round_trips_and_is_idempotent() {
+        let source = status_test_dir("transfer-source");
+        let destination = status_test_dir("transfer-destination");
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir_all(&destination).unwrap();
+        write_transfer_test_kit(&source, true);
+        write_transfer_test_kit(&destination, false);
+
+        let transfer = export_benchmark_host_evidence(&source, "node-a").unwrap();
+        assert_eq!(transfer.schema, "meshfit.benchmark-host-evidence/v1");
+        assert_eq!(transfer.host, "node-a");
+        assert_eq!(transfer.bundles.len(), 1);
+        assert_eq!(transfer.bundles[0].sha256.len(), 64);
+
+        let first = import_benchmark_host_evidence(&destination, &transfer).unwrap();
+        assert_eq!(first.imported, 1);
+        assert_eq!(first.already_present, 0);
+        assert_eq!(first.total, 1);
+
+        let second = import_benchmark_host_evidence(&destination, &transfer).unwrap();
+        assert_eq!(second.imported, 0);
+        assert_eq!(second.already_present, 1);
+
+        let source_bytes = fs::read(source.join("results/meshfit/run-01.yaml")).unwrap();
+        let destination_bytes = fs::read(destination.join("results/meshfit/run-01.yaml")).unwrap();
+        assert_eq!(source_bytes, destination_bytes);
+
+        let _ = fs::remove_dir_all(source);
+        let _ = fs::remove_dir_all(destination);
+    }
+
+    #[test]
+    fn bounded_evidence_import_rejects_tamper_and_slot_escape_before_write() {
+        let source = status_test_dir("transfer-reject-source");
+        let destination = status_test_dir("transfer-reject-destination");
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir_all(&destination).unwrap();
+        write_transfer_test_kit(&source, true);
+        write_transfer_test_kit(&destination, false);
+
+        let transfer = export_benchmark_host_evidence(&source, "node-a").unwrap();
+
+        let mut tampered = BenchmarkHostEvidenceTransfer {
+            schema: transfer.schema.clone(),
+            benchmark_id: transfer.benchmark_id.clone(),
+            host: transfer.host.clone(),
+            bundles: transfer
+                .bundles
+                .iter()
+                .map(|item| BenchmarkTransferredBundle {
+                    candidate: item.candidate.clone(),
+                    plan_id: item.plan_id.clone(),
+                    run_number: item.run_number,
+                    path: item.path.clone(),
+                    sha256: item.sha256.clone(),
+                    content: format!("{}\n# tampered\n", item.content),
+                })
+                .collect(),
+        };
+        let error = import_benchmark_host_evidence(&destination, &tampered).unwrap_err();
+        assert!(error.contains("SHA-256 mismatch"));
+        assert!(!destination.join("results/meshfit/run-01.yaml").exists());
+
+        tampered = transfer;
+        tampered.bundles[0].path = "../outside.yaml".into();
+        let error = import_benchmark_host_evidence(&destination, &tampered).unwrap_err();
+        assert!(error.contains("does not match kit slot"));
+        assert!(!destination.join("results/meshfit/run-01.yaml").exists());
+
+        let _ = fs::remove_dir_all(source);
+        let _ = fs::remove_dir_all(destination);
+    }
+
+    #[test]
+    fn bounded_evidence_import_rejects_request_contract_drift() {
+        let source = status_test_dir("transfer-request-source");
+        let destination = status_test_dir("transfer-request-destination");
+        fs::create_dir_all(&source).unwrap();
+        fs::create_dir_all(&destination).unwrap();
+        write_transfer_test_kit(&source, true);
+        write_transfer_test_kit(&destination, false);
+
+        let mut transfer = export_benchmark_host_evidence(&source, "node-a").unwrap();
+        let mut bundle: BenchmarkBundle =
+            serde_yaml::from_str(&transfer.bundles[0].content).unwrap();
+        bundle.request.config.prompt.push_str(" drift");
+        let content = serde_yaml::to_string(&bundle).unwrap();
+        transfer.bundles[0].sha256 = sha256_hex(content.as_bytes());
+        transfer.bundles[0].content = content;
+
+        let error = import_benchmark_host_evidence(&destination, &transfer).unwrap_err();
+        assert!(error.contains("prompt"));
+        assert!(!destination.join("results/meshfit/run-01.yaml").exists());
+
+        let _ = fs::remove_dir_all(source);
+        let _ = fs::remove_dir_all(destination);
     }
 
     #[test]
