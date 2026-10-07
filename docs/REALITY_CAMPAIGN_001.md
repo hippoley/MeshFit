@@ -388,3 +388,198 @@ following occurs:
 The next engineering decision should be driven by whichever of these real checks
 fails on the actual machines. If none fail, stop changing the framework and run
 the experiment.
+
+
+## Provider appendix: Lambda On-Demand Cloud
+
+Use this appendix only when Reality Campaign 001 is run on Lambda On-Demand
+Cloud (ODC). The provider gate is intentionally outside MeshFit's planner: live
+capacity, firewall state, instance lifecycle, and billing are external facts and
+must be checked immediately before spend.
+
+### A. Require authenticated live capacity before launch
+
+Do not infer live capacity from the public pricing page. Query Lambda's
+authenticated instance-types endpoint and retain the response as campaign
+evidence:
+
+```bash
+test -n "${LAMBDA_API_KEY:?set LAMBDA_API_KEY outside shell history}"
+
+curl --fail --silent --show-error \
+  --request GET \
+  --url 'https://cloud.lambda.ai/api/v1/instance-types' \
+  --header 'accept: application/json' \
+  --header "Authorization: Bearer ${LAMBDA_API_KEY}" \
+  > lambda-instance-types.json
+```
+
+Inspect the exact provider type names instead of hard-coding names from a stale
+document:
+
+```bash
+jq -r '
+  .data
+  | to_entries[]
+  | [
+      .key,
+      .value.instance_type.gpu_description,
+      (.value.instance_type.specs.gpus | tostring),
+      .value.instance_type.architecture,
+      (.value.instance_type.price_cents_per_hour | tostring),
+      (.value.regions_with_capacity_available | map(.name) | join(","))
+    ]
+  | @tsv
+' lambda-instance-types.json
+```
+
+For the current primary campaign shape, choose the actual returned type keys for:
+
+- node-a: 2 x NVIDIA A6000 48 GB;
+- node-b: 1 x NVIDIA H100 PCIe 80 GB;
+- node-c: 1 x NVIDIA B200 180 GB.
+
+Then compute the live same-region intersection from the captured response:
+
+```bash
+export MESHFIT_NODE_A_TYPE=<provider-type-key-for-2x-a6000>
+export MESHFIT_NODE_B_TYPE=<provider-type-key-for-1x-h100-pcie>
+export MESHFIT_NODE_C_TYPE=<provider-type-key-for-1x-b200>
+
+jq -r \
+  --arg a "$MESHFIT_NODE_A_TYPE" \
+  --arg b "$MESHFIT_NODE_B_TYPE" \
+  --arg c "$MESHFIT_NODE_C_TYPE" '
+    [.data[$a].regions_with_capacity_available[].name] as $a_regions
+    | [.data[$b].regions_with_capacity_available[].name] as $b_regions
+    | [.data[$c].regions_with_capacity_available[].name] as $c_regions
+    | [
+        $a_regions[]
+        | . as $region
+        | select(
+            ($b_regions | index($region)) != null
+            and ($c_regions | index($region)) != null
+          )
+      ]
+    | unique[]
+  ' lambda-instance-types.json
+```
+
+The campaign must not launch unless this prints at least one region. Capacity is
+first-come and can change between this query and launch, so a later
+provider/capacity error is a normal external gate, not permission to substitute a
+different hardware shape silently.
+
+### B. Freeze the provider cost ceiling before spend
+
+Record the current hourly prices from the same authenticated response. Also
+cross-check them against the provider's public pricing page before launch.
+
+For the primary shape, the previously expected order of magnitude is:
+
+```text
+2 x A6000 48 GB + 1 x H100 PCIe 80 GB + 1 x B200 180 GB
+```
+
+Do not treat those prices as constants. Compute the actual campaign burn rate
+from `lambda-instance-types.json` and write it into the campaign notes before
+launch. Keep the existing Reality Campaign budget ceiling explicit; if the
+required instance types or expected wall-clock time would cross it, stop before
+provisioning.
+
+### C. Make TCP/5201 an explicit provider firewall gate
+
+Lambda ODC does not open arbitrary inbound TCP ports by default. Before peer
+measurement, attach a Lambda firewall ruleset that permits TCP/5201 only from
+the experiment peers. Keep SSH scoped as narrowly as practical and do not expose
+iperf3 to `0.0.0.0/0`.
+
+Record the firewall ruleset ID and the source networks used in the campaign
+evidence directory.
+
+The ODC API exposes both public and private instance addresses, but the campaign
+must not assume that a returned private address proves the required peer path.
+After all three instances are active, capture their provider metadata and test
+the exact private path that will be benchmarked:
+
+```bash
+curl --fail --silent --show-error \
+  --request GET \
+  --url 'https://cloud.lambda.ai/api/v1/instances' \
+  --header 'accept: application/json' \
+  --header "Authorization: Bearer ${LAMBDA_API_KEY}" \
+  > lambda-running-instances.json
+
+# On each host, using the peer private IP recorded above:
+ping -c 1 <peer-private-ip>
+nc -vz <peer-private-ip> 5201
+```
+
+Start the bound iperf3 servers described in the main runbook before the
+`nc -vz` check. If the private path is not reachable, do not silently switch
+the experiment to public Internet addresses: that would change the network tier
+being measured. Stop, record the provider/network blocker, and choose a provider
+or topology whose intended experiment path can be demonstrated.
+
+### D. Keep provider identity beside MeshFit identity
+
+For each launched host, retain at least:
+
+- Lambda instance ID;
+- Lambda region;
+- provider instance-type key and GPU description;
+- public IP and private IP returned by the API;
+- MeshFit logical node ID;
+- immutable `meshfit discover` artifact;
+- firewall ruleset ID used for the campaign.
+
+Provider metadata is not a substitute for MeshFit's hardware attestation. It is
+the external receipt that ties the paid resource to the experiment window.
+
+### E. Terminate through Lambda, not through the guest OS
+
+As soon as host evidence has been exported and copied off the paid instances,
+terminate every campaign instance through the Lambda control plane:
+
+```bash
+export MESHFIT_LAMBDA_INSTANCE_IDS_JSON='[
+  "<node-a-instance-id>",
+  "<node-b-instance-id>",
+  "<node-c-instance-id>"
+]'
+
+curl --fail --silent --show-error \
+  --request POST \
+  --url 'https://cloud.lambda.ai/api/v1/instance-operations/terminate' \
+  --header 'accept: application/json' \
+  --header 'content-type: application/json' \
+  --header "Authorization: Bearer ${LAMBDA_API_KEY}" \
+  --data "$(jq -cn \
+    --argjson ids "$MESHFIT_LAMBDA_INSTANCE_IDS_JSON" \
+    '{instance_ids: $ids}')" \
+  > lambda-terminate-receipt.json
+```
+
+Retain `lambda-terminate-receipt.json` with the campaign evidence. Do **not**
+use `shutdown`, `poweroff`, or `systemctl poweroff` as a billing stop:
+guest-OS shutdown is not instance termination.
+
+After termination, query the provider again and confirm that none of the
+campaign instance IDs remains active. Also remove any campaign-only firewall
+ruleset after the instances are gone.
+
+### F. Provider stop conditions
+
+Abort the paid campaign before benchmark execution if any of these is true:
+
+- the authenticated same-region capacity intersection is empty;
+- the provider launches a different instance type than the frozen campaign
+  shape;
+- any instance reports an unexpected architecture;
+- the intended private experiment path cannot be demonstrated;
+- TCP/5201 cannot be restricted to experiment peers;
+- the observed hourly burn rate violates the campaign budget ceiling;
+- instance termination cannot be confirmed through the provider control plane.
+
+These conditions are external Reality failures. They should produce evidence
+and a new execution decision, not a relaxed MeshFit benchmark gate.
