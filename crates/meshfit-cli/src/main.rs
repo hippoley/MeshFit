@@ -4543,6 +4543,16 @@ mod tests {
         baseline.benchmark_id = "baseline-run-01".into();
         baseline.request.executable.source_plan_id = "plan-baseline".into();
         baseline.request.executable.working_node = "node-a".into();
+        baseline.request.concurrency = 1;
+        baseline.request.executable.service.port = BENCHMARK_LISTEN_PORT;
+        baseline.request.config = BenchmarkConfig {
+            prompt: default_benchmark_prompt(),
+            max_tokens: default_benchmark_max_tokens(),
+            warmup_requests: default_benchmark_warmup_requests(),
+            measured_requests: 2,
+            request_timeout_ms: default_benchmark_request_timeout_ms(),
+            startup_timeout_ms: default_benchmark_startup_timeout_ms(),
+        };
 
         let mut meshfit = baseline.clone();
         meshfit.benchmark_id = "meshfit-run-01".into();
