@@ -4614,6 +4614,25 @@ mod tests {
     }
 
     #[test]
+    fn benchmark_prompt_rejects_inline_and_file_together() {
+        let args = vec![
+            "--prompt".to_string(),
+            "inline".to_string(),
+            "--prompt-file".to_string(),
+            "workload.txt".to_string(),
+        ];
+        let error = benchmark_prompt_from_args(&args).unwrap_err();
+        assert!(error.contains("mutually exclusive"));
+    }
+
+    #[test]
+    fn benchmark_prompt_rejects_empty_inline_payload() {
+        let args = vec!["--prompt".to_string(), "   ".to_string()];
+        let error = benchmark_prompt_from_args(&args).unwrap_err();
+        assert!(error.contains("must not be empty"));
+    }
+
+    #[test]
     fn benchmark_auto_defaults_to_at_least_ten_samples() {
         assert_eq!(default_measured_requests(1), 10);
         assert_eq!(default_measured_requests(2), 10);
