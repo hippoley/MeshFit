@@ -103,6 +103,8 @@ python3 tools/compute_proxy.py \
   --size 8192 \
   --warmup 5 \
   --repeats 20 \
+  --max-cv 0.10 \
+  --require-stable \
   > node-a-gpu0-compute-proxy.json
 ```
 
@@ -251,7 +253,7 @@ the coordinator kit. On each benchmark host, export only the result slots that
 the frozen kit assigned to that host:
 
 ```bash
-meshfit benchmark-export-host benchmark-001 --current-host
+meshfit benchmark-export-host benchmark-001 --current-host > node-a-evidence.yaml
 ```
 
 Transfer the generated host-evidence package with your normal authenticated
@@ -261,7 +263,7 @@ On the coordinator, import the package into the coordinator's original frozen
 kit:
 
 ```bash
-meshfit benchmark-import-host benchmark-001 <host-evidence.yaml>
+meshfit benchmark-import-host benchmark-001 node-a-evidence.yaml
 ```
 
 The coordinator kit is the only slot whitelist. Import verifies the package
