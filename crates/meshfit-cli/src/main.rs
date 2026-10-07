@@ -4964,11 +4964,7 @@ mod tests {
 
     #[test]
     fn cross_node_candidate_rejects_inflated_effective_bandwidth() {
-        let mut tampered = peer_measurement(
-            Some(0.42),
-            Some(21.8),
-            Some(1_700_000_000_000),
-        );
+        let mut tampered = peer_measurement(Some(0.42), Some(21.8), Some(1_700_000_000_000));
         tampered.bandwidth_forward_gbps = Some(24.1);
         tampered.bandwidth_reverse_gbps = Some(21.8);
         tampered.bandwidth_gbps = Some(100.0);
@@ -4985,11 +4981,7 @@ mod tests {
 
     #[test]
     fn cross_node_candidate_rejects_non_positive_peer_values() {
-        let mut invalid = peer_measurement(
-            Some(0.0),
-            Some(21.8),
-            Some(1_700_000_000_000),
-        );
+        let mut invalid = peer_measurement(Some(0.0), Some(21.8), Some(1_700_000_000_000));
         invalid.bandwidth_forward_gbps = Some(0.0);
         invalid.bandwidth_reverse_gbps = Some(21.8);
         invalid.bandwidth_gbps = Some(0.0);
