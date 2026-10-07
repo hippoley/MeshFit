@@ -225,8 +225,8 @@ fn load_benchmark_bundle_contract(
         })?;
 
     let model_path = kit_dir.join(&kit.model_identity);
-    let model_raw =
-        fs::read_to_string(&model_path).map_err(|e| format!("read {}: {e}", model_path.display()))?;
+    let model_raw = fs::read_to_string(&model_path)
+        .map_err(|e| format!("read {}: {e}", model_path.display()))?;
     let model_identity: ModelArtifactIdentity = serde_yaml::from_str(&model_raw)
         .map_err(|e| format!("parse {}: {e}", model_path.display()))?;
 
@@ -3200,20 +3200,17 @@ fn inspect_benchmark_kit(kit_dir: &Path) -> Result<BenchmarkKitStatus, String> {
                 }
             };
 
-            let evidence_contract =
-                match load_benchmark_bundle_contract(kit_dir, &kit, candidate) {
-                    Ok(contract) => contract,
-                    Err(error) => {
-                        invalid_bundles.push(BenchmarkInvalidBundle {
-                            path: bundle_rel.clone(),
-                            error: format!("evidence contract: {error}"),
-                        });
-                        continue;
-                    }
-                };
-            if let Err(error) =
-                validate_benchmark_bundle_contract(&bundle, &evidence_contract)
-            {
+            let evidence_contract = match load_benchmark_bundle_contract(kit_dir, &kit, candidate) {
+                Ok(contract) => contract,
+                Err(error) => {
+                    invalid_bundles.push(BenchmarkInvalidBundle {
+                        path: bundle_rel.clone(),
+                        error: format!("evidence contract: {error}"),
+                    });
+                    continue;
+                }
+            };
+            if let Err(error) = validate_benchmark_bundle_contract(&bundle, &evidence_contract) {
                 invalid_bundles.push(BenchmarkInvalidBundle {
                     path: bundle_rel.clone(),
                     error,
@@ -4255,8 +4252,8 @@ mod tests {
         fs::write(&bundle, "not-valid-yaml: [").unwrap();
 
         let kit = status_test_kit();
-        let error =
-            validate_existing_candidate_bundle(&bundle, &dir, &kit, &kit.candidates[0]).unwrap_err();
+        let error = validate_existing_candidate_bundle(&bundle, &dir, &kit, &kit.candidates[0])
+            .unwrap_err();
         assert!(error.contains("parse existing bundle"));
 
         let _ = fs::remove_dir_all(dir);
