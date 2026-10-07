@@ -3452,6 +3452,7 @@ fn inspect_benchmark_worklist(
     pending_only: bool,
 ) -> Result<BenchmarkWorklist, String> {
     let kit = load_benchmark_execution_kit(kit_dir)?;
+    let expected_request = load_expected_benchmark_request_contract(kit_dir, &kit)?;
     let mut hosts = std::collections::BTreeMap::<String, BenchmarkHostWork>::new();
 
     for candidate in &kit.candidates {
@@ -3487,6 +3488,7 @@ fn inspect_benchmark_worklist(
                 &expected_hardware,
                 &expected_model,
                 &expected_local_topology,
+                &expected_request,
                 kit.listen_port,
                 &lock_path,
             );
@@ -3568,6 +3570,7 @@ fn inspect_work_slot(
     expected_hardware: &HardwareIdentity,
     expected_model: &ModelArtifactIdentity,
     expected_local_topology: &[String],
+    expected_request: &BenchmarkExpectedRequestContract,
     expected_listen_port: u16,
     lock_path: &Path,
 ) -> (&'static str, Option<String>) {
@@ -3587,7 +3590,9 @@ fn inspect_work_slot(
             expected_model,
             expected_local_topology,
             expected_listen_port,
-        ) {
+        )
+        .and_then(|_| validate_benchmark_request_contract(&bundle, expected_request))
+        {
             return ("invalid", Some(error));
         }
         return ("valid", None);
@@ -3611,6 +3616,7 @@ fn inspect_benchmark_kit(kit_dir: &Path) -> Result<BenchmarkKitStatus, String> {
         fs::read_to_string(&kit_path).map_err(|e| format!("read {}: {e}", kit_path.display()))?;
     let kit: BenchmarkExecutionKit =
         serde_yaml::from_str(&raw).map_err(|e| format!("parse {}: {e}", kit_path.display()))?;
+    let expected_request = load_expected_benchmark_request_contract(kit_dir, &kit)?;
 
     let mut expected_bundles = 0_usize;
     let mut valid_bundles = 0_usize;
@@ -3704,7 +3710,9 @@ fn inspect_benchmark_kit(kit_dir: &Path) -> Result<BenchmarkKitStatus, String> {
                 &expected_model,
                 &expected_local_topology,
                 kit.listen_port,
-            ) {
+            )
+            .and_then(|_| validate_benchmark_request_contract(&bundle, &expected_request))
+            {
                 invalid_bundles.push(BenchmarkInvalidBundle {
                     path: bundle_rel.clone(),
                     error,
