@@ -988,7 +988,7 @@ fn benchmark_peer_evidence_check_at(
                 }
                 let age_seconds = measurement.captured_at_unix_ms.map(|captured_at| {
                     if captured_at > now_unix_ms.saturating_add(60_000) {
-                        warnings.push(format!(
+                        pair_issues.push(format!(
                             "{from_node}<->{to_node} peer measurement timestamp is in the future by more than 60 seconds"
                         ));
                     }
@@ -4970,6 +4970,24 @@ mod tests {
             check.measurements[0].source.as_deref(),
             Some("meshfit-peer-probe")
         );
+    }
+
+    #[test]
+    fn cross_node_candidate_rejects_far_future_peer_timestamp() {
+        let snapshot = peer_evidence_snapshot(vec![peer_measurement(
+            Some(0.42),
+            Some(21.8),
+            Some(1_700_000_120_001),
+        )]);
+        let nodes = vec!["node-a".to_string(), "node-b".to_string()];
+        let check =
+            benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_000_000, Some(1800));
+
+        assert!(!check.ready);
+        assert!(check
+            .issues
+            .iter()
+            .any(|issue| issue.contains("timestamp is in the future by more than 60 seconds")));
     }
 
     #[test]
