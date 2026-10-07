@@ -693,6 +693,68 @@ fn inspect_benchmark_host_attestation(
     benchmark_hardware_profile_attestation(expected, &local.hardware_identity)
 }
 
+fn inspect_benchmark_local_topology_attestation(
+    kit_dir: &Path,
+    kit: &BenchmarkExecutionKit,
+    candidate: &BenchmarkExecutionCandidate,
+    local: &LocalDiscovery,
+) -> BenchmarkLocalTopologyAttestation {
+    let snapshot_path = kit_dir.join(&kit.snapshot);
+    let raw = match fs::read_to_string(&snapshot_path) {
+        Ok(raw) => raw,
+        Err(error) => {
+            return BenchmarkLocalTopologyAttestation {
+                verified: false,
+                matches: false,
+                issues: vec![format!(
+                    "cannot attest local topology because snapshot '{}' could not be read: {error}",
+                    snapshot_path.display()
+                )],
+                warnings: Vec::new(),
+            };
+        }
+    };
+    let snapshot: InfrastructureSnapshot = match serde_yaml::from_str(&raw) {
+        Ok(snapshot) => snapshot,
+        Err(error) => {
+            return BenchmarkLocalTopologyAttestation {
+                verified: false,
+                matches: false,
+                issues: vec![format!(
+                    "cannot attest local topology because snapshot '{}' is invalid: {error}",
+                    snapshot_path.display()
+                )],
+                warnings: Vec::new(),
+            };
+        }
+    };
+
+    let expected = normalized_snapshot_local_topology(&snapshot, &candidate.benchmark_host);
+    let observed_identity = meshfit_core::topology_identity_from_discovery(local);
+    let observed = normalized_identity_local_topology(&observed_identity, &local.node.id);
+    let topology_required = candidate.placement == Some(PlacementKind::TensorParallel);
+
+    benchmark_local_topology_attestation(
+        &expected,
+        &observed,
+        topology_required,
+        &candidate.benchmark_host,
+    )
+}
+
+fn load_expected_benchmark_local_topology(
+    kit_dir: &Path,
+    kit: &BenchmarkExecutionKit,
+    benchmark_host: &str,
+) -> Result<Vec<String>, String> {
+    let snapshot_path = kit_dir.join(&kit.snapshot);
+    let raw = fs::read_to_string(&snapshot_path)
+        .map_err(|e| format!("read {}: {e}", snapshot_path.display()))?;
+    let snapshot: InfrastructureSnapshot = serde_yaml::from_str(&raw)
+        .map_err(|e| format!("parse {}: {e}", snapshot_path.display()))?;
+    Ok(normalized_snapshot_local_topology(&snapshot, benchmark_host))
+}
+
 fn benchmark_peer_evidence_check_at(
     snapshot: &InfrastructureSnapshot,
     nodes: &[String],
@@ -2236,6 +2298,7 @@ fn validate_existing_candidate_bundle(
     candidate: &BenchmarkExecutionCandidate,
     expected_hardware: &HardwareIdentity,
     expected_model: &ModelArtifactIdentity,
+    expected_local_topology: &[String],
     expected_listen_port: u16,
 ) -> Result<(), String> {
     let raw = fs::read_to_string(bundle_path)
@@ -2337,6 +2400,9 @@ fn plan_benchmark_candidate_runs(
         host_match: preflight.host_match,
         hardware_profile_match: preflight.hardware_profile_match,
         hardware_profile_issues: preflight.hardware_profile_issues,
+        local_topology_verified: preflight.local_topology_verified,
+        local_topology_match: preflight.local_topology_match,
+        local_topology_issues: preflight.local_topology_issues,
         preflight_ready: preflight.ready,
         preflight_issues: preflight.issues,
         preflight_warnings: preflight.warnings,
@@ -2962,6 +3028,8 @@ fn inspect_benchmark_preflight(
     let host_match = observed_host == candidate.benchmark_host;
     let hardware_attestation =
         inspect_benchmark_host_attestation(kit_dir, &kit, &candidate.benchmark_host, &local);
+    let topology_attestation =
+        inspect_benchmark_local_topology_attestation(kit_dir, &kit, candidate, &local);
     let peer_evidence = inspect_benchmark_peer_evidence(kit_dir, &kit, candidate);
     let runtime_discovery = discover_runtimes();
     let runtime_found = runtime_discovery
@@ -3006,9 +3074,11 @@ fn inspect_benchmark_preflight(
         ));
     }
     issues.extend(hardware_attestation.issues.clone());
+    issues.extend(topology_attestation.issues.clone());
     issues.extend(peer_evidence.issues.clone());
     let mut warnings = model_check.warnings.clone();
     warnings.extend(hardware_attestation.warnings.clone());
+    warnings.extend(topology_attestation.warnings.clone());
     warnings.extend(peer_evidence.warnings.clone());
     warnings.extend(local.warnings);
     warnings.extend(runtime_discovery.warnings);
@@ -3022,6 +3092,9 @@ fn inspect_benchmark_preflight(
         host_match,
         hardware_profile_match: hardware_attestation.matches,
         hardware_profile_issues: hardware_attestation.issues,
+        local_topology_verified: topology_attestation.verified,
+        local_topology_match: topology_attestation.matches,
+        local_topology_issues: topology_attestation.issues,
         runtime: candidate.runtime.clone(),
         runtime_found,
         model_path: model_check.path,
@@ -3115,6 +3188,24 @@ fn validate_benchmark_bundle_for_candidate(
             "bundle hardware identity does not match snapshot benchmark host '{}': {}",
             candidate.benchmark_host,
             attestation.issues.join("; ")
+        ));
+    }
+
+    let observed_topology =
+        normalized_identity_local_topology(&bundle.request.identity.topology, &candidate.benchmark_host);
+    let topology_required = candidate.placement == Some(PlacementKind::TensorParallel)
+        || bundle.request.executable.placement == PlacementKind::TensorParallel;
+    let topology_attestation = benchmark_local_topology_attestation(
+        expected_local_topology,
+        &observed_topology,
+        topology_required,
+        &candidate.benchmark_host,
+    );
+    if !topology_attestation.matches {
+        return Err(format!(
+            "bundle local topology does not match snapshot benchmark host '{}': {}",
+            candidate.benchmark_host,
+            topology_attestation.issues.join("; ")
         ));
     }
 
