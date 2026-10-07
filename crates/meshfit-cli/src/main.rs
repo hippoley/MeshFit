@@ -269,6 +269,35 @@ struct BenchmarkInvalidBundle {
     error: String,
 }
 
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct BenchmarkHostEvidenceTransfer {
+    schema: String,
+    benchmark_id: String,
+    host: String,
+    bundles: Vec<BenchmarkTransferredBundle>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
+struct BenchmarkTransferredBundle {
+    candidate: String,
+    plan_id: String,
+    run_number: usize,
+    path: String,
+    sha256: String,
+    content: String,
+}
+
+#[derive(Debug, Serialize)]
+struct BenchmarkEvidenceImportResult {
+    benchmark_id: String,
+    host: String,
+    imported: usize,
+    already_present: usize,
+    total: usize,
+}
+
 #[derive(Debug, Clone)]
 struct BenchmarkExpectedRequestContract {
     context_tokens: u32,
@@ -1723,6 +1752,36 @@ fn run() -> Result<(), String> {
                 pending_only,
             )?;
             let yaml = serde_yaml::to_string(&worklist).map_err(|e| e.to_string())?;
+            print!("{yaml}");
+        }
+        "benchmark-export-host" => {
+            let kit_dir = args.get(2).ok_or_else(|| {
+                "usage: meshfit benchmark-export-host <kit-dir> (--host NODE | --current-host)"
+                    .to_string()
+            })?;
+            let explicit_host = option_value(&args[3..], "--host")?.map(str::to_string);
+            let current_host = args.iter().any(|arg| arg == "--current-host");
+            if explicit_host.is_some() == current_host {
+                return Err("exactly one of --host NODE or --current-host is required".to_string());
+            }
+            let host = explicit_host.unwrap_or_else(|| discover_local().node.id);
+            let transfer = export_benchmark_host_evidence(Path::new(kit_dir), &host)?;
+            let yaml = serde_yaml::to_string(&transfer).map_err(|e| e.to_string())?;
+            print!("{yaml}");
+        }
+        "benchmark-import-host" => {
+            let kit_dir = args.get(2).ok_or_else(|| {
+                "usage: meshfit benchmark-import-host <kit-dir> <host-evidence.yaml>".to_string()
+            })?;
+            let transfer_path = args
+                .get(3)
+                .ok_or_else(|| "missing host-evidence.yaml".to_string())?;
+            let raw = fs::read_to_string(transfer_path)
+                .map_err(|e| format!("read {transfer_path}: {e}"))?;
+            let transfer: BenchmarkHostEvidenceTransfer =
+                serde_yaml::from_str(&raw).map_err(|e| format!("parse {transfer_path}: {e}"))?;
+            let result = import_benchmark_host_evidence(Path::new(kit_dir), &transfer)?;
+            let yaml = serde_yaml::to_string(&result).map_err(|e| e.to_string())?;
             print!("{yaml}");
         }
         "benchmark-status" => {
