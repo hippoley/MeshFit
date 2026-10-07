@@ -3586,6 +3586,98 @@ mod tests {
         assert!(benchmark_plan_warnings(&selected).is_empty());
     }
 
+    fn peer_evidence_snapshot(
+        measurements: Vec<meshfit_core::PeerMeasurementEvidence>,
+    ) -> InfrastructureSnapshot {
+        InfrastructureSnapshot {
+            infrastructure: meshfit_core::InfrastructureIR {
+                nodes: vec![],
+                links: vec![],
+            },
+            hardware_identities: std::collections::BTreeMap::new(),
+            peer_measurements: measurements,
+            warnings: vec![],
+        }
+    }
+
+    fn peer_measurement(
+        latency_ms: Option<f64>,
+        bandwidth_gbps: Option<f64>,
+        captured_at_unix_ms: Option<u128>,
+    ) -> meshfit_core::PeerMeasurementEvidence {
+        meshfit_core::PeerMeasurementEvidence {
+            from_node: "node-a".into(),
+            to_node: "node-b".into(),
+            kind: LinkKind::Ethernet,
+            latency_ms,
+            jitter_ms: Some(0.03),
+            bandwidth_gbps,
+            source: Some("meshfit-peer-probe".into()),
+            captured_at_unix_ms,
+        }
+    }
+
+    #[test]
+    fn single_host_candidate_does_not_require_peer_measurement() {
+        let snapshot = peer_evidence_snapshot(vec![]);
+        let nodes = vec!["node-a".to_string()];
+        let check = benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_010_000);
+
+        assert!(check.ready);
+        assert!(check.measurements.is_empty());
+        assert!(check.issues.is_empty());
+    }
+
+    #[test]
+    fn cross_node_candidate_requires_peer_measurement_provenance() {
+        let snapshot = peer_evidence_snapshot(vec![]);
+        let nodes = vec!["node-a".to_string(), "node-b".to_string()];
+        let check = benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_010_000);
+
+        assert!(!check.ready);
+        assert!(check
+            .issues
+            .iter()
+            .any(|issue| issue.contains("no peer measurement provenance")));
+    }
+
+    #[test]
+    fn cross_node_candidate_accepts_complete_measured_peer_evidence() {
+        let snapshot = peer_evidence_snapshot(vec![peer_measurement(
+            Some(0.42),
+            Some(21.8),
+            Some(1_700_000_000_000),
+        )]);
+        let nodes = vec!["node-a".to_string(), "node-b".to_string()];
+        let check = benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_010_000);
+
+        assert!(check.ready);
+        assert!(check.issues.is_empty());
+        assert_eq!(check.measurements.len(), 1);
+        assert_eq!(check.measurements[0].age_seconds, Some(10));
+        assert_eq!(
+            check.measurements[0].source.as_deref(),
+            Some("meshfit-peer-probe")
+        );
+    }
+
+    #[test]
+    fn cross_node_candidate_rejects_rtt_without_bandwidth() {
+        let snapshot = peer_evidence_snapshot(vec![peer_measurement(
+            Some(0.42),
+            None,
+            Some(1_700_000_000_000),
+        )]);
+        let nodes = vec!["node-a".to_string(), "node-b".to_string()];
+        let check = benchmark_peer_evidence_check_at(&snapshot, &nodes, 1_700_000_010_000);
+
+        assert!(!check.ready);
+        assert!(check
+            .issues
+            .iter()
+            .any(|issue| issue.contains("no measured bandwidth")));
+    }
+
     #[test]
     fn benchmark_auto_defaults_to_at_least_ten_samples() {
         assert_eq!(default_measured_requests(1), 10);
