@@ -4003,6 +4003,59 @@ mod tests {
             .any(|issue| issue.contains("RAM capacity mismatch")));
     }
 
+    fn compute_proxy_bundle(id: &str, decode_scale: f64) -> BenchmarkBundle {
+        let mut bundle: BenchmarkBundle =
+            serde_yaml::from_str(include_str!("../../../examples/benchmark-bundle.yaml")).unwrap();
+        bundle.benchmark_id = id.into();
+        for measurement in &mut bundle.measurements {
+            let decode_ms = measurement.total_ms - measurement.ttft_ms;
+            measurement.total_ms = measurement.ttft_ms + decode_ms / decode_scale;
+        }
+        bundle
+    }
+
+    #[test]
+    fn benchmark_compute_proxy_aggregates_stable_real_bundle_shape() {
+        let bundles = vec![
+            compute_proxy_bundle("run-01", 0.98),
+            compute_proxy_bundle("run-02", 1.00),
+            compute_proxy_bundle("run-03", 1.02),
+        ];
+
+        let report = build_benchmark_compute_proxy(&bundles).unwrap();
+        assert_eq!(report.schema, "meshfit.benchmark-compute-proxy/v1");
+        assert_eq!(report.bundle_count, 3);
+        assert_eq!(report.benchmark_ids, vec!["run-01", "run-02", "run-03"]);
+        assert!(report.mean_decode_tokens_per_second > 0.0);
+        assert_eq!(report.relative_compute, report.mean_decode_tokens_per_second);
+        assert!(report.coefficient_of_variation < 0.20);
+        assert!(report.stable);
+    }
+
+    #[test]
+    fn benchmark_compute_proxy_rejects_mixed_hardware() {
+        let mut bundles = vec![
+            compute_proxy_bundle("run-01", 1.0),
+            compute_proxy_bundle("run-02", 1.0),
+            compute_proxy_bundle("run-03", 1.0),
+        ];
+        bundles[2].request.identity.hardware.devices[0].model = "foreign-gpu".into();
+
+        let error = build_benchmark_compute_proxy(&bundles).unwrap_err();
+        assert!(error.contains("different hardware identity"));
+    }
+
+    #[test]
+    fn benchmark_compute_proxy_requires_three_runs() {
+        let bundles = vec![
+            compute_proxy_bundle("run-01", 1.0),
+            compute_proxy_bundle("run-02", 1.0),
+        ];
+
+        let error = build_benchmark_compute_proxy(&bundles).unwrap_err();
+        assert!(error.contains("at least 3 independent"));
+    }
+
     #[test]
     fn benchmark_plan_selection_keeps_three_strategies_distinct() {
         fn plan(
