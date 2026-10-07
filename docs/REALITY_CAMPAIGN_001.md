@@ -79,23 +79,31 @@ Do not edit generated BenchmarkBundle files by hand.
 
 ### 1. Discover every real host
 
-On each machine, give MeshFit a stable logical node ID and capture discovery:
+On each machine, give MeshFit a stable logical node ID and capture both hardware
+discovery and runtime inventory immediately after the host comes up:
 
 ```bash
 export MESHFIT_NODE_ID=node-a
 meshfit discover > node-a.raw.yaml
+meshfit runtimes > node-a-runtimes.yaml
 cp node-a.raw.yaml node-a.yaml
 ```
 
-Repeat for every host. Treat `node-*.raw.yaml` as immutable machine-derived
-evidence. Insert `relative_compute` only into the working `node-*.yaml`
-copies used to build the coordinator snapshot. Never edit the raw discovery
-artifacts in place.
+Repeat for every host. Treat `node-*.raw.yaml` and
+`node-*-runtimes.yaml` as immutable machine-derived evidence. Review the
+runtime inventory before spending time on compute/network probes; if no runtime
+needed by any candidate is discoverable on PATH, fix the host image/environment
+before proceeding.
 
+Runtime inventory is intentionally separate from `LocalDiscovery`; do not copy
+runtime fields into the discovery YAML or snapshot by hand.
+
+Insert `relative_compute` only into the working `node-*.yaml` copies used to
+build the coordinator snapshot. Never edit the raw discovery artifacts in place.
 The hardware identity, accelerator inventory, local topology, driver metadata,
-and runtime discovery fields in the working copies must remain byte-for-byte
-derived from their raw counterparts; only the explicitly documented
-`relative_compute` field may be added or changed.
+and warnings in the working copies must remain derived from their raw
+counterparts; only the explicitly documented `relative_compute` field may be
+added or changed.
 
 ### 2. Measure the compute-ordering proxy
 
@@ -470,7 +478,7 @@ following occurs:
 - a benchmark host fails `CONTROL.sha256` verification;
 - hardware or local topology no longer matches the frozen snapshot;
 - the model SHA-256 differs between hosts;
-- the selected runtime is unavailable on its assigned host;
+- the selected runtime is unavailable on its assigned host or the frozen runtime inventory shows the required runtime missing;
 - the service port is occupied;
 - candidate plans collapse to the same effective placement;
 - the frozen `meshfit-plan-id.txt` is changed after benchmark execution begins;
