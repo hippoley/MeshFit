@@ -192,7 +192,6 @@ struct BenchmarkInvalidBundle {
     error: String,
 }
 
-
 #[derive(Debug, Serialize)]
 struct BenchmarkProofReceipt {
     schema: String,
@@ -1645,7 +1644,6 @@ fn finalize_benchmark_kit(kit_dir: &Path) -> Result<BenchmarkComparisonReport, S
 
     load_benchmark_comparison_report(&kit_dir.join("comparison.yaml"))
 }
-
 
 fn sha256_hex(bytes: &[u8]) -> String {
     format!("{:x}", Sha256::digest(bytes))
