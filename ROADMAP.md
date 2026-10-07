@@ -1,5 +1,7 @@
 # Roadmap
 
+> **Current state — Engineering Stable / Reality Verification P0:** the benchmark and execution framework is no longer MeshFit's primary bottleneck. The project now prioritizes real heterogeneous hardware, measured network tiers, at least three executable placements, repeated raw BenchmarkBundle runs, and the first defensible headline number. New framework work should not preempt this Reality Gate unless it fixes evidence integrity or blocks real execution.
+
 MeshFit's roadmap is ordered by the shortest path to a real closed loop.
 
 ## 1. Structural placement — v0.1
@@ -70,7 +72,7 @@ MeshFit's roadmap is ordered by the shortest path to a real closed loop.
 - [x] benchmark-host hardware attestation — logical host IDs are checked against snapshot hardware identity before execution; architecture/OS/heterogeneous accelerator profile/RAM are hard gates, CPU/driver drift is explicit warning
 - [x] host-level readiness audit — one read-only report reuses execution preflight across every candidate assigned to a machine, exposes local hardware/runtime/model readiness, and supports a non-zero `--require-ready` gate before any runtime launch
 - [x] port-scoped batch execution isolation — run-one locks one slot, candidate/host executors hold the listen-port lock across the full batch to prevent interleaved timing evidence; 109-step main CI Reality Verified on run #764
-- [ ] real repeated-run distributions on heterogeneous hardware
+- [ ] **P0 Reality Gate:** real repeated-run distributions on heterogeneous hardware
 - [x] exact-evidence prediction intervals — sample stddev/CV + 95% Student-t next-observation interval for identical execution identity/context/concurrency; 124-step CI Reality Verified on run #920; cross-hardware intervals remain pending
 - [x] memory calibration contract + CLI — PlanIR required-memory vs observed peak-VRAM error/correction ratios; synthetic CI Reality Verified on runs #877/#900; real GPU repeated calibration pending
 - [x] exact-identity performance calibration contract — plan/fingerprint/context/concurrency/BenchmarkConfig hard-bound; TTFT/decode error reporting CI Reality Verified on run #956
