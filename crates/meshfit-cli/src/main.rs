@@ -5348,7 +5348,7 @@ mod tests {
                 &expected_hardware,
                 &expected_model,
                 &[],
-                kit.listen_port,
+                &expected_request,
                 &lock_path,
             ),
             ("pending", None)
