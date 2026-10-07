@@ -548,55 +548,55 @@ fn benchmark_peer_evidence_check_at(
                 .iter()
                 .filter(|measurement| {
                     (measurement.from_node == *from_node && measurement.to_node == *to_node)
-                        || (measurement.from_node == *to_node
-                            && measurement.to_node == *from_node)
+                        || (measurement.from_node == *to_node && measurement.to_node == *from_node)
                 })
                 .max_by_key(|measurement| measurement.captured_at_unix_ms.unwrap_or(0));
 
             let mut pair_issues = Vec::new();
-            let (source, latency_ms, bandwidth_gbps, age_seconds) =
-                if let Some(measurement) = evidence {
-                    if measurement.source.as_deref() != Some("meshfit-peer-probe") {
-                        pair_issues.push(format!(
-                            "{from_node}<->{to_node} peer evidence source is {:?}; expected meshfit-peer-probe",
-                            measurement.source
-                        ));
-                    }
-                    if measurement.latency_ms.is_none() {
-                        pair_issues.push(format!(
-                            "{from_node}<->{to_node} peer evidence has no measured RTT"
-                        ));
-                    }
-                    if measurement.bandwidth_gbps.is_none() {
-                        pair_issues.push(format!(
-                            "{from_node}<->{to_node} peer evidence has no measured bandwidth"
-                        ));
-                    }
-                    let age_seconds = measurement.captured_at_unix_ms.map(|captured_at| {
-                        if captured_at > now_unix_ms.saturating_add(60_000) {
-                            warnings.push(format!(
-                                "{from_node}<->{to_node} peer measurement timestamp is in the future by more than 60 seconds"
-                            ));
-                        }
-                        now_unix_ms.saturating_sub(captured_at) / 1_000
-                    });
-                    if measurement.captured_at_unix_ms.is_none() {
-                        pair_issues.push(format!(
-                            "{from_node}<->{to_node} peer evidence has no capture timestamp"
-                        ));
-                    }
-                    (
-                        measurement.source.clone(),
-                        measurement.latency_ms,
-                        measurement.bandwidth_gbps,
-                        age_seconds.map(|age| age.min(u64::MAX as u128) as u64),
-                    )
-                } else {
+            let (source, latency_ms, bandwidth_gbps, age_seconds) = if let Some(measurement) =
+                evidence
+            {
+                if measurement.source.as_deref() != Some("meshfit-peer-probe") {
                     pair_issues.push(format!(
-                        "{from_node}<->{to_node} has no peer measurement provenance in the snapshot"
+                        "{from_node}<->{to_node} peer evidence source is {:?}; expected meshfit-peer-probe",
+                        measurement.source
                     ));
-                    (None, None, None, None)
-                };
+                }
+                if measurement.latency_ms.is_none() {
+                    pair_issues.push(format!(
+                        "{from_node}<->{to_node} peer evidence has no measured RTT"
+                    ));
+                }
+                if measurement.bandwidth_gbps.is_none() {
+                    pair_issues.push(format!(
+                        "{from_node}<->{to_node} peer evidence has no measured bandwidth"
+                    ));
+                }
+                let age_seconds = measurement.captured_at_unix_ms.map(|captured_at| {
+                    if captured_at > now_unix_ms.saturating_add(60_000) {
+                        warnings.push(format!(
+                            "{from_node}<->{to_node} peer measurement timestamp is in the future by more than 60 seconds"
+                        ));
+                    }
+                    now_unix_ms.saturating_sub(captured_at) / 1_000
+                });
+                if measurement.captured_at_unix_ms.is_none() {
+                    pair_issues.push(format!(
+                        "{from_node}<->{to_node} peer evidence has no capture timestamp"
+                    ));
+                }
+                (
+                    measurement.source.clone(),
+                    measurement.latency_ms,
+                    measurement.bandwidth_gbps,
+                    age_seconds.map(|age| age.min(u64::MAX as u128) as u64),
+                )
+            } else {
+                pair_issues.push(format!(
+                    "{from_node}<->{to_node} has no peer measurement provenance in the snapshot"
+                ));
+                (None, None, None, None)
+            };
 
             issues.extend(pair_issues.iter().cloned());
             measurements.push(BenchmarkPeerMeasurementStatus {
