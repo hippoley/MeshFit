@@ -3991,10 +3991,12 @@ mod tests {
         let mut baseline: BenchmarkBundle = serde_yaml::from_str(fixture_raw).unwrap();
         baseline.benchmark_id = "baseline-run-01".into();
         baseline.request.executable.source_plan_id = "plan-baseline".into();
+        baseline.request.executable.working_node = "node-a".into();
 
         let mut meshfit = baseline.clone();
         meshfit.benchmark_id = "meshfit-run-01".into();
         meshfit.request.executable.source_plan_id = "plan-meshfit".into();
+        meshfit.request.executable.working_node = "node-b".into();
         for measurement in &mut meshfit.measurements {
             measurement.ttft_ms *= 0.9;
             measurement.total_ms *= 0.95;
@@ -4010,11 +4012,30 @@ mod tests {
             serde_yaml::to_string(&meshfit).unwrap(),
         )
         .unwrap();
-        fs::write(dir.join("inputs/snapshot.yaml"), "snapshot: fixture\n").unwrap();
+
+        let expected_hardware = baseline.request.identity.hardware.clone();
+        let expected_model = baseline.request.identity.model.clone();
+        let mut hardware_identities = std::collections::BTreeMap::new();
+        hardware_identities.insert("node-a".to_string(), expected_hardware.clone());
+        hardware_identities.insert("node-b".to_string(), expected_hardware);
+        let snapshot = InfrastructureSnapshot {
+            infrastructure: meshfit_core::InfrastructureIR {
+                nodes: Vec::new(),
+                links: Vec::new(),
+            },
+            hardware_identities,
+            peer_measurements: Vec::new(),
+            warnings: Vec::new(),
+        };
+        fs::write(
+            dir.join("inputs/snapshot.yaml"),
+            serde_yaml::to_string(&snapshot).unwrap(),
+        )
+        .unwrap();
         fs::write(dir.join("inputs/target.yaml"), "target: fixture\n").unwrap();
         fs::write(
             dir.join("inputs/model-identity.yaml"),
-            "model_identity: fixture\n",
+            serde_yaml::to_string(&expected_model).unwrap(),
         )
         .unwrap();
 
