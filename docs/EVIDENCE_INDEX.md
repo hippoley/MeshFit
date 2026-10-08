@@ -54,6 +54,7 @@ provider APIs, or benchmark policy. It is to make the
 | Provider launch / termination evidence | `110440bd227029feef8c8dad3f6281f92884f85f` / PR #100 | provider identity, launch, path validation and billing-stop actions are retained |
 | Executable Lambda pre-spend capacity receipt | `5ab411f9d50e8d988103a0466ba93d284c9fc7c8` / PR #113 | authenticated instance-type response is hashed; exact shapes, common live region, burn rate and $50 wall-clock ceiling are fail-closed |
 | External audit handoff root | `d882be1f6301876e4ed79aa9441d4d0418a14244` / PR #117 | `benchmark-proof.yaml` is the reviewer root linking frozen inputs, candidate plans and raw bundles by SHA-256 |
+| Independent proof verification | `130ff0c64a4d89e46b0d29b7a37e2a1ff876cfd2` / PR #120 | an external consumer can reject path escape, hash tamper, identity drift, completeness mismatch and report mismatch without asking the planner to make a new decision |
 
 ## External audit root
 
@@ -171,12 +172,54 @@ A reviewer can test the central claim in this order:
 6. PRs #95/#96/#98/#99 — verify physical network evidence is conservative and fresh
 7. PR #113 — verify provider capacity/cost selection is a fail-closed receipt
 8. PR #117 — verify `benchmark-proof.yaml` is the external audit root
-9. Issue #82 — verify whether real BenchmarkBundles and a benchmark proof now exist
+9. PR #120 — independently verify the receipt against the frozen kit and raw bundles
+10. Issue #82 — verify whether real BenchmarkBundles and a benchmark proof now exist
 
 If #82 still has zero real bundles, the correct conclusion is:
 
 > the methodology is implemented and externally inspectable, but the first real
 > placement proof is still pending.
+
+## Anti-substitution north star
+
+MeshFit should assume that placement generation itself will become increasingly
+commoditized by stronger optimizers, LLMs and infrastructure agents.
+
+The durable layer is therefore not ownership of a particular scheduling
+heuristic. It is the trust boundary around a decision:
+
+```text
+optimizer / heuristic / LLM / human
+        ↓
+precommitted decision
+        ↓
+measured physical evidence
+        ↓
+execution identity
+        ↓
+tamper-evident proof
+        ↓
+independent verification
+        ↓
+externally reviewable claim
+```
+
+A stronger model can become another decision producer without replacing this
+verification layer.
+
+Future work should be prioritized only when it does at least one of the
+following:
+
+- binds a claim to physical or externally observable reality;
+- reduces the gap between a precommitted decision and what actually executed;
+- makes evidence easier for an independent party to reject or reproduce;
+- creates a reusable artifact that can enter an external review or governance
+  process;
+- solves a concrete cost, reliability, capacity, compliance or audit problem on
+  real infrastructure.
+
+Features whose only advantage is "the planner is smarter" should be treated as
+replaceable unless they produce one of those durable outputs.
 
 ## 5–10 year credential boundary
 
