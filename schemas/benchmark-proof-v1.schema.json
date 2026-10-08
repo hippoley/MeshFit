@@ -1,0 +1,88 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hippoley/MeshFit/schemas/benchmark-proof-v1.schema.json",
+  "title": "MeshFit Benchmark Proof Receipt v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "benchmark_id",
+    "kit_complete",
+    "expected_bundles",
+    "valid_bundles",
+    "evidence_publishable",
+    "evidence_status",
+    "inputs",
+    "candidates",
+    "report"
+  ],
+  "properties": {
+    "schema": { "const": "meshfit.benchmark-proof/v1" },
+    "benchmark_id": { "type": "string", "minLength": 1 },
+    "kit_complete": { "type": "boolean" },
+    "expected_bundles": { "type": "integer", "minimum": 0 },
+    "valid_bundles": { "type": "integer", "minimum": 0 },
+    "evidence_publishable": { "type": "boolean" },
+    "evidence_status": { "type": "string", "minLength": 1 },
+    "inputs": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/input" }
+    },
+    "candidates": {
+      "type": "array",
+      "items": { "$ref": "#/$defs/candidate" }
+    },
+    "report": {
+      "type": "object",
+      "description": "BenchmarkComparisonReport as emitted by MeshFit. The receipt binds this report as a structured claim result; deeper report-schema validation remains owned by the report type."
+    }
+  },
+  "$defs": {
+    "sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "input": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["role", "path", "sha256"],
+      "properties": {
+        "role": { "type": "string", "minLength": 1 },
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" }
+      }
+    },
+    "candidate": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["name", "plan_id", "benchmark_host", "runtime", "bundles"],
+      "properties": {
+        "name": { "type": "string", "minLength": 1 },
+        "plan_id": { "type": "string", "minLength": 1 },
+        "benchmark_host": { "type": "string", "minLength": 1 },
+        "runtime": { "type": "string", "minLength": 1 },
+        "bundles": {
+          "type": "array",
+          "items": { "$ref": "#/$defs/bundle" }
+        }
+      }
+    },
+    "bundle": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["path", "sha256", "benchmark_id", "source_plan_id"],
+      "properties": {
+        "path": { "type": "string", "minLength": 1 },
+        "sha256": { "$ref": "#/$defs/sha256" },
+        "benchmark_id": { "type": "string", "minLength": 1 },
+        "source_plan_id": { "type": "string", "minLength": 1 },
+        "source_commit": {
+          "type": "string",
+          "pattern": "^[0-9a-f]{40}$"
+        },
+        "binary_sha256": { "$ref": "#/$defs/sha256" },
+        "captured_at": { "type": "string", "minLength": 1 }
+      }
+    }
+  }
+}
