@@ -56,7 +56,8 @@ provider APIs, or benchmark policy. It is to make the
 | External audit handoff root | `d882be1f6301876e4ed79aa9441d4d0418a14244` / PR #117 | `benchmark-proof.yaml` is the reviewer root linking frozen inputs, candidate plans and raw bundles by SHA-256 |
 | Independent proof verification | `130ff0c64a4d89e46b0d29b7a37e2a1ff876cfd2` / PR #120 | an external consumer can reject path escape, hash tamper, identity drift, completeness mismatch and report mismatch without asking the planner to make a new decision |
 | Reviewer-facing Proof Explorer | `a3bd8b1f53f767124f887163472e89d240f91da1` / PR #125 | a third party can inspect the public proof contract interactively without treating the UI as the verifier |
-| CI proof consumer action | PR pending | a third party can make its own workflow fail closed on MeshFit proof verification and bind downstream policy to the verified proof digest |
+| CI proof consumer action | `1333d8fc9b43c1c061d20ff2f785c666b2b19968` / PR #128 | a third party can make its own workflow fail closed on MeshFit proof verification and bind downstream policy to the verified proof digest |
+| Positive/negative consumer conformance | `852dbfb2f5fab3bf993dfbe7abd9fe4e87cb3f04` / PR #130 | the reusable Action accepts a valid provisional proof, exports its digest, rejects an incompatible proof, and still rejects provisional evidence when publishability is required |
 
 ## External audit root
 
