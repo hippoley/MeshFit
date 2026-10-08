@@ -5497,7 +5497,13 @@ mod tests {
 
     #[test]
     fn benchmark_proof_succeeds_for_complete_provisional_kit() {
-        let dir = status_test_dir("proof-complete-provisional");
+        let external_dir = std::env::var_os("MESHFIT_PROOF_CONFORMANCE_DIR").map(PathBuf::from);
+        let dir = external_dir
+            .clone()
+            .unwrap_or_else(|| status_test_dir("proof-complete-provisional"));
+        if dir.exists() {
+            fs::remove_dir_all(&dir).unwrap();
+        }
         fs::create_dir_all(dir.join("inputs")).unwrap();
         fs::create_dir_all(dir.join("results/baseline")).unwrap();
         fs::create_dir_all(dir.join("results/meshfit")).unwrap();
@@ -5690,7 +5696,11 @@ mod tests {
         let escape = resolve_proof_path(&canonical_root, "../outside.yaml").unwrap_err();
         assert!(escape.contains("disallowed path component"));
 
-        let _ = fs::remove_dir_all(dir);
+        if external_dir.is_none() {
+            let _ = fs::remove_dir_all(dir);
+        } else {
+            eprintln!("retained proof conformance fixture at {}", dir.display());
+        }
     }
 
     #[test]
