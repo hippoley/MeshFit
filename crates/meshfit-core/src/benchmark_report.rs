@@ -362,6 +362,7 @@ fn evidence_qualification(
     let mut all_ids = std::collections::HashSet::new();
     let mut compared_plan_ids = std::collections::HashSet::new();
     let mut source_commit: Option<&str> = None;
+    let mut binary_sha256: Option<&str> = None;
 
     for candidate in candidates {
         let Some(first_bundle) = candidate.bundles.first() else {
@@ -929,6 +930,7 @@ mod tests {
         bundle.request.executable.source_plan_id = plan_id.into();
         bundle.provenance.source = "meshfit-local-runner".into();
         bundle.provenance.commit = Some(source_commit.into());
+        bundle.provenance.binary_sha256 = Some("binary-sha".into());
         bundle.provenance.captured_at = Some("unix_ms:1700000000000".into());
         let measurement = bundle.measurements[0].clone();
         bundle.measurements = vec![measurement; 10];
@@ -973,6 +975,23 @@ mod tests {
         assert!(!publishable);
         assert!(status.contains("campaign is already bound to 'abc'"));
         assert!(status.contains("source commit 'def'"));
+    }
+
+    #[test]
+    fn publication_requires_one_meshfit_binary_across_campaign() {
+        let mut candidates = publishable_test_candidates(["abc", "abc", "abc", "abc"]);
+        let (publishable, status) =
+            evidence_qualification(&candidates, ComparisonObjective::P95TtftMs);
+        assert!(publishable, "{status}");
+
+        candidates[1].bundles[1].provenance.binary_sha256 = Some("different-binary".into());
+        let (publishable, status) =
+            evidence_qualification(&candidates, ComparisonObjective::P95TtftMs);
+
+        assert!(!publishable);
+        assert!(status.contains("binary SHA-256"));
+        assert!(status.contains("different-binary"));
+        assert!(status.contains("binary-sha"));
     }
 
     #[test]
