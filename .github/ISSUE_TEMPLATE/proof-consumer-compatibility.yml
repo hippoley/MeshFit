@@ -1,8 +1,6 @@
 name: Proof consumer / interoperability
 description: Report a real MeshFit proof-consumption, verification, schema, attestation, or external-inventory compatibility problem.
 title: "[proof-consumer] "
-labels:
-  - interoperability
 body:
   - type: markdown
     attributes:
