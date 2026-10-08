@@ -118,6 +118,26 @@ placement API. A standard placement object can become an optional precommit
 input only when there is a real consumer/use case and a stable correlation
 boundary.
 
+KEP-5313 also keeps **consumer feedback** out of the read-only
+`PlacementDecision` object and points feedback toward a separate channel such
+as events, metrics, or a purpose-built feedback API. That ownership rule is a
+good fit for placement proof:
+
+```text
+PlacementDecision (scheduler-owned, read-only to consumers)
+        ↓
+deployment / execution
+        ↓
+separate execution-proof / conformance evidence
+        ↓
+review, policy, or optional feedback channel
+```
+
+MeshFit should therefore never require a consumer to mutate the placement
+decision in order to attach proof. Correlation should be by stable decision /
+placement identity or digest, while proof remains a separately owned evidence
+object.
+
 ## Anti-substitution test
 
 A proposed feature belongs in the durable layer only when replacing the planner
