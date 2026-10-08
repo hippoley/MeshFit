@@ -47,7 +47,7 @@ jobs:
           cat >"$TMP/source/mlperf-system-info-single-node-0.lstopo.xml" <<'XML'
           <topology><object type="Machine"><info name="HostName" value="node-a"/><info name="Architecture" value="x86_64"/><info name="OSName" value="Linux"/></object></topology>
           XML
-          python3 tools/mlcommons_infragraph_to_meshfit.py             --infragraph-yaml "$TMP/infragraph.yaml"             --sysinfo-dir "$TMP/source"             --out-dir "$TMP/seed"
+          python3 tools/mlcommons_infragraph_to_meshfit.py             --infragraph-yaml "$TMP/infragraph.yaml"             --sysinfo-dir "$TMP/source"             --out-dir "$TMP/seed"             --assume-zero-hourly-cost
           test -f "$TMP/seed/discovery-node-a.yaml"
           cargo run -p meshfit -- snapshot-manifest "$TMP/seed/snapshot-manifest.yaml" > "$TMP/snapshot.yaml"
           grep -q "node-a" "$TMP/snapshot.yaml"
