@@ -665,6 +665,7 @@ mod tests {
                 source: "test".into(),
                 source_url: None,
                 commit: Some("abc".into()),
+                binary_sha256: None,
                 captured_at: None,
             },
         }
