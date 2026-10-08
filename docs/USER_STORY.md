@@ -94,9 +94,14 @@ Current solver/compiler coverage is strongest for:
 - vLLM single-host / same-host TP compilation;
 - llama.cpp single-host / CPU-offload compilation.
 
-The following names exist in the IR or long-term vision but are **not current
-end-to-end product commitments**:
+The following names exist in the IR, examples, evidence identity, or long-term
+vision but are **not current end-to-end decision commitments**:
 
+- MoE-aware placement policy from `is_moe` / `active_parameters_b`;
+- automatic quantization selection (quantization is currently evidence/artifact identity);
+- hard placement gating from `p95_latency_ms` or `budget_per_day_usd`;
+- storage-aware placement;
+- failure-domain-aware placement;
 - Pipeline Parallel placement search/execution;
 - Expert Parallel placement search/execution;
 - Replica placement search/execution;
@@ -128,8 +133,9 @@ The ten long-term questions above currently resolve as follows:
    CPU-offload paths exist, while PP/EP/replication are deferred;
 7. **which runtime should execute** — represented and compiled for the current
    vLLM/llama.cpp subset, not every advertised runtime capability;
-8. **expected memory/network/latency/throughput/cost** — **partial**; memory,
-   communication/cost contracts and exact-evidence calibration exist, but no
+8. **expected memory/network/latency/throughput/cost** — **partial**; memory
+   and TP communication/cost contracts plus exact-evidence calibration exist,
+   but `p95_latency_ms` / daily budget are not yet full solver gates and no
    generic cross-hardware latency/throughput predictor is claimed;
 9. **dominant bottleneck** — available where current structural/evidence
    contracts support it; not a universal causal diagnosis engine;
