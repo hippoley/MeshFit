@@ -33,3 +33,53 @@ jobs:
         run: |
           set -euo pipefail
           test "$ACTION_OUTCOME" = "failure"
+
+
+  accept-provisional-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+      - uses: dtolnay/rust-toolchain@stable
+
+      - name: Materialize a clearly synthetic provisional conformance vector
+        shell: bash
+        env:
+          MESHFIT_PROOF_CONFORMANCE_DIR: /tmp/meshfit-proof-conformance
+        run: |
+          set -euo pipefail
+          cargo test -p meshfit benchmark_proof_succeeds_for_complete_provisional_kit -- --nocapture --test-threads=1
+          test -f "$MESHFIT_PROOF_CONFORMANCE_DIR/benchmark-proof.yaml"
+
+      - name: Verify the retained provisional proof through the consumer action
+        id: accept
+        uses: ./.github/actions/verify-proof
+        with:
+          proof: /tmp/meshfit-proof-conformance/benchmark-proof.yaml
+          root: /tmp/meshfit-proof-conformance
+          require-publishable: "false"
+
+      - name: Assert immutable verified-proof output
+        shell: bash
+        env:
+          PROOF_SHA256: ${{ steps.accept.outputs.proof-sha256 }}
+        run: |
+          set -euo pipefail
+          test "${#PROOF_SHA256}" -eq 64
+          printf '%s' "$PROOF_SHA256" | grep -Eq '^[0-9a-f]{64}$'
+
+      - name: Prove the same synthetic vector cannot satisfy a publishable gate
+        id: publishable
+        continue-on-error: true
+        uses: ./.github/actions/verify-proof
+        with:
+          proof: /tmp/meshfit-proof-conformance/benchmark-proof.yaml
+          root: /tmp/meshfit-proof-conformance
+          require-publishable: "true"
+
+      - name: Assert provisional evidence stays non-publishable
+        shell: bash
+        env:
+          ACTION_OUTCOME: ${{ steps.publishable.outcome }}
+        run: |
+          set -euo pipefail
+          test "$ACTION_OUTCOME" = "failure"
