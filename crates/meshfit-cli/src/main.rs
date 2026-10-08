@@ -2814,13 +2814,13 @@ fn export_benchmark_proof_package(
             }
             let src = resolve_proof_path(&canonical_root, rel)?;
             let dst = out_dir.join(rel);
-            let parent = dst.parent().ok_or_else(|| {
-                format!("exported proof path '{}' has no parent", dst.display())
-            })?;
+            let parent = dst
+                .parent()
+                .ok_or_else(|| format!("exported proof path '{}' has no parent", dst.display()))?;
             fs::create_dir_all(parent)
                 .map_err(|e| format!("create proof export directory {}: {e}", parent.display()))?;
-            let bytes =
-                fs::read(&src).map_err(|e| format!("read proof artifact {}: {e}", src.display()))?;
+            let bytes = fs::read(&src)
+                .map_err(|e| format!("read proof artifact {}: {e}", src.display()))?;
             fs::write(&dst, bytes)
                 .map_err(|e| format!("write proof artifact {}: {e}", dst.display()))?;
         }
@@ -5779,8 +5779,7 @@ mod tests {
         assert_eq!(verification.proof_sha256.len(), 64);
 
         let export_dir = status_test_dir("proof-export-provisional");
-        let exported =
-            export_benchmark_proof_package(&proof_path, &dir, &export_dir).unwrap();
+        let exported = export_benchmark_proof_package(&proof_path, &dir, &export_dir).unwrap();
         assert_eq!(exported.proof_sha256, verification.proof_sha256);
         assert!(export_dir.join("benchmark-proof.yaml").is_file());
         assert!(export_dir.join("kit.yaml").is_file());
