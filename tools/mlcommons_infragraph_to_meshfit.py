@@ -19,6 +19,7 @@ from __future__ import annotations
 
 import argparse
 import json
+import math
 import re
 import xml.etree.ElementTree as ET
 from pathlib import Path
@@ -109,7 +110,32 @@ def safe_name(raw: str) -> str:
     return out or "node"
 
 
-def build_seed(instance: dict, sysinfo: dict, xml_path: Path) -> dict:
+def parse_hourly_cost_map(path: Path) -> dict[str, float]:
+    raw = yaml.safe_load(path.read_text(encoding="utf-8"))
+    if not isinstance(raw, dict) or not raw:
+        raise ValueError("hourly cost map must be a non-empty mapping of instance.name -> USD/hour")
+
+    costs: dict[str, float] = {}
+    for key, raw_value in raw.items():
+        node_id = str(key).strip()
+        if not node_id:
+            raise ValueError("hourly cost map contains an empty node id")
+        try:
+            value = float(raw_value)
+        except (TypeError, ValueError) as exc:
+            raise ValueError(f"{node_id}: invalid hourly cost {raw_value!r}") from exc
+        if not math.isfinite(value) or value < 0.0:
+            raise ValueError(f"{node_id}: hourly cost must be finite and non-negative")
+        costs[node_id] = value
+    return costs
+
+
+def build_seed(
+    instance: dict,
+    sysinfo: dict,
+    xml_path: Path,
+    hourly_cost_usd: float,
+) -> dict:
     node_id = str(instance.get("name") or "").strip()
     if not node_id:
         raise ValueError("InfraGraph instance has no name")
@@ -161,6 +187,7 @@ def build_seed(instance: dict, sysinfo: dict, xml_path: Path) -> dict:
         "hardware_identity.ram_mib is intentionally unset because MLCommons host_memory_capacity is presentation-rounded.",
         "accelerator free memory and relative_compute are intentionally unset/zero; measure them on the execution host.",
         "local_fabric is intentionally empty; MLCommons InfraGraph PR #1088 does not infer inter-node fabric edges.",
+        "hourly_cost_usd is an explicit operator declaration; MLCommons sysinfo does not supply this cost fact.",
         "Run meshfit discover on the target host and meshfit probe for required peers before Benchmark 001 readiness.",
     ]
     if stem:
@@ -179,18 +206,58 @@ def build_seed(instance: dict, sysinfo: dict, xml_path: Path) -> dict:
             "site": "mlcommons-import",
             "ram_gb": host_ram_gib,
             "accelerators": accelerators,
-            "hourly_cost_usd": 0.0,
+            "hourly_cost_usd": hourly_cost_usd,
         },
         "local_fabric": [],
         "warnings": warnings,
     }
 
 
-def convert(infragraph_yaml: Path, sysinfo_dir: Path, out_dir: Path) -> list[Path]:
+def convert(
+    infragraph_yaml: Path,
+    sysinfo_dir: Path,
+    out_dir: Path,
+    hourly_costs: dict[str, float] | None = None,
+    assume_zero_hourly_cost: bool = False,
+) -> list[Path]:
     graph = yaml.safe_load(infragraph_yaml.read_text(encoding="utf-8")) or {}
     instances = graph.get("instances") or []
     if not instances:
         raise ValueError("InfraGraph YAML contains no instances")
+
+    instance_names = {
+        str(instance.get("name") or "").strip()
+        for instance in instances
+    }
+    if "" in instance_names:
+        raise ValueError("InfraGraph instance has no name")
+
+    if assume_zero_hourly_cost:
+        if hourly_costs is not None:
+            raise ValueError("hourly cost map and zero-cost assumption are mutually exclusive")
+        hourly_costs = {node_id: 0.0 for node_id in instance_names}
+    elif hourly_costs is None:
+        raise ValueError(
+            "MLCommons sysinfo does not define node hourly cost; provide "
+            "--hourly-cost-map or explicitly pass --assume-zero-hourly-cost"
+        )
+
+    missing_costs = sorted(instance_names - set(hourly_costs))
+    extra_costs = sorted(set(hourly_costs) - instance_names)
+    if missing_costs:
+        raise ValueError(
+            "hourly cost map is missing InfraGraph instance(s): "
+            + ", ".join(missing_costs)
+        )
+    if extra_costs:
+        raise ValueError(
+            "hourly cost map contains unknown InfraGraph instance(s): "
+            + ", ".join(extra_costs)
+        )
+    for node_id, value in hourly_costs.items():
+        if not math.isfinite(value) or value < 0.0:
+            raise ValueError(f"{node_id}: hourly cost must be finite and non-negative")
+
     if out_dir.exists():
         raise ValueError(f"output directory already exists: {out_dir}")
 
@@ -214,7 +281,12 @@ def convert(infragraph_yaml: Path, sysinfo_dir: Path, out_dir: Path) -> list[Pat
                     f"{instance.get('name')}: missing paired {stem}.json or {stem}.lstopo.xml"
                 )
             sysinfo = json.loads(sysinfo_path.read_text(encoding="utf-8"))
-            seed = build_seed(instance, sysinfo, xml_path)
+            seed = build_seed(
+                instance,
+                sysinfo,
+                xml_path,
+                hourly_costs[str(instance.get("name") or "").strip()],
+            )
             node_id = seed["node"]["id"]
             if node_id in seen_node_ids:
                 raise ValueError(f"duplicate InfraGraph instance/node id: {node_id}")
@@ -248,10 +320,32 @@ def main() -> int:
     parser.add_argument("--infragraph-yaml", required=True, type=Path)
     parser.add_argument("--sysinfo-dir", required=True, type=Path)
     parser.add_argument("--out-dir", required=True, type=Path)
+    cost_group = parser.add_mutually_exclusive_group(required=True)
+    cost_group.add_argument(
+        "--hourly-cost-map",
+        type=Path,
+        help="YAML/JSON mapping of InfraGraph instance.name to declared marginal USD/hour",
+    )
+    cost_group.add_argument(
+        "--assume-zero-hourly-cost",
+        action="store_true",
+        help="Explicitly declare zero marginal compute cost for every imported node",
+    )
     args = parser.parse_args()
 
     try:
-        files = convert(args.infragraph_yaml, args.sysinfo_dir, args.out_dir)
+        hourly_costs = (
+            parse_hourly_cost_map(args.hourly_cost_map)
+            if args.hourly_cost_map is not None
+            else None
+        )
+        files = convert(
+            args.infragraph_yaml,
+            args.sysinfo_dir,
+            args.out_dir,
+            hourly_costs=hourly_costs,
+            assume_zero_hourly_cost=args.assume_zero_hourly_cost,
+        )
     except Exception as exc:
         parser.error(str(exc))
     for path in files:
