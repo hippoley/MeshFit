@@ -208,6 +208,31 @@ meshfit benchmark-verify-proof benchmark-proof.yaml \
 Until Reality Campaign 001 produces retained real BenchmarkBundles, the bundled
 Explorer example remains explicitly non-publishable.
 
+### Use MeshFit as a CI gate
+
+The reusable verifier action turns the proof contract into a machine-consumption
+surface:
+
+```yaml
+- id: meshfit-proof
+  uses: hippoley/MeshFit/.github/actions/verify-proof@<PINNED_COMMIT_SHA>
+  with:
+    proof: evidence/benchmark-proof.yaml
+    root: evidence/benchmark-001
+    require-publishable: "true"
+```
+
+The action fails closed on an invalid proof and exports the SHA-256 of the exact
+verified proof bytes so downstream attestation or policy systems can bind their
+decision to an immutable subject. See
+[Proof Consumer Contract](docs/PROOF_CONSUMER_CONTRACT.md).
+
+The long-lived category boundary is intentionally narrow: MeshFit is not trying
+to own generic "decision provenance." The durable layer is
+[execution-bound placement proof](docs/PLACEMENT_PROOF_BOUNDARY.md): binding a
+precommitted placement to the physical execution and evidence later used for a
+performance/cost claim.
+
 ---
 
 ## It sits above the runtimes

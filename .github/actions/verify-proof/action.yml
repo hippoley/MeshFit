@@ -1,0 +1,75 @@
+name: MeshFit Verify Proof
+description: Verify a MeshFit benchmark proof against its materialized audit root.
+author: hippoley
+
+inputs:
+  proof:
+    description: Path to benchmark-proof.yaml.
+    required: true
+    default: benchmark-proof.yaml
+  root:
+    description: Path to the materialized benchmark kit referenced by the proof.
+    required: true
+    default: benchmark-001
+  require-publishable:
+    description: Fail unless the proof passes MeshFit's publishability gate.
+    required: false
+    default: "true"
+
+outputs:
+  proof-sha256:
+    description: SHA-256 of the exact proof bytes that were verified.
+    value: ${{ steps.digest.outputs.sha256 }}
+
+runs:
+  using: composite
+  steps:
+    - name: Validate inputs
+      shell: bash
+      env:
+        MESHFIT_PROOF: ${{ inputs.proof }}
+        MESHFIT_ROOT: ${{ inputs.root }}
+      run: |
+        set -euo pipefail
+        test -f "$MESHFIT_PROOF"
+        test -d "$MESHFIT_ROOT"
+
+    - name: Verify publishable proof
+      if: ${{ inputs.require-publishable == 'true' }}
+      shell: bash
+      env:
+        MESHFIT_PROOF: ${{ inputs.proof }}
+        MESHFIT_ROOT: ${{ inputs.root }}
+      run: |
+        set -euo pipefail
+        cargo run --quiet \
+          --manifest-path "$GITHUB_ACTION_PATH/../../../Cargo.toml" \
+          -p meshfit -- \
+          benchmark-verify-proof "$MESHFIT_PROOF" \
+          --root "$MESHFIT_ROOT" \
+          --require-publishable
+
+    - name: Verify proof
+      if: ${{ inputs.require-publishable != 'true' }}
+      shell: bash
+      env:
+        MESHFIT_PROOF: ${{ inputs.proof }}
+        MESHFIT_ROOT: ${{ inputs.root }}
+      run: |
+        set -euo pipefail
+        cargo run --quiet \
+          --manifest-path "$GITHUB_ACTION_PATH/../../../Cargo.toml" \
+          -p meshfit -- \
+          benchmark-verify-proof "$MESHFIT_PROOF" \
+          --root "$MESHFIT_ROOT"
+
+    - name: Export verified proof digest
+      id: digest
+      shell: bash
+      env:
+        MESHFIT_PROOF: ${{ inputs.proof }}
+      run: |
+        set -euo pipefail
+        digest="$(sha256sum "$MESHFIT_PROOF" | awk '{print $1}')"
+        echo "sha256=$digest" >> "$GITHUB_OUTPUT"
+        echo "Verified MeshFit proof SHA-256: $digest"

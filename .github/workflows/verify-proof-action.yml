@@ -1,0 +1,35 @@
+name: Verify Proof Action Contract
+
+on:
+  pull_request:
+    paths:
+      - ".github/actions/verify-proof/**"
+      - ".github/workflows/verify-proof-action.yml"
+      - "crates/meshfit-cli/**"
+      - "crates/meshfit-core/**"
+      - "Cargo.toml"
+      - "Cargo.lock"
+  workflow_dispatch:
+
+jobs:
+  reject-incompatible-proof:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v6
+
+      - name: Invoke consumer action on incompatible task-local fixture
+        id: reject
+        continue-on-error: true
+        uses: ./.github/actions/verify-proof
+        with:
+          proof: contrib/infrabench/placement-proof-integrity/environment/campaign/benchmark-proof.yaml
+          root: contrib/infrabench/placement-proof-integrity/environment/campaign
+          require-publishable: "false"
+
+      - name: Assert fail-closed behavior
+        shell: bash
+        env:
+          ACTION_OUTCOME: ${{ steps.reject.outcome }}
+        run: |
+          set -euo pipefail
+          test "$ACTION_OUTCOME" = "failure"
