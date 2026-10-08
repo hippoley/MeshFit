@@ -55,6 +55,7 @@ provider APIs, or benchmark policy. It is to make the
 | Executable Lambda pre-spend capacity receipt | `5ab411f9d50e8d988103a0466ba93d284c9fc7c8` / PR #113 | authenticated instance-type response is hashed; exact shapes, common live region, burn rate and $50 wall-clock ceiling are fail-closed |
 | External audit handoff root | `d882be1f6301876e4ed79aa9441d4d0418a14244` / PR #117 | `benchmark-proof.yaml` is the reviewer root linking frozen inputs, candidate plans and raw bundles by SHA-256 |
 | Independent proof verification | `130ff0c64a4d89e46b0d29b7a37e2a1ff876cfd2` / PR #120 | an external consumer can reject path escape, hash tamper, identity drift, completeness mismatch and report mismatch without asking the planner to make a new decision |
+| Reviewer-facing Proof Explorer | `a3bd8b1f53f767124f887163472e89d240f91da1` / PR #125 | a third party can inspect the public proof contract interactively without treating the UI as the verifier |
 
 ## External audit root
 
@@ -164,16 +165,17 @@ Signals that do count include:
 
 A reviewer can test the central claim in this order:
 
-1. [Trace-to-Placement Contract](TRACE_TO_PLACEMENT_CONTRACT.md)
-2. [Reality Campaign 001](REALITY_CAMPAIGN_001.md)
-3. PR #104 — verify placement is frozen before measurement
-4. PR #105 — verify repeated-run execution identity is enforced
-5. PR #116 — verify actual executable bytes are bound into each run
-6. PRs #95/#96/#98/#99 — verify physical network evidence is conservative and fresh
-7. PR #113 — verify provider capacity/cost selection is a fail-closed receipt
-8. PR #117 — verify `benchmark-proof.yaml` is the external audit root
-9. PR #120 — independently verify the receipt against the frozen kit and raw bundles
-10. Issue #82 — verify whether real BenchmarkBundles and a benchmark proof now exist
+1. [Proof Explorer](../web/proof-explorer/) — understand the decision/evidence/claim boundary interactively
+2. [Trace-to-Placement Contract](TRACE_TO_PLACEMENT_CONTRACT.md)
+3. [Reality Campaign 001](REALITY_CAMPAIGN_001.md)
+4. PR #104 — verify placement is frozen before measurement
+5. PR #105 — verify repeated-run execution identity is enforced
+6. PR #116 — verify actual executable bytes are bound into each run
+7. PRs #95/#96/#98/#99 — verify physical network evidence is conservative and fresh
+8. PR #113 — verify provider capacity/cost selection is a fail-closed receipt
+9. PR #117 — verify `benchmark-proof.yaml` is the external audit root
+10. PR #120 — independently verify the receipt against the frozen kit and raw bundles
+11. Issue #82 — verify whether real BenchmarkBundles and a benchmark proof now exist
 
 If #82 still has zero real bundles, the correct conclusion is:
 
