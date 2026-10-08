@@ -138,3 +138,37 @@ https://github.com/hippoley/MeshFit/blob/main/docs/PROOF_CONSUMER_CONTRACT.md#be
 
 This URI identifies the predicate semantics; it does not imply endorsement by
 GitHub, Sigstore, in-toto, or another standards body.
+
+## Portable proof package
+
+A reviewer or downstream repository should not have to infer which files belong
+to a proof.
+
+MeshFit can materialize the exact dependency closure already named by the proof:
+
+```bash
+meshfit benchmark-export-proof benchmark-proof.yaml \
+  --root benchmark-001 \
+  --out exported-proof
+```
+
+The export operation:
+
+1. verifies the source proof against the source audit root;
+2. reads only input and bundle paths already referenced by
+   `meshfit.benchmark-proof/v1`;
+3. rejects path escape and the reserved `benchmark-proof.yaml` destination;
+4. writes the exact proof bytes plus the referenced artifacts while preserving
+   their relative paths;
+5. re-runs independent proof verification against the exported directory;
+6. requires the exported proof SHA-256 to match the source proof SHA-256.
+
+The destination must not already exist. A failed export is removed rather than
+left as a partial evidence tree.
+
+This is intentionally **not** a new manifest or archive format. The proof remains
+the only evidence index, and the exported directory is simply a portable
+materialization of that index.
+
+For a public campaign, use `--require-publishable` so a provisional evidence
+set cannot be exported as if it had passed the publication gate.
