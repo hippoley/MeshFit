@@ -116,6 +116,8 @@ The machine-readable verifier result has schema:
 meshfit.benchmark-proof-verification/v1
 ```
 
+Its public JSON Schema is [`schemas/benchmark-proof-verification-v1.schema.json`](../schemas/benchmark-proof-verification-v1.schema.json). Downstream consumers may validate the result shape independently of the planner.
+
 It is suitable as an attestation predicate because the attestation subject is
 the exact verified proof digest, while the predicate records the independent
 verification result.
