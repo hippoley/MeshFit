@@ -208,3 +208,42 @@ contract. It currently freezes and/or verifies:
 The next useful validation is external: map a portable workload representation
 onto this contract and identify whether the boundary is sufficient without
 changing either system's core schema.
+
+## 10. External audit handoff root
+
+For external review, the root artifact is the generated `benchmark-proof.yaml` receipt rather than a new provenance schema.
+
+The receipt is designed to let an independent reviewer walk from a claim back to the exact frozen inputs and raw execution evidence used to support it. It includes SHA-256 references for:
+
+- the execution kit and comparison manifest;
+- the infrastructure snapshot;
+- the placement target;
+- the model identity;
+- the frozen prompt;
+- every raw BenchmarkBundle included in the comparison.
+
+For each candidate it also records the frozen `plan_id`, benchmark host, runtime, bundle path/hash, MeshFit source commit, and capture time. The referenced BenchmarkBundle carries the full execution identity, so the receipt does not duplicate that schema.
+
+The intended verification path is:
+
+```text
+benchmark-proof.yaml
+        |
+        +--> frozen inputs (hash verified)
+        |
+        +--> candidate plan_id
+        |
+        +--> raw BenchmarkBundle hashes
+                    |
+                    +--> ExecutionIdentity
+                    +--> request/workload contract
+                    +--> model/runtime/topology identity
+                    +--> measurements
+        |
+        +--> comparison report / claim gate
+```
+
+An external consumer should be able to reject the claim if any referenced file hash, plan binding, source revision, execution identity, or publication gate fails to match. No external integration should require MeshFit to invent a second sidecar carrying the same information.
+
+This receipt is the preferred handoff artifact for future reproducibility or benchmark-infrastructure discussions. A downstream standard may choose to reference or hash it, but the underlying Reality Campaign evidence remains authoritative.
+
