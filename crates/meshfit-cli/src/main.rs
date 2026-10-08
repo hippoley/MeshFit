@@ -361,6 +361,8 @@ struct BenchmarkProofBundle {
     #[serde(skip_serializing_if = "Option::is_none")]
     source_commit: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    binary_sha256: Option<String>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     captured_at: Option<String>,
 }
 
@@ -2393,6 +2395,7 @@ fn build_benchmark_proof_receipt(kit_dir: &Path) -> Result<BenchmarkProofReceipt
                 benchmark_id: bundle.benchmark_id,
                 source_plan_id: bundle.request.executable.source_plan_id,
                 source_commit: bundle.provenance.commit,
+                binary_sha256: bundle.provenance.binary_sha256,
                 captured_at: bundle.provenance.captured_at,
             });
         }
