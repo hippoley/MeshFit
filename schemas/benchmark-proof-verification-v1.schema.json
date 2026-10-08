@@ -1,0 +1,46 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://github.com/hippoley/MeshFit/schemas/benchmark-proof-verification-v1.schema.json",
+  "title": "MeshFit Benchmark Proof Verification v1",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schema",
+    "proof_sha256",
+    "inputs_verified",
+    "bundles_verified",
+    "report_matches",
+    "evidence_publishable",
+    "evidence_status",
+    "verified"
+  ],
+  "properties": {
+    "schema": {
+      "const": "meshfit.benchmark-proof-verification/v1"
+    },
+    "proof_sha256": {
+      "type": "string",
+      "pattern": "^[0-9a-f]{64}$"
+    },
+    "inputs_verified": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "bundles_verified": {
+      "type": "integer",
+      "minimum": 0
+    },
+    "report_matches": {
+      "const": true
+    },
+    "evidence_publishable": {
+      "type": "boolean"
+    },
+    "evidence_status": {
+      "type": "string"
+    },
+    "verified": {
+      "const": true
+    }
+  }
+}
