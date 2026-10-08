@@ -17,7 +17,61 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
-      - run: python3 -m py_compile tools/compute_proxy.py
+      - run: python3 -m py_compile tools/compute_proxy.py tools/lambda_capacity_gate.py
+      - run: |
+          cat >/tmp/lambda-instance-types.json <<'JSON'
+          {
+            "data": {
+              "gpu_2x_a6000": {
+                "instance_type": {
+                  "name": "gpu_2x_a6000",
+                  "description": "2x NVIDIA A6000 (48 GB)",
+                  "gpu_description": "NVIDIA A6000 (48 GB)",
+                  "price_cents_per_hour": 218,
+                  "specs": {"vcpus": 24, "memory_gib": 200, "storage_gib": 1400, "gpus": 2},
+                  "architecture": "x86_64"
+                },
+                "regions_with_capacity_available": [{"name": "us-test-1", "description": "test"}]
+              },
+              "gpu_1x_h100_pcie": {
+                "instance_type": {
+                  "name": "gpu_1x_h100_pcie",
+                  "description": "1x NVIDIA H100 PCIe (80 GB)",
+                  "gpu_description": "NVIDIA H100 PCIe (80 GB)",
+                  "price_cents_per_hour": 329,
+                  "specs": {"vcpus": 26, "memory_gib": 200, "storage_gib": 1400, "gpus": 1},
+                  "architecture": "x86_64"
+                },
+                "regions_with_capacity_available": [{"name": "us-test-1", "description": "test"}]
+              },
+              "gpu_1x_b200": {
+                "instance_type": {
+                  "name": "gpu_1x_b200",
+                  "description": "1x NVIDIA B200 (180 GB)",
+                  "gpu_description": "NVIDIA B200 (180 GB)",
+                  "price_cents_per_hour": 699,
+                  "specs": {"vcpus": 32, "memory_gib": 256, "storage_gib": 2000, "gpus": 1},
+                  "architecture": "x86_64"
+                },
+                "regions_with_capacity_available": [{"name": "us-test-1", "description": "test"}]
+              }
+            }
+          }
+          JSON
+          python3 tools/lambda_capacity_gate.py /tmp/lambda-instance-types.json > /tmp/lambda-capacity-receipt.json
+          grep -q '"ready_to_launch_shape": true' /tmp/lambda-capacity-receipt.json
+          grep -q '"concurrent_burn_usd_per_hour": 12.46' /tmp/lambda-capacity-receipt.json
+          grep -q '"us-test-1"' /tmp/lambda-capacity-receipt.json
+          python3 - <<'PY'
+          import json
+          p = "/tmp/lambda-instance-types.json"
+          data = json.load(open(p))
+          data["data"]["gpu_1x_b200"]["regions_with_capacity_available"] = [
+              {"name": "eu-test-1", "description": "test"}
+          ]
+          json.dump(data, open("/tmp/lambda-no-common-region.json", "w"))
+          PY
+          ! python3 tools/lambda_capacity_gate.py /tmp/lambda-no-common-region.json
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
