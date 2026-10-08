@@ -185,7 +185,9 @@ repeated-run execution identity.
 That boundary is documented in the
 [Trace-to-Placement Contract](docs/TRACE_TO_PLACEMENT_CONTRACT.md), with
 [Reality Campaign 001](docs/REALITY_CAMPAIGN_001.md) as the first concrete
-conformance case.
+conformance case. For the shortest reviewer path from claims to exact public
+commits, current Reality status, and external-validation gaps, see the
+[Decision-Provenance Evidence Index](docs/EVIDENCE_INDEX.md).
 
 ---
 
