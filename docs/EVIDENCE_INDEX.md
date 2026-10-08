@@ -178,6 +178,41 @@ If #82 still has zero real bundles, the correct conclusion is:
 > the methodology is implemented and externally inspectable, but the first real
 > placement proof is still pending.
 
+## 5–10 year credential boundary
+
+Not every current artifact is expected to remain important for a decade.
+
+### Durable methodology assets
+
+These should remain legible even if runtimes, accelerators, providers, and
+benchmark versions change:
+
+- precommit the placement decision before observing performance;
+- bind claims to immutable source and executable identity;
+- bind repeated runs to one ExecutionIdentity;
+- retain measured physical evidence with capture time/freshness;
+- preserve raw result hashes and an audit root;
+- separate observed infrastructure from downstream placement decisions;
+- make claim publication fail closed when evidence cannot support it.
+
+### Replaceable 2026 implementation details
+
+These are useful execution details, not the long-term credential itself:
+
+- Lambda-specific instance-type names and prices;
+- A6000 / H100 / B200 as the first campaign shape;
+- vLLM or any particular runtime version;
+- the exact Benchmark 001 objective and campaign budget;
+- individual CLI command names;
+- current provider/network plumbing.
+
+A durable identity claim should therefore be phrased around the methodology and
+externally reviewed evidence chain, not around a transient provider or release.
+
+The 5–10 year credential becomes materially stronger only when the methodology is
+also countersigned outside this repository through review, reproduction, merged
+contributions, working-group records, or repeated requests for technical judgment.
+
 ## Graduation criteria
 
 MeshFit moves from a project toward an external position only when:
