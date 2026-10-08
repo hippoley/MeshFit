@@ -1,0 +1,7 @@
+plan_id: meshfit-plan-001
+placement: tensor_parallel
+nodes:
+  - node-a
+  - node-b
+runtime: vllm
+model_id: qwen-demo
