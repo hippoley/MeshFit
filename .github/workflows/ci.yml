@@ -49,7 +49,7 @@ jobs:
           XML
           python3 tools/mlcommons_infragraph_to_meshfit.py             --infragraph-yaml "$TMP/infragraph.yaml"             --sysinfo-dir "$TMP/source"             --out-dir "$TMP/seed"
           test -f "$TMP/seed/discovery-node-a.yaml"
-          cargo run -p meshfit -- snapshot "$TMP/seed/discovery-node-a.yaml" > "$TMP/snapshot.yaml"
+          cargo run -p meshfit -- snapshot-manifest "$TMP/seed/snapshot-manifest.yaml" > "$TMP/snapshot.yaml"
           grep -q "node-a" "$TMP/snapshot.yaml"
           grep -q "relative_compute: 0" "$TMP/snapshot.yaml"
       - run: |
