@@ -6,9 +6,7 @@
   "additionalProperties": false,
   "required": [
     "schema",
-    "proof_path",
     "proof_sha256",
-    "audit_root",
     "inputs_verified",
     "bundles_verified",
     "report_matches",
@@ -20,17 +18,9 @@
     "schema": {
       "const": "meshfit.benchmark-proof-verification/v1"
     },
-    "proof_path": {
-      "type": "string",
-      "minLength": 1
-    },
     "proof_sha256": {
       "type": "string",
       "pattern": "^[0-9a-f]{64}$"
-    },
-    "audit_root": {
-      "type": "string",
-      "minLength": 1
     },
     "inputs_verified": {
       "type": "integer",
