@@ -331,8 +331,12 @@ fn run_against_child(
 fn meshfit_binary_sha256() -> Result<String, String> {
     let path = std::env::current_exe()
         .map_err(|error| format!("resolve current MeshFit executable for provenance: {error}"))?;
-    let bytes = std::fs::read(&path)
-        .map_err(|error| format!("read MeshFit executable '{}' for provenance: {error}", path.display()))?;
+    let bytes = std::fs::read(&path).map_err(|error| {
+        format!(
+            "read MeshFit executable '{}' for provenance: {error}",
+            path.display()
+        )
+    })?;
     Ok(format!("{:x}", Sha256::digest(bytes)))
 }
 
