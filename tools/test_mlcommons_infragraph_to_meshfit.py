@@ -29,7 +29,13 @@ class AdapterTests(unittest.TestCase):
                         "device": "host-type",
                         "count": 1,
                         "description": "mlperf-system-info-single-node-0",
-                    }
+                    },
+                    {
+                        "name": "cpu-only",
+                        "device": "cpu-host-type",
+                        "count": 1,
+                        "description": "mlperf-system-info-single-node-1",
+                    },
                 ],
             }
             graph_path = root / "infragraph.yaml"
@@ -58,8 +64,31 @@ class AdapterTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
+            cpu_stem = "mlperf-system-info-single-node-1"
+            (src / f"{cpu_stem}.json").write_text(
+                json.dumps(
+                    {
+                        "host_processor_model_name": "Intel Xeon Platinum",
+                        "host_memory_capacity": "128GiB",
+                        "accelerator_model_name": "",
+                        "accelerators_per_node": 0,
+                        "accelerator_memory_capacity": "",
+                        "inference_backend": "",
+                        "driver": "",
+                        "operating_system": "ubuntu 24.04",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (src / f"{cpu_stem}.lstopo.xml").write_text(
+                """<topology><object type="Machine"><info name="HostName" value="cpu-only"/>
+                <info name="Architecture" value="x86_64"/>
+                <info name="OSName" value="Linux"/></object></topology>""",
+                encoding="utf-8",
+            )
+
             files = adapter.convert(graph_path, src, out)
-            self.assertEqual(len(files), 2)
+            self.assertEqual(len(files), 3)
 
             discovery = yaml.safe_load((out / "discovery-node-a.yaml").read_text())
             self.assertEqual(discovery["hardware_identity"]["architecture"], "x86_64")
@@ -73,8 +102,16 @@ class AdapterTests(unittest.TestCase):
             self.assertEqual(discovery["local_fabric"], [])
             self.assertTrue(any("not execution attestation" in w for w in discovery["warnings"]))
 
+            cpu_discovery = yaml.safe_load((out / "discovery-cpu-only.yaml").read_text())
+            self.assertEqual(cpu_discovery["node"]["accelerators"], [])
+            self.assertEqual(cpu_discovery["hardware_identity"]["devices"], [])
+            self.assertEqual(cpu_discovery["node"]["ram_gb"], 128.0)
+
             manifest = yaml.safe_load((out / "snapshot-manifest.yaml").read_text())
-            self.assertEqual(manifest["discovery_files"], ["discovery-node-a.yaml"])
+            self.assertEqual(
+                manifest["discovery_files"],
+                ["discovery-node-a.yaml", "discovery-cpu-only.yaml"],
+            )
             self.assertEqual(manifest["probes"], [])
 
     def test_refuses_missing_architecture(self):
