@@ -574,8 +574,34 @@ curl --fail --silent --show-error \
   > lambda-instance-types.json
 ```
 
-Inspect the exact provider type names instead of hard-coding names from a stale
-document:
+Run the executable pre-spend gate against the captured response. It selects
+exactly one provider type for each frozen campaign role, requires x86_64,
+computes the live same-region intersection, derives the authenticated concurrent
+burn rate, and calculates the maximum GPU wall-clock time under the frozen $50
+ceiling:
+
+```bash
+python3 tools/lambda_capacity_gate.py   lambda-instance-types.json   > lambda-capacity-gate.json
+```
+
+Retain both `lambda-instance-types.json` and `lambda-capacity-gate.json` as
+campaign evidence. The gate fails closed when a role is missing or ambiguous,
+the required GPU count/architecture does not match, any selected shape has no
+live capacity, or the three shapes have no common region.
+
+The current defaults match the frozen primary campaign roles:
+
+- node-a: regex `A6000`, exactly 2 GPUs;
+- node-b: regex `H100 PCIe`, exactly 1 GPU;
+- node-c: regex `B200`, exactly 1 GPU;
+- architecture: `x86_64`;
+- first-run GPU budget ceiling: `$50`.
+
+If Lambda changes its descriptions such that a default regex is ambiguous, do
+not guess. Narrow the corresponding `--node-*-match` regex and retain the exact
+command with the receipt.
+
+For human inspection, the raw provider response can still be listed with:
 
 ```bash
 jq -r '
@@ -593,39 +619,14 @@ jq -r '
 ' lambda-instance-types.json
 ```
 
-For the current primary campaign shape, choose the actual returned type keys for:
+Read the selected provider keys, `common_regions`,
+`concurrent_burn_usd_per_hour`, and
+`max_gpu_wall_clock_hours_under_budget` from
+`lambda-capacity-gate.json`. Export those exact provider type keys before
+launch; do not substitute a different hardware shape silently.
 
-- node-a: 2 x NVIDIA A6000 48 GB;
-- node-b: 1 x NVIDIA H100 PCIe 80 GB;
-- node-c: 1 x NVIDIA B200 180 GB.
-
-Then compute the live same-region intersection from the captured response:
-
-```bash
-export MESHFIT_NODE_A_TYPE=<provider-type-key-for-2x-a6000>
-export MESHFIT_NODE_B_TYPE=<provider-type-key-for-1x-h100-pcie>
-export MESHFIT_NODE_C_TYPE=<provider-type-key-for-1x-b200>
-
-jq -r \
-  --arg a "$MESHFIT_NODE_A_TYPE" \
-  --arg b "$MESHFIT_NODE_B_TYPE" \
-  --arg c "$MESHFIT_NODE_C_TYPE" '
-    [.data[$a].regions_with_capacity_available[].name] as $a_regions
-    | [.data[$b].regions_with_capacity_available[].name] as $b_regions
-    | [.data[$c].regions_with_capacity_available[].name] as $c_regions
-    | [
-        $a_regions[]
-        | . as $region
-        | select(
-            ($b_regions | index($region)) != null
-            and ($c_regions | index($region)) != null
-          )
-      ]
-    | unique[]
-  ' lambda-instance-types.json
-```
-
-The campaign must not launch unless this prints at least one region. Capacity is
+The campaign must not launch unless the gate exits successfully and
+`common_regions` is non-empty. Capacity is
 first-come and can change between this query and launch, so a later
 provider/capacity error is a normal external gate, not permission to substitute a
 different hardware shape silently.
