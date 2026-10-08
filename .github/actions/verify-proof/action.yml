@@ -19,7 +19,10 @@ inputs:
 outputs:
   proof-sha256:
     description: SHA-256 of the exact proof bytes that were verified.
-    value: ${{ steps.digest.outputs.sha256 }}
+    value: ${{ steps.verify.outputs.sha256 }}
+  verification-json:
+    description: Path to the JSON verification result emitted by MeshFit for this proof.
+    value: ${{ steps.verify.outputs.verification-json }}
 
 runs:
   using: composite
@@ -34,42 +37,61 @@ runs:
         test -f "$MESHFIT_PROOF"
         test -d "$MESHFIT_ROOT"
 
-    - name: Verify publishable proof
-      if: ${{ inputs.require-publishable == 'true' }}
-      shell: bash
-      env:
-        MESHFIT_PROOF: ${{ inputs.proof }}
-        MESHFIT_ROOT: ${{ inputs.root }}
-      run: |
-        set -euo pipefail
-        cargo run --quiet \
-          --manifest-path "$GITHUB_ACTION_PATH/../../../Cargo.toml" \
-          -p meshfit -- \
-          benchmark-verify-proof "$MESHFIT_PROOF" \
-          --root "$MESHFIT_ROOT" \
-          --require-publishable
-
     - name: Verify proof
-      if: ${{ inputs.require-publishable != 'true' }}
+      id: verify
       shell: bash
       env:
         MESHFIT_PROOF: ${{ inputs.proof }}
         MESHFIT_ROOT: ${{ inputs.root }}
+        MESHFIT_REQUIRE_PUBLISHABLE: ${{ inputs.require-publishable }}
       run: |
         set -euo pipefail
+
+        verification_json="$(mktemp "${RUNNER_TEMP:-/tmp}/meshfit-proof-verification.XXXXXX")"
+        args=(
+          benchmark-verify-proof "$MESHFIT_PROOF"
+          --root "$MESHFIT_ROOT"
+          --json
+        )
+        if [ "$MESHFIT_REQUIRE_PUBLISHABLE" = "true" ]; then
+          args+=(--require-publishable)
+        fi
+
         cargo run --quiet \
           --manifest-path "$GITHUB_ACTION_PATH/../../../Cargo.toml" \
           -p meshfit -- \
-          benchmark-verify-proof "$MESHFIT_PROOF" \
-          --root "$MESHFIT_ROOT"
+          "${args[@]}" > "$verification_json"
 
-    - name: Export verified proof digest
-      id: digest
-      shell: bash
-      env:
-        MESHFIT_PROOF: ${{ inputs.proof }}
-      run: |
-        set -euo pipefail
-        digest="$(sha256sum "$MESHFIT_PROOF" | awk '{print $1}')"
+        digest="$(
+          python3 - "$MESHFIT_PROOF" <<'PY'
+        import hashlib
+        import sys
+
+        digest = hashlib.sha256()
+        with open(sys.argv[1], "rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        print(digest.hexdigest())
+        PY
+        )"
+
+        python3 - "$verification_json" "$digest" "$MESHFIT_REQUIRE_PUBLISHABLE" <<'PY'
+        import json
+        import sys
+
+        path, digest, require_publishable = sys.argv[1:4]
+        with open(path, "r", encoding="utf-8") as handle:
+            verification = json.load(handle)
+
+        assert verification["schema"] == "meshfit.benchmark-proof-verification/v1"
+        assert verification["verified"] is True
+        assert verification["report_matches"] is True
+        assert verification["proof_sha256"] == digest
+        if require_publishable == "true":
+            assert verification["evidence_publishable"] is True
+        PY
+
         echo "sha256=$digest" >> "$GITHUB_OUTPUT"
+        echo "verification-json=$verification_json" >> "$GITHUB_OUTPUT"
         echo "Verified MeshFit proof SHA-256: $digest"
+        echo "Verification JSON: $verification_json"

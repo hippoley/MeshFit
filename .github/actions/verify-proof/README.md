@@ -29,8 +29,12 @@ jobs:
 ```
 
 The action exposes the SHA-256 of the exact proof bytes that passed verification
-so a downstream system can bind an attestation, review record, release note, or
-policy decision to that immutable subject.
+and the path to a machine-readable verification JSON document, so a downstream
+system can bind an attestation, review record, release note, or policy decision
+to that immutable subject.
+
+For a standard GitHub/Sigstore-backed composition, see
+[Verify and Attest a MeshFit Benchmark Proof](../../../docs/VERIFY_AND_ATTEST_PROOF.md).
 
 ## Trust boundary
 
@@ -65,6 +69,7 @@ benchmark claim true.
 ## Runner requirement
 
 The action builds and executes the verifier from the exact MeshFit revision named
-in `uses:`. A Rust/Cargo toolchain must be available on the runner.
+in `uses:`. A Rust/Cargo toolchain, Bash, and Python 3 must be available on the
+runner. The bundled examples and contract tests target GitHub-hosted Ubuntu.
 
 For external use, pin `uses:` to a full commit SHA rather than a mutable branch.
