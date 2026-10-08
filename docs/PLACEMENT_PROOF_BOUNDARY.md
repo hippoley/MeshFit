@@ -78,6 +78,46 @@ The MeshFit-specific boundary begins where an infrastructure placement becomes a
 falsifiable claim about what should run where, and ends with an independently
 recomputable evidence/claim result.
 
+## Relationship to standardized placement decisions
+
+Kubernetes KEP-5313 is a useful boundary test because it proposes a
+vendor-neutral `PlacementDecision` API for the resolved "which clusters" answer
+while deliberately leaving scheduling logic and downstream deployment behavior
+out of scope.
+
+MeshFit should treat that direction as complementary rather than inventing
+another general placement-decision API.
+
+A future composition can look like:
+
+```text
+vendor scheduler / LLM / placement controller
+        ↓
+standard PlacementDecision
+        ↓
+decision correlation / frozen digest
+        ↓
+actual deployment and physical execution
+        ↓
+MeshFit execution-bound placement proof
+```
+
+The long-lived MeshFit question begins **after** a decision object exists:
+
+> Did the later execution and benchmark claim actually realize the frozen
+> placement decision under the physical conditions claimed?
+
+This also distinguishes MeshFit from trusted-placement architectures that attest
+a node before admitting a workload. Pre-placement platform trust is valuable,
+but it is not the same as binding a later performance/cost claim to the exact
+decision and execution evidence.
+
+No Kubernetes API integration is claimed today. In particular, MeshFit should
+not change `meshfit.benchmark-proof/v1` merely to mirror a still-evolving
+placement API. A standard placement object can become an optional precommit
+input only when there is a real consumer/use case and a stable correlation
+boundary.
+
 ## Anti-substitution test
 
 A proposed feature belongs in the durable layer only when replacing the planner
