@@ -369,9 +369,7 @@ struct BenchmarkProofBundle {
 #[derive(Debug, Serialize)]
 struct BenchmarkProofVerification {
     schema: String,
-    proof_path: String,
     proof_sha256: String,
-    audit_root: String,
     inputs_verified: usize,
     bundles_verified: usize,
     report_matches: bool,
@@ -2730,9 +2728,7 @@ fn verify_benchmark_proof(
 
     Ok(BenchmarkProofVerification {
         schema: "meshfit.benchmark-proof-verification/v1".to_string(),
-        proof_path: proof_path.display().to_string(),
         proof_sha256: sha256_hex(&proof_bytes),
-        audit_root: audit_root.display().to_string(),
         inputs_verified: receipt.inputs.len(),
         bundles_verified: total_bundles,
         report_matches: true,
@@ -5497,9 +5493,7 @@ mod tests {
     fn benchmark_proof_verification_has_machine_json_shape() {
         let verification = BenchmarkProofVerification {
             schema: "meshfit.benchmark-proof-verification/v1".into(),
-            proof_path: "benchmark-proof.yaml".into(),
             proof_sha256: "a".repeat(64),
-            audit_root: "benchmark-001".into(),
             inputs_verified: 6,
             bundles_verified: 2,
             report_matches: true,
