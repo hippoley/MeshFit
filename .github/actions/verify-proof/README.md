@@ -29,8 +29,12 @@ jobs:
 ```
 
 The action exposes the SHA-256 of the exact proof bytes that passed verification
-so a downstream system can bind an attestation, review record, release note, or
-policy decision to that immutable subject.
+and the path to a machine-readable verification JSON document, so a downstream
+system can bind an attestation, review record, release note, or policy decision
+to that immutable subject.
+
+For a standard GitHub/Sigstore-backed composition, see
+[Verify and Attest a MeshFit Benchmark Proof](../../../docs/VERIFY_AND_ATTEST_PROOF.md).
 
 ## Trust boundary
 
