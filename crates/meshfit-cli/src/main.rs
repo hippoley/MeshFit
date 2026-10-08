@@ -2462,7 +2462,9 @@ fn build_benchmark_proof_receipt(kit_dir: &Path) -> Result<BenchmarkProofReceipt
 fn resolve_proof_path(audit_root: &Path, rel: &str) -> Result<PathBuf, String> {
     let rel_path = Path::new(rel);
     if rel_path.as_os_str().is_empty() || rel_path.is_absolute() {
-        return Err(format!("proof path '{rel}' must be a non-empty relative path"));
+        return Err(format!(
+            "proof path '{rel}' must be a non-empty relative path"
+        ));
     }
 
     for component in rel_path.components() {
@@ -2518,7 +2520,10 @@ fn verify_benchmark_proof(
     let mut input_roles = std::collections::HashMap::new();
     for input in &receipt.inputs {
         if input_roles.insert(input.role.as_str(), input).is_some() {
-            return Err(format!("proof contains duplicate input role '{}'", input.role));
+            return Err(format!(
+                "proof contains duplicate input role '{}'",
+                input.role
+            ));
         }
         let path = resolve_proof_path(&audit_root, &input.path)?;
         let bytes =
@@ -2568,8 +2573,8 @@ fn verify_benchmark_proof(
             }
 
             let path = resolve_proof_path(&audit_root, &bundle_receipt.path)?;
-            let bytes =
-                fs::read(&path).map_err(|e| format!("read proof bundle {}: {e}", path.display()))?;
+            let bytes = fs::read(&path)
+                .map_err(|e| format!("read proof bundle {}: {e}", path.display()))?;
             let observed_hash = sha256_hex(&bytes);
             if observed_hash != bundle_receipt.sha256 {
                 return Err(format!(
@@ -4766,7 +4771,9 @@ fn render_benchmark_runbook(kit: &BenchmarkExecutionKit) -> String {
     out.push_str("meshfit benchmark-status . --require-complete\n");
     out.push_str("meshfit benchmark-finalize . --markdown --require-publishable\n");
     out.push_str("meshfit benchmark-proof . --require-publishable > benchmark-proof.yaml\n");
-    out.push_str("meshfit benchmark-verify-proof benchmark-proof.yaml --root . --require-publishable\n");
+    out.push_str(
+        "meshfit benchmark-verify-proof benchmark-proof.yaml --root . --require-publishable\n",
+    );
     out.push_str("```\n\n");
 
     out.push_str("## Low-level comparison\n\n");
