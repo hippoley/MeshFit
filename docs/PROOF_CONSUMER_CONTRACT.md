@@ -118,6 +118,11 @@ meshfit.benchmark-proof-verification/v1
 
 Its public JSON Schema is [`schemas/benchmark-proof-verification-v1.schema.json`](../schemas/benchmark-proof-verification-v1.schema.json). Downstream consumers may validate the result shape independently of the planner.
 
+The v1 verification result intentionally excludes local `proof_path` and
+`audit_root` filesystem strings. Those are invocation diagnostics, not portable
+evidence facts, and including canonical runner paths would make otherwise
+equivalent attestations differ across machines.
+
 It is suitable as an attestation predicate because the attestation subject is
 the exact verified proof digest, while the predicate records the independent
 verification result.
