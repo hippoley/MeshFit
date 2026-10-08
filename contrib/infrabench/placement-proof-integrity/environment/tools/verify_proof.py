@@ -29,7 +29,9 @@ def main() -> int:
     root = Path(sys.argv[1] if len(sys.argv) > 1 else "/app/campaign")
     proof = yaml.safe_load((root / "benchmark-proof.yaml").read_text())
 
-    if proof.get("schema") != "meshfit.benchmark-proof/v1":
+    # This task fixture is intentionally a task-local repair contract. It is
+    # not the public MeshFit BenchmarkProofReceipt schema.
+    if proof.get("schema") != "meshfit.infrabench-placement-proof/v1":
         raise ValueError("unsupported proof schema")
 
     plan = safe_path(root, proof["plan"]["path"])
