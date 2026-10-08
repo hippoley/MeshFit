@@ -2017,6 +2017,35 @@ fn run() -> Result<(), String> {
                 print!("{yaml}");
             }
         }
+        "benchmark-export-proof" => {
+            let proof_path = args.get(2).ok_or_else(|| {
+                "usage: meshfit benchmark-export-proof <benchmark-proof.yaml> --root <kit-dir> --out <dir> [--require-publishable]"
+                    .to_string()
+            })?;
+            let audit_root = option_value(&args[3..], "--root")?
+                .ok_or_else(|| "--root <kit-dir> is required".to_string())?;
+            let out_dir = option_value(&args[3..], "--out")?
+                .ok_or_else(|| "--out <dir> is required".to_string())?;
+
+            let verification = export_benchmark_proof_package(
+                Path::new(proof_path),
+                Path::new(audit_root),
+                Path::new(out_dir),
+            )?;
+
+            if args.iter().any(|arg| arg == "--require-publishable")
+                && !verification.evidence_publishable
+            {
+                let _ = fs::remove_dir_all(out_dir);
+                return Err(format!(
+                    "verified exported proof is not publishable: {}",
+                    verification.evidence_status
+                ));
+            }
+
+            let yaml = serde_yaml::to_string(&verification).map_err(|e| e.to_string())?;
+            print!("{yaml}");
+        }
         "compare-benchmarks" => {
             let manifest_path = args.get(2).ok_or_else(|| {
                 "usage: meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]"
@@ -2463,7 +2492,7 @@ fn build_benchmark_proof_receipt(kit_dir: &Path) -> Result<BenchmarkProofReceipt
     })
 }
 
-fn resolve_proof_path(audit_root: &Path, rel: &str) -> Result<PathBuf, String> {
+fn normalize_proof_relative_path(rel: &str) -> Result<PathBuf, String> {
     let rel_path = Path::new(rel);
     if rel_path.as_os_str().is_empty() || rel_path.is_absolute() {
         return Err(format!(
@@ -2471,9 +2500,11 @@ fn resolve_proof_path(audit_root: &Path, rel: &str) -> Result<PathBuf, String> {
         ));
     }
 
+    let mut normalized = PathBuf::new();
     for component in rel_path.components() {
         match component {
-            Component::Normal(_) | Component::CurDir => {}
+            Component::Normal(value) => normalized.push(value),
+            Component::CurDir => {}
             _ => {
                 return Err(format!(
                     "proof path '{rel}' contains a disallowed path component"
@@ -2482,7 +2513,18 @@ fn resolve_proof_path(audit_root: &Path, rel: &str) -> Result<PathBuf, String> {
         }
     }
 
-    let candidate = audit_root.join(rel_path);
+    if normalized.as_os_str().is_empty() {
+        return Err(format!(
+            "proof path '{rel}' must contain a normal relative component"
+        ));
+    }
+
+    Ok(normalized)
+}
+
+fn resolve_proof_path(audit_root: &Path, rel: &str) -> Result<PathBuf, String> {
+    let rel_path = normalize_proof_relative_path(rel)?;
+    let candidate = audit_root.join(&rel_path);
     let canonical = candidate
         .canonicalize()
         .map_err(|e| format!("resolve proof path '{}': {e}", candidate.display()))?;
@@ -2736,6 +2778,81 @@ fn verify_benchmark_proof(
         evidence_status: recomputed_report.evidence_status,
         verified: true,
     })
+}
+
+fn export_benchmark_proof_package(
+    proof_path: &Path,
+    audit_root: &Path,
+    out_dir: &Path,
+) -> Result<BenchmarkProofVerification, String> {
+    if out_dir.exists() {
+        return Err(format!(
+            "proof export destination '{}' already exists; refusing to merge evidence trees",
+            out_dir.display()
+        ));
+    }
+
+    let source_verification = verify_benchmark_proof(proof_path, audit_root)?;
+    let proof_bytes =
+        fs::read(proof_path).map_err(|e| format!("read proof {}: {e}", proof_path.display()))?;
+    let receipt: BenchmarkProofReceipt = serde_yaml::from_slice(&proof_bytes)
+        .map_err(|e| format!("parse proof {}: {e}", proof_path.display()))?;
+    let canonical_root = audit_root
+        .canonicalize()
+        .map_err(|e| format!("resolve audit root {}: {e}", audit_root.display()))?;
+
+    let mut referenced = std::collections::BTreeSet::new();
+    for input in &receipt.inputs {
+        referenced.insert(input.path.as_str());
+    }
+    for candidate in &receipt.candidates {
+        for bundle in &candidate.bundles {
+            referenced.insert(bundle.path.as_str());
+        }
+    }
+
+    let result = (|| -> Result<BenchmarkProofVerification, String> {
+        fs::create_dir_all(out_dir)
+            .map_err(|e| format!("create proof export {}: {e}", out_dir.display()))?;
+        fs::write(out_dir.join("benchmark-proof.yaml"), &proof_bytes).map_err(|e| {
+            format!(
+                "write exported proof {}: {e}",
+                out_dir.join("benchmark-proof.yaml").display()
+            )
+        })?;
+
+        for rel in referenced {
+            let normalized_rel = normalize_proof_relative_path(rel)?;
+            if normalized_rel == Path::new("benchmark-proof.yaml") {
+                return Err(
+                    "proof references reserved export path 'benchmark-proof.yaml'".to_string(),
+                );
+            }
+            let src = resolve_proof_path(&canonical_root, rel)?;
+            let dst = out_dir.join(&normalized_rel);
+            let parent = dst
+                .parent()
+                .ok_or_else(|| format!("exported proof path '{}' has no parent", dst.display()))?;
+            fs::create_dir_all(parent)
+                .map_err(|e| format!("create proof export directory {}: {e}", parent.display()))?;
+            let bytes = fs::read(&src)
+                .map_err(|e| format!("read proof artifact {}: {e}", src.display()))?;
+            fs::write(&dst, bytes)
+                .map_err(|e| format!("write proof artifact {}: {e}", dst.display()))?;
+        }
+
+        let exported_proof = out_dir.join("benchmark-proof.yaml");
+        let exported_verification = verify_benchmark_proof(&exported_proof, out_dir)?;
+        if exported_verification.proof_sha256 != source_verification.proof_sha256 {
+            return Err("exported proof digest differs from source proof".to_string());
+        }
+        Ok(exported_verification)
+    })();
+
+    if result.is_err() {
+        let _ = fs::remove_dir_all(out_dir);
+    }
+    result
 }
 
 fn benchmark_execution_lock_target(listen_port: u16) -> PathBuf {
@@ -5744,6 +5861,20 @@ mod tests {
         assert_eq!(verification.bundles_verified, 2);
         assert_eq!(verification.proof_sha256.len(), 64);
 
+        let export_dir = status_test_dir("proof-export-provisional");
+        let exported = export_benchmark_proof_package(&proof_path, &dir, &export_dir).unwrap();
+        assert_eq!(exported.proof_sha256, verification.proof_sha256);
+        assert!(export_dir.join("benchmark-proof.yaml").is_file());
+        assert!(export_dir.join("kit.yaml").is_file());
+        assert!(export_dir.join("comparison.yaml").is_file());
+        assert!(export_dir.join("inputs/snapshot.yaml").is_file());
+        assert!(export_dir.join("inputs/target.yaml").is_file());
+        assert!(export_dir.join("inputs/model-identity.yaml").is_file());
+        assert!(export_dir.join("inputs/prompt.txt").is_file());
+        assert!(export_dir.join("results/baseline/run-01.yaml").is_file());
+        assert!(export_dir.join("results/meshfit/run-01.yaml").is_file());
+        let _ = fs::remove_dir_all(export_dir);
+
         let baseline_path = dir.join("results/baseline/run-01.yaml");
         let original_baseline = fs::read(&baseline_path).unwrap();
         fs::write(
@@ -5758,6 +5889,11 @@ mod tests {
         let canonical_root = dir.canonicalize().unwrap();
         let escape = resolve_proof_path(&canonical_root, "../outside.yaml").unwrap_err();
         assert!(escape.contains("disallowed path component"));
+
+        let reserved_alias = normalize_proof_relative_path("./benchmark-proof.yaml").unwrap();
+        assert_eq!(reserved_alias, PathBuf::from("benchmark-proof.yaml"));
+        let empty_alias = normalize_proof_relative_path(".").unwrap_err();
+        assert!(empty_alias.contains("normal relative component"));
 
         if external_dir.is_none() {
             let _ = fs::remove_dir_all(dir);
