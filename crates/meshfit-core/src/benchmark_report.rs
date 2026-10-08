@@ -506,6 +506,29 @@ fn evidence_qualification(
                 None => source_commit = Some(commit),
                 Some(_) => {}
             }
+
+            let Some(binary_sha) = bundle.provenance.binary_sha256.as_deref() else {
+                return (
+                    false,
+                    format!(
+                        "benchmark_id '{}' has no MeshFit binary SHA-256; publishable evidence must bind measurements to the executed binary",
+                        bundle.benchmark_id
+                    ),
+                );
+            };
+            match binary_sha256 {
+                Some(expected) if expected != binary_sha => {
+                    return (
+                        false,
+                        format!(
+                            "benchmark_id '{}' uses MeshFit binary SHA-256 '{}' but campaign is already bound to '{}'; publishable evidence must use one executable artifact across all candidates and runs",
+                            bundle.benchmark_id, binary_sha, expected
+                        ),
+                    );
+                }
+                None => binary_sha256 = Some(binary_sha),
+                Some(_) => {}
+            }
             if !candidate_ids.insert(bundle.benchmark_id.as_str()) {
                 return (
                     false,
