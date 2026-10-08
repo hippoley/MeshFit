@@ -42,7 +42,10 @@ Deciding whether those machines should **cooperate** is not.
 
 ## Target UX
 
-The interaction below is the product target, not the current pre-alpha CLI.
+The interaction below is an **illustrative long-term product target**, not output
+emitted by the current CLI. In particular, the latency/throughput/confidence and
+dominant-bottleneck values shown here are not claims that a general predictor or
+bottleneck-diagnosis engine is already implemented.
 
 ~~~text
 meshfit plan infra.yaml \
@@ -118,7 +121,7 @@ edge
 └─ egress
 ~~~
 
-Then it searches for a mapping:
+The **long-term** search space is broader than the current executable contract:
 
 ~~~text
 model graph
@@ -132,7 +135,15 @@ latency × throughput × memory × network × cost
 ranked deployment plans
 ~~~
 
-This is the project.
+Current end-to-end coverage is intentionally narrower: single-host placement,
+local TP, conservative cross-node TP feasibility reasoning, and CPU offload,
+with runtime compilation for the supported vLLM / llama.cpp subsets. PP, EP,
+replication and generic multi-node orchestration remain vision-level/deferred
+capabilities until reality or an external consumer justifies them.
+
+The durable current product boundary is not "every placement mode." It is that a
+supported placement can be observed, precommitted, executed, evidenced and
+independently verified without silently inventing missing physical facts.
 
 ---
 
