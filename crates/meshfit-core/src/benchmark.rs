@@ -410,6 +410,7 @@ mod tests {
                 source: "meshfit-benchmark".into(),
                 source_url: None,
                 commit: Some("abc".into()),
+                binary_sha256: None,
                 captured_at: None,
             },
         };
@@ -449,6 +450,7 @@ mod tests {
                 source: "meshfit-benchmark".into(),
                 source_url: None,
                 commit: None,
+                binary_sha256: None,
                 captured_at: None,
             },
         };
@@ -491,6 +493,7 @@ mod tests {
                 source: "meshfit-benchmark".into(),
                 source_url: None,
                 commit: None,
+                binary_sha256: None,
                 captured_at: None,
             },
         };
@@ -511,6 +514,7 @@ mod tests {
                 source: "meshfit-benchmark".into(),
                 source_url: None,
                 commit: None,
+                binary_sha256: None,
                 captured_at: None,
             },
         };

@@ -7,6 +7,7 @@ use std::{
 };
 
 use serde_json::{json, Value};
+use sha2::{Digest, Sha256};
 
 use crate::{
     artifact::inspect_model_artifact,
@@ -321,9 +322,22 @@ fn run_against_child(
             source: "meshfit-local-runner".into(),
             source_url: None,
             commit: meshfit_source_commit(),
+            binary_sha256: Some(meshfit_binary_sha256()?),
             captured_at: Some(format!("unix_ms:{unix_millis}")),
         },
     })
+}
+
+fn meshfit_binary_sha256() -> Result<String, String> {
+    let path = std::env::current_exe()
+        .map_err(|error| format!("resolve current MeshFit executable for provenance: {error}"))?;
+    let bytes = std::fs::read(&path).map_err(|error| {
+        format!(
+            "read MeshFit executable '{}' for provenance: {error}",
+            path.display()
+        )
+    })?;
+    Ok(format!("{:x}", Sha256::digest(bytes)))
 }
 
 fn meshfit_source_commit() -> Option<String> {

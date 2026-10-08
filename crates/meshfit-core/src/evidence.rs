@@ -28,6 +28,8 @@ pub struct BenchmarkProvenance {
     #[serde(default)]
     pub commit: Option<String>,
     #[serde(default)]
+    pub binary_sha256: Option<String>,
+    #[serde(default)]
     pub captured_at: Option<String>,
 }
 
@@ -326,6 +328,7 @@ mod tests {
                         source: "local-bench".into(),
                         source_url: None,
                         commit: Some("abc".into()),
+                        binary_sha256: None,
                         captured_at: None,
                     },
                 },
@@ -342,6 +345,7 @@ mod tests {
                         source: "local-bench".into(),
                         source_url: None,
                         commit: Some("def".into()),
+                        binary_sha256: None,
                         captured_at: None,
                     },
                 },
