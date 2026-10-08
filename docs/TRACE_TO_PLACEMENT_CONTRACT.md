@@ -248,3 +248,12 @@ An external consumer should be able to reject the claim if any referenced file h
 
 This receipt is the preferred handoff artifact for future reproducibility or benchmark-infrastructure discussions. A downstream standard may choose to reference or hash it, but the underlying Reality Campaign evidence remains authoritative.
 
+The receipt is independently checkable with:
+
+```bash
+meshfit benchmark-verify-proof benchmark-proof.yaml --root <materialized-kit>
+```
+
+Verification does not ask the planner to make a new decision. It only checks
+whether the published receipt is internally consistent with the frozen files and
+raw bundles it claims to represent.
