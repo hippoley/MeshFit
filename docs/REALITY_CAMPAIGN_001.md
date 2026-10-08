@@ -131,10 +131,12 @@ artifact being compared. If a fallback provider changes the campaign
 architecture (for example, to ARM64), rebuild and freeze a new campaign artifact
 before any benchmark evidence is collected.
 
-The bundle runner also records the build-time MeshFit Git commit. Final
-publishability requires one source commit across every candidate/run, so the
-binary SHA gate is an early transport/build check and the provenance gate is
-the final evidence check.
+The bundle runner records both the build-time MeshFit Git commit and the SHA-256
+of the executable bytes that are actually running. Final publishability requires
+one source commit **and one binary SHA-256** across every candidate/run. The
+pre-distribution `meshfit.sha256` check therefore protects transport, while the
+BenchmarkBundle provenance and final publication gate independently bind each
+measurement to the executed binary artifact.
 
 ### 1. Discover every real host
 
