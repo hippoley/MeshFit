@@ -5511,6 +5511,43 @@ mod tests {
     }
 
     #[test]
+    fn benchmark_proof_verification_json_matches_public_schema_fields() {
+        let verification = BenchmarkProofVerification {
+            schema: "meshfit.benchmark-proof-verification/v1".into(),
+            proof_sha256: "b".repeat(64),
+            inputs_verified: 6,
+            bundles_verified: 2,
+            report_matches: true,
+            evidence_publishable: false,
+            evidence_status: "provisional".into(),
+            verified: true,
+        };
+
+        let value = serde_json::to_value(&verification).unwrap();
+        let object = value.as_object().unwrap();
+        let schema: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../schemas/benchmark-proof-verification-v1.schema.json"
+        ))
+        .unwrap();
+
+        let required = schema["required"].as_array().unwrap();
+        let properties = schema["properties"].as_object().unwrap();
+
+        let actual_keys = object.keys().cloned().collect::<std::collections::BTreeSet<_>>();
+        let required_keys = required
+            .iter()
+            .map(|item| item.as_str().unwrap().to_string())
+            .collect::<std::collections::BTreeSet<_>>();
+        let property_keys = properties
+            .keys()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+
+        assert_eq!(actual_keys, required_keys);
+        assert_eq!(actual_keys, property_keys);
+    }
+
+    #[test]
     fn benchmark_proof_sha256_is_content_addressed() {
         assert_eq!(
             sha256_hex(b"meshfit"),
