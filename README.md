@@ -189,6 +189,25 @@ conformance case. For the shortest reviewer path from claims to exact public
 commits, current Reality status, and external-validation gaps, see the
 [Decision-Provenance Evidence Index](docs/EVIDENCE_INDEX.md).
 
+### Inspect the proof, not just the README
+
+The [Proof Explorer](web/proof-explorer/) is the reviewer-facing interaction
+surface for `meshfit.benchmark-proof/v1`. It walks a receipt through the
+precommitted decision, frozen inputs, execution identity, raw evidence, claim
+gate, and independent verification boundary.
+
+The Explorer never upgrades evidence to truth. A publishable result still has to
+pass:
+
+```bash
+meshfit benchmark-verify-proof benchmark-proof.yaml \
+  --root <materialized-kit> \
+  --require-publishable
+```
+
+Until Reality Campaign 001 produces retained real BenchmarkBundles, the bundled
+Explorer example remains explicitly non-publishable.
+
 ---
 
 ## It sits above the runtimes
