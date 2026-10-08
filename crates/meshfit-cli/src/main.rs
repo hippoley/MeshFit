@@ -1993,7 +1993,7 @@ fn run() -> Result<(), String> {
         }
         "benchmark-verify-proof" => {
             let proof_path = args.get(2).ok_or_else(|| {
-                "usage: meshfit benchmark-verify-proof <benchmark-proof.yaml> --root <kit-dir> [--require-publishable]"
+                "usage: meshfit benchmark-verify-proof <benchmark-proof.yaml> --root <kit-dir> [--require-publishable] [--json]"
                     .to_string()
             })?;
             let audit_root = option_value(&args[3..], "--root")?
@@ -2010,8 +2010,13 @@ fn run() -> Result<(), String> {
                 ));
             }
 
-            let yaml = serde_yaml::to_string(&verification).map_err(|e| e.to_string())?;
-            print!("{yaml}");
+            if args.iter().any(|arg| arg == "--json") {
+                let json = serde_json::to_string_pretty(&verification).map_err(|e| e.to_string())?;
+                println!("{json}");
+            } else {
+                let yaml = serde_yaml::to_string(&verification).map_err(|e| e.to_string())?;
+                print!("{yaml}");
+            }
         }
         "compare-benchmarks" => {
             let manifest_path = args.get(2).ok_or_else(|| {
@@ -5485,6 +5490,32 @@ mod tests {
             .issues
             .iter()
             .any(|issue| issue.contains("exceeds declared freshness limit 30s")));
+    }
+
+    #[test]
+    fn benchmark_proof_verification_has_machine_json_shape() {
+        let verification = BenchmarkProofVerification {
+            schema: "meshfit.benchmark-proof-verification/v1".into(),
+            proof_path: "benchmark-proof.yaml".into(),
+            proof_sha256: "a".repeat(64),
+            audit_root: "benchmark-001".into(),
+            inputs_verified: 6,
+            bundles_verified: 2,
+            report_matches: true,
+            evidence_publishable: false,
+            evidence_status: "provisional".into(),
+            verified: true,
+        };
+
+        let json = serde_json::to_string(&verification).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(
+            parsed["schema"],
+            "meshfit.benchmark-proof-verification/v1"
+        );
+        assert_eq!(parsed["proof_sha256"], "a".repeat(64));
+        assert_eq!(parsed["verified"], true);
+        assert_eq!(parsed["evidence_publishable"], false);
     }
 
     #[test]
