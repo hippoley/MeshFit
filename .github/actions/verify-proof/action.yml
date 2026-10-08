@@ -60,6 +60,23 @@ runs:
         cargo run --quiet           --manifest-path "$GITHUB_ACTION_PATH/../../../Cargo.toml"           -p meshfit --           "${args[@]}" > "$verification_json"
 
         digest="$(sha256sum "$MESHFIT_PROOF" | awk '{print $1}')"
+
+        python3 - "$verification_json" "$digest" "$MESHFIT_REQUIRE_PUBLISHABLE" <<'PY'
+        import json
+        import sys
+
+        path, digest, require_publishable = sys.argv[1:4]
+        with open(path, "r", encoding="utf-8") as handle:
+            verification = json.load(handle)
+
+        assert verification["schema"] == "meshfit.benchmark-proof-verification/v1"
+        assert verification["verified"] is True
+        assert verification["report_matches"] is True
+        assert verification["proof_sha256"] == digest
+        if require_publishable == "true":
+            assert verification["evidence_publishable"] is True
+        PY
+
         echo "sha256=$digest" >> "$GITHUB_OUTPUT"
         echo "verification-json=$verification_json" >> "$GITHUB_OUTPUT"
         echo "Verified MeshFit proof SHA-256: $digest"
