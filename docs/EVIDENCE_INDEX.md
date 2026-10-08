@@ -134,9 +134,12 @@ Current public alignment work is tracked in:
 - #109 — Chakra trace-to-placement boundary
 - #111 — Chakra → ASTRA-sim → MeshFit conformance case
 - #112 — MLPerf / MLCommons disclosure and provenance alignment
+- [ODSI ↔ MeshFit Placement-Proof Mapping](ODSI_PLACEMENT_PROOF_MAPPING.md) —
+  exploratory mapping from current MeshFit evidence objects to
+  `draft-wang-cats-odsi-01` path/commitment/receipt/verification concepts.
 
-These issues document interoperability questions. They are **not** evidence of
-external adoption.
+These artifacts document interoperability questions. They are **not** evidence
+of external adoption or standards-body acceptance.
 
 ## External validation status
 
