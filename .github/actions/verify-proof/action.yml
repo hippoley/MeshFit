@@ -47,7 +47,7 @@ runs:
       run: |
         set -euo pipefail
 
-        verification_json="$(mktemp "${RUNNER_TEMP:-/tmp}/meshfit-proof-verification.XXXXXX.json")"
+        verification_json="$(mktemp "${RUNNER_TEMP:-/tmp}/meshfit-proof-verification.XXXXXX")"
         args=(
           benchmark-verify-proof "$MESHFIT_PROOF"
           --root "$MESHFIT_ROOT"
@@ -62,7 +62,18 @@ runs:
           -p meshfit -- \
           "${args[@]}" > "$verification_json"
 
-        digest="$(sha256sum "$MESHFIT_PROOF" | awk '{print $1}')"
+        digest="$(
+          python3 - "$MESHFIT_PROOF" <<'PY'
+        import hashlib
+        import sys
+
+        digest = hashlib.sha256()
+        with open(sys.argv[1], "rb") as handle:
+            for chunk in iter(lambda: handle.read(1024 * 1024), b""):
+                digest.update(chunk)
+        print(digest.hexdigest())
+        PY
+        )"
 
         python3 - "$verification_json" "$digest" "$MESHFIT_REQUIRE_PUBLISHABLE" <<'PY'
         import json
