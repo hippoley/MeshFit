@@ -1,4 +1,4 @@
-schema: meshfit.benchmark-proof/v1
+schema: meshfit.infrabench-placement-proof/v1
 benchmark_id: benchmark-001
 plan:
   path: frozen/plan.yaml
