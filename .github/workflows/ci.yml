@@ -17,6 +17,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
         with:
           components: rustfmt, clippy
+      - run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.2
       - run: python3 -m py_compile tools/compute_proxy.py tools/lambda_capacity_gate.py tools/mlcommons_infragraph_to_meshfit.py tools/test_mlcommons_infragraph_to_meshfit.py
       - run: python3 -m unittest tools/test_mlcommons_infragraph_to_meshfit.py
       - run: |
@@ -73,7 +74,6 @@ jobs:
           json.dump(data, open("/tmp/lambda-no-common-region.json", "w"))
           PY
           ! python3 tools/lambda_capacity_gate.py /tmp/lambda-no-common-region.json
-      - run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.2
       - run: python3 -m py_compile contrib/infrabench/placement-proof-integrity/environment/tools/verify_proof.py contrib/infrabench/placement-proof-integrity/tests/verify.py
       - run: |
           set -euo pipefail
