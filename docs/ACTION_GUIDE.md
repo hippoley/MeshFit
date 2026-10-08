@@ -65,9 +65,12 @@ framework lines:
    exported-tree re-verify.
 2. **#133** — MLCommons/InfraGraph planning seed with unknown evidence preserved
    as unknown.
-3. **#134** — portable verification JSON + schema + digest/predicate binding.
-4. **#138** — proof-consumer/interoperability intake surface.
-5. **#139** — user-story truth audit / roadmap correction.
+3. **#138** — proof-consumer/interoperability intake surface.
+4. **#139** — user-story truth audit / roadmap correction.
+
+#134 is already merged: portable verification JSON, public schema, digest/predicate
+binding, and standard attestation composition are now mainline code/contract
+capabilities.
 
 Merge only after the relevant CI succeeds. A mergeable PR with queued or failed
 CI is not completed evidence.
