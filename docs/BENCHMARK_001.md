@@ -312,9 +312,16 @@ After a materialized Benchmark 001 kit is complete, emit one content-addressed r
 meshfit benchmark-status benchmark-001 --require-complete
 meshfit benchmark-finalize benchmark-001 --markdown --require-publishable
 meshfit benchmark-proof benchmark-001 --require-publishable > benchmark-proof.yaml
+meshfit benchmark-verify-proof benchmark-proof.yaml --root benchmark-001 --require-publishable
 ```
 
-The proof command refuses incomplete kits. Its versioned `meshfit.benchmark-proof/v1` receipt binds the final comparison report to the frozen control inputs (`kit.yaml`, `comparison.yaml`, snapshot, target, and model identity) and to every raw benchmark bundle by SHA-256. Each bundle entry also records its benchmark ID, source plan ID, MeshFit source commit, and capture timestamp.
+The proof command refuses incomplete kits. The verifier is deliberately
+planner-independent: it treats the receipt and referenced files as untrusted
+inputs, rejects unsafe paths, recomputes every referenced SHA-256, rechecks
+bundle identity fields, rebuilds the comparison report from the verified raw
+bundles, and rejects any mismatch. It also emits the SHA-256 of the proof receipt
+itself so an external issue, review, or publication can anchor the exact
+artifact. Its versioned `meshfit.benchmark-proof/v1` receipt binds the final comparison report to the frozen control inputs (`kit.yaml`, `comparison.yaml`, snapshot, target, and model identity) and to every raw benchmark bundle by SHA-256. Each bundle entry also records its benchmark ID, source plan ID, MeshFit source commit, and capture timestamp.
 
 A proof receipt does **not** upgrade provisional or synthetic evidence into a performance claim. Completeness, evidence publishability, and any performance-advantage claim remain separate gates.
 
