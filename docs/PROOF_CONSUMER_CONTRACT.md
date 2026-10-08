@@ -106,3 +106,28 @@ If an independent repository begins using it, the preferred next step is to
 extract the action into a dedicated repository/release unit so it can be
 versioned and discovered independently without coupling consumers to MeshFit's
 application release cadence.
+
+
+## Benchmark-proof-verification v1 predicate semantics
+
+The machine-readable verifier result has schema:
+
+```text
+meshfit.benchmark-proof-verification/v1
+```
+
+It is suitable as an attestation predicate because the attestation subject is
+the exact verified proof digest, while the predicate records the independent
+verification result.
+
+A relying party should still apply its own signer/workflow policy. The
+verification predicate does not become trustworthy merely because it is signed.
+
+The current custom predicate TypeURI used by MeshFit examples is:
+
+```text
+https://github.com/hippoley/MeshFit/blob/main/docs/PROOF_CONSUMER_CONTRACT.md#benchmark-proof-verification-v1-predicate-semantics
+```
+
+This URI identifies the predicate semantics; it does not imply endorsement by
+GitHub, Sigstore, in-toto, or another standards body.
