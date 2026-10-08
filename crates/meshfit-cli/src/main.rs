@@ -1,6 +1,6 @@
 use std::{
     env, fs,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     process,
 };
 
@@ -322,7 +322,7 @@ struct BenchmarkExpectedRequestContract {
     config: BenchmarkConfig,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct BenchmarkProofReceipt {
     schema: String,
     benchmark_id: String,
@@ -336,14 +336,14 @@ struct BenchmarkProofReceipt {
     report: BenchmarkComparisonReport,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct BenchmarkProofInput {
     role: String,
     path: String,
     sha256: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct BenchmarkProofCandidate {
     name: String,
     plan_id: String,
@@ -352,7 +352,7 @@ struct BenchmarkProofCandidate {
     bundles: Vec<BenchmarkProofBundle>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct BenchmarkProofBundle {
     path: String,
     sha256: String,
@@ -364,6 +364,20 @@ struct BenchmarkProofBundle {
     binary_sha256: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     captured_at: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct BenchmarkProofVerification {
+    schema: String,
+    proof_path: String,
+    proof_sha256: String,
+    audit_root: String,
+    inputs_verified: usize,
+    bundles_verified: usize,
+    report_matches: bool,
+    evidence_publishable: bool,
+    evidence_status: String,
+    verified: bool,
 }
 
 #[derive(Debug)]
