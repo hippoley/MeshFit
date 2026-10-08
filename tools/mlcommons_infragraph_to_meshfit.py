@@ -191,36 +191,56 @@ def convert(infragraph_yaml: Path, sysinfo_dir: Path, out_dir: Path) -> list[Pat
     instances = graph.get("instances") or []
     if not instances:
         raise ValueError("InfraGraph YAML contains no instances")
-    if out_dir.exists() and any(out_dir.iterdir()):
-        raise ValueError(f"output directory is not empty: {out_dir}")
-    out_dir.mkdir(parents=True, exist_ok=True)
+    if out_dir.exists():
+        raise ValueError(f"output directory already exists: {out_dir}")
 
-    written: list[Path] = []
-    discovery_files: list[str] = []
-    for instance in instances:
-        stem = str(instance.get("description") or "").strip()
-        if not stem:
-            raise ValueError(f"instance {instance.get('name')!r} has no description/source stem")
-        sysinfo_path = sysinfo_dir / f"{stem}.json"
-        xml_path = sysinfo_dir / f"{stem}.lstopo.xml"
-        if not sysinfo_path.is_file() or not xml_path.is_file():
-            raise ValueError(f"{instance.get('name')}: missing paired {stem}.json or {stem}.lstopo.xml")
-        sysinfo = json.loads(sysinfo_path.read_text(encoding="utf-8"))
-        seed = build_seed(instance, sysinfo, xml_path)
-        filename = f"discovery-{safe_name(seed['node']['id'])}.yaml"
-        path = out_dir / filename
-        path.write_text(yaml.safe_dump(seed, sort_keys=False), encoding="utf-8")
-        written.append(path)
-        discovery_files.append(filename)
+    stage = out_dir.with_name(out_dir.name + ".meshfit-tmp")
+    if stage.exists():
+        raise ValueError(f"staging directory already exists: {stage}")
 
-    manifest = {
-        "discovery_files": discovery_files,
-        "probes": [],
-    }
-    manifest_path = out_dir / "snapshot-manifest.yaml"
-    manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
-    written.append(manifest_path)
-    return written
+    try:
+        stage.mkdir(parents=True)
+        discovery_files: list[str] = []
+        seen_node_ids: set[str] = set()
+
+        for instance in instances:
+            stem = str(instance.get("description") or "").strip()
+            if not stem:
+                raise ValueError(f"instance {instance.get('name')!r} has no description/source stem")
+            sysinfo_path = sysinfo_dir / f"{stem}.json"
+            xml_path = sysinfo_dir / f"{stem}.lstopo.xml"
+            if not sysinfo_path.is_file() or not xml_path.is_file():
+                raise ValueError(
+                    f"{instance.get('name')}: missing paired {stem}.json or {stem}.lstopo.xml"
+                )
+            sysinfo = json.loads(sysinfo_path.read_text(encoding="utf-8"))
+            seed = build_seed(instance, sysinfo, xml_path)
+            node_id = seed["node"]["id"]
+            if node_id in seen_node_ids:
+                raise ValueError(f"duplicate InfraGraph instance/node id: {node_id}")
+            seen_node_ids.add(node_id)
+
+            filename = f"discovery-{safe_name(node_id)}.yaml"
+            if filename in discovery_files:
+                raise ValueError(f"node ids collide after filename sanitization: {node_id}")
+            path = stage / filename
+            path.write_text(yaml.safe_dump(seed, sort_keys=False), encoding="utf-8")
+            discovery_files.append(filename)
+
+        manifest = {
+            "discovery_files": discovery_files,
+            "probes": [],
+        }
+        manifest_path = stage / "snapshot-manifest.yaml"
+        manifest_path.write_text(yaml.safe_dump(manifest, sort_keys=False), encoding="utf-8")
+        stage.rename(out_dir)
+    except Exception:
+        if stage.exists():
+            import shutil
+            shutil.rmtree(stage, ignore_errors=True)
+        raise
+
+    return [out_dir / name for name in discovery_files] + [out_dir / "snapshot-manifest.yaml"]
 
 
 def main() -> int:
