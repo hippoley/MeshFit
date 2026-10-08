@@ -369,9 +369,7 @@ struct BenchmarkProofBundle {
 #[derive(Debug, Serialize)]
 struct BenchmarkProofVerification {
     schema: String,
-    proof_path: String,
     proof_sha256: String,
-    audit_root: String,
     inputs_verified: usize,
     bundles_verified: usize,
     report_matches: bool,
@@ -1993,7 +1991,7 @@ fn run() -> Result<(), String> {
         }
         "benchmark-verify-proof" => {
             let proof_path = args.get(2).ok_or_else(|| {
-                "usage: meshfit benchmark-verify-proof <benchmark-proof.yaml> --root <kit-dir> [--require-publishable]"
+                "usage: meshfit benchmark-verify-proof <benchmark-proof.yaml> --root <kit-dir> [--require-publishable] [--json]"
                     .to_string()
             })?;
             let audit_root = option_value(&args[3..], "--root")?
@@ -2010,8 +2008,14 @@ fn run() -> Result<(), String> {
                 ));
             }
 
-            let yaml = serde_yaml::to_string(&verification).map_err(|e| e.to_string())?;
-            print!("{yaml}");
+            if args.iter().any(|arg| arg == "--json") {
+                let json =
+                    serde_json::to_string_pretty(&verification).map_err(|e| e.to_string())?;
+                println!("{json}");
+            } else {
+                let yaml = serde_yaml::to_string(&verification).map_err(|e| e.to_string())?;
+                print!("{yaml}");
+            }
         }
         "compare-benchmarks" => {
             let manifest_path = args.get(2).ok_or_else(|| {
@@ -2724,9 +2728,7 @@ fn verify_benchmark_proof(
 
     Ok(BenchmarkProofVerification {
         schema: "meshfit.benchmark-proof-verification/v1".to_string(),
-        proof_path: proof_path.display().to_string(),
         proof_sha256: sha256_hex(&proof_bytes),
-        audit_root: audit_root.display().to_string(),
         inputs_verified: receipt.inputs.len(),
         bundles_verified: total_bundles,
         report_matches: true,
@@ -5485,6 +5487,67 @@ mod tests {
             .issues
             .iter()
             .any(|issue| issue.contains("exceeds declared freshness limit 30s")));
+    }
+
+    #[test]
+    fn benchmark_proof_verification_has_machine_json_shape() {
+        let verification = BenchmarkProofVerification {
+            schema: "meshfit.benchmark-proof-verification/v1".into(),
+            proof_sha256: "a".repeat(64),
+            inputs_verified: 6,
+            bundles_verified: 2,
+            report_matches: true,
+            evidence_publishable: false,
+            evidence_status: "provisional".into(),
+            verified: true,
+        };
+
+        let json = serde_json::to_string(&verification).unwrap();
+        let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
+        assert_eq!(parsed["schema"], "meshfit.benchmark-proof-verification/v1");
+        assert_eq!(parsed["proof_sha256"], "a".repeat(64));
+        assert_eq!(parsed["verified"], true);
+        assert_eq!(parsed["evidence_publishable"], false);
+    }
+
+    #[test]
+    fn benchmark_proof_verification_json_matches_public_schema_fields() {
+        let verification = BenchmarkProofVerification {
+            schema: "meshfit.benchmark-proof-verification/v1".into(),
+            proof_sha256: "b".repeat(64),
+            inputs_verified: 6,
+            bundles_verified: 2,
+            report_matches: true,
+            evidence_publishable: false,
+            evidence_status: "provisional".into(),
+            verified: true,
+        };
+
+        let value = serde_json::to_value(&verification).unwrap();
+        let object = value.as_object().unwrap();
+        let schema: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../schemas/benchmark-proof-verification-v1.schema.json"
+        ))
+        .unwrap();
+
+        let required = schema["required"].as_array().unwrap();
+        let properties = schema["properties"].as_object().unwrap();
+
+        let actual_keys = object
+            .keys()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        let required_keys = required
+            .iter()
+            .map(|item| item.as_str().unwrap().to_string())
+            .collect::<std::collections::BTreeSet<_>>();
+        let property_keys = properties
+            .keys()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+
+        assert_eq!(actual_keys, required_keys);
+        assert_eq!(actual_keys, property_keys);
     }
 
     #[test]
