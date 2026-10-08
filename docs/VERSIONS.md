@@ -150,7 +150,8 @@ Add:
 - exact-evidence 95% next-observation intervals with sample stddev/CV; cross-hardware intervals pending
 - declared marginal cost estimation contract: plan hourly cost + explicit predicted output throughput + modeled communication egress; full TCO and observed-cost calibration pending
 - memory calibration contract and CLI: required-memory vs observed peak-VRAM error/correction ratios (synthetic CI verified; real GPU repeated calibration pending)
-- latency / throughput predictors
+- exact-identity latency / throughput calibration; broader cross-hardware
+  predictors are demand-gated until real evidence shows they change a decision
 - estimate-vs-observed reports — VRAM plus exact-identity p95 TTFT / mean decode throughput calibration contracts implemented; real GPU performance calibration pending
 - carefully bounded cross-hardware transfer
 
@@ -176,20 +177,33 @@ Exit gate:
 
 **Question:** What is the minimum additional measurement needed to choose between plans?
 
-Add probes chosen by uncertainty:
+Current state:
 
-- iperf3
-- RTT / jitter
-- GPU microbenchmark
-- storage throughput
-- runtime capability probe
-- model artifact inspection
+- `recommend-probes` ranks solver evidence gaps;
+- RTT/jitter + optional iperf3 bandwidth probing already exist;
+- the Reality Campaign compute proxy already supplies measured compute ordering;
+- model artifact inspection and runtime inventory already exist.
 
-MeshFit should request the **minimum probe that can change the decision**.
+The remaining user-story gap is **orchestration**, not more probe primitives:
+
+```text
+rejection / uncertainty
+  -> structured source/peer/device target
+  -> exact executable measurement
+  -> updated snapshot/evidence
+  -> re-run solver
+  -> explicit decision delta
+```
+
+Do not parse human/display candidate strings into probe commands. Introduce a
+structured probe target only when a real campaign shows this is a material
+operator blocker.
 
 Exit gate:
 
-> A previously ambiguous placement choice changes because a targeted probe supplied missing evidence.
+> A previously ambiguous placement choice changes (or is conclusively shown not
+> to change) because one targeted, provenance-bound measurement supplied the
+> missing evidence.
 
 ---
 
