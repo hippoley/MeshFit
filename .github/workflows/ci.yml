@@ -21,6 +21,38 @@ jobs:
       - run: python3 -m py_compile tools/compute_proxy.py tools/lambda_capacity_gate.py tools/mlcommons_infragraph_to_meshfit.py tools/test_mlcommons_infragraph_to_meshfit.py
       - run: python3 -m unittest tools/test_mlcommons_infragraph_to_meshfit.py
       - run: |
+          set -euo pipefail
+          TMP=/tmp/meshfit-mlcommons-seed
+          rm -rf "$TMP"
+          mkdir -p "$TMP/source"
+          cat >"$TMP/infragraph.yaml" <<'YAML'
+          instances:
+            - name: node-a
+              device: h100-host
+              count: 1
+              description: mlperf-system-info-single-node-0
+          YAML
+          cat >"$TMP/source/mlperf-system-info-single-node-0.json" <<'JSON'
+          {
+            "host_processor_model_name": "AMD EPYC 9654",
+            "host_memory_capacity": "256GiB",
+            "accelerator_model_name": "NVIDIA H100 80GB HBM3",
+            "accelerators_per_node": 1,
+            "accelerator_memory_capacity": "80GiB",
+            "inference_backend": "CUDA 12.9",
+            "driver": "Driver 575.57.08",
+            "operating_system": "ubuntu 24.04"
+          }
+          JSON
+          cat >"$TMP/source/mlperf-system-info-single-node-0.lstopo.xml" <<'XML'
+          <topology><object type="Machine"><info name="HostName" value="node-a"/><info name="Architecture" value="x86_64"/><info name="OSName" value="Linux"/></object></topology>
+          XML
+          python3 tools/mlcommons_infragraph_to_meshfit.py             --infragraph-yaml "$TMP/infragraph.yaml"             --sysinfo-dir "$TMP/source"             --out-dir "$TMP/seed"
+          test -f "$TMP/seed/discovery-node-a.yaml"
+          cargo run -p meshfit -- snapshot "$TMP/seed/discovery-node-a.yaml" > "$TMP/snapshot.yaml"
+          grep -q "node-a" "$TMP/snapshot.yaml"
+          grep -q "relative_compute: 0" "$TMP/snapshot.yaml"
+      - run: |
           cat >/tmp/lambda-instance-types.json <<'JSON'
           {
             "data": {
