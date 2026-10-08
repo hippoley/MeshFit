@@ -4766,6 +4766,7 @@ fn render_benchmark_runbook(kit: &BenchmarkExecutionKit) -> String {
     out.push_str("meshfit benchmark-status . --require-complete\n");
     out.push_str("meshfit benchmark-finalize . --markdown --require-publishable\n");
     out.push_str("meshfit benchmark-proof . --require-publishable > benchmark-proof.yaml\n");
+    out.push_str("meshfit benchmark-verify-proof benchmark-proof.yaml --root . --require-publishable\n");
     out.push_str("```\n\n");
 
     out.push_str("## Low-level comparison\n\n");
