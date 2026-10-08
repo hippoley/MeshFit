@@ -97,6 +97,12 @@ Current solver/compiler coverage is strongest for:
 The following names exist in the IR, examples, evidence identity, or long-term
 vision but are **not current end-to-end decision commitments**:
 
+- automatic fit derivation from parameter count or a generic model-architecture
+  parser — current memory feasibility is driven by explicit
+  `weight_memory_gb` plus the KV-cache execution profile; `parameters_b` is
+  descriptive today;
+- generic NPU discovery/placement — do not infer support merely from the
+  heterogeneous-backend vocabulary;
 - MoE-aware placement policy from `is_moe` / `active_parameters_b`;
 - automatic quantization selection (quantization is currently evidence/artifact identity);
 - hard placement gating from `p95_latency_ms` or `budget_per_day_usd`;
@@ -120,8 +126,11 @@ CLI, and covered by the relevant evidence contract.
 
 The ten long-term questions above currently resolve as follows:
 
-1. **which models can run** — structural fit exists for the explicit target
-   model/profile; not a universal model-catalog compatibility service;
+1. **which models can run** — structural fit exists for an explicit target
+   model/profile whose weight-memory/KV requirements are supplied; MeshFit does
+   not currently infer those requirements from parameter count or arbitrary
+   architecture metadata and is not a universal model-catalog compatibility
+   service;
 2. **which topologies are feasible** — implemented for the currently supported
    placement modes above;
 3. **which plans are useful** — Pareto/rejection/exclusion logic exists, but its
