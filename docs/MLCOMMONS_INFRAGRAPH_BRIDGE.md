@@ -18,6 +18,13 @@ pairs, per node:
 and produces a merged InfraGraph YAML whose instances retain the source
 `description = <stem>`.
 
+As of upstream head `1aeb3c4dfbb09c6986e84a74f879a4f32547b7e6`
+(checked 2026-10-08), this is no longer merely inferred from an example:
+the PR description calls the shared stem "the whole pairing contract", and
+`generate-infragraph/build_infragraph.py` explicitly keeps the stem in
+`instance.description` because it is the link back to that node's sysinfo JSON
+after `instance.name` has been replaced by the real hostname.
+
 MeshFit consumes that pairing only as a **planning seed**.
 
 It does not treat the imported material as final execution attestation.
@@ -107,7 +114,10 @@ The goal is composition:
 It is not for MeshFit to replace InfraGraph's graph model, submission sysinfo,
 or hardware collection ecosystem.
 
-## Current upstream question
+## Remaining upstream observation
+
+The source-stem pairing semantics are now clear enough for this bridge; no
+generic pairing-key question remains.
 
 PR #1088 also surfaces a CPU-only behavior where using a GPU-runtime variation
 can suppress otherwise useful sysinfo from a node. That upstream issue matters
