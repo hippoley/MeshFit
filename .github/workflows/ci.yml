@@ -137,6 +137,7 @@ jobs:
       - run: grep -q 'benchmark-run-host . --current-host --resume' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
       - run: grep -q 'benchmark-finalize . --markdown --require-publishable' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
       - run: grep -q 'benchmark-proof . --require-publishable' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
+      - run: grep -q 'benchmark-verify-proof benchmark-proof.yaml --root . --require-publishable' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
       - run: grep -q '## Recovery and debugging' /tmp/meshfit-benchmark-001-materialized/RUNBOOK.md
       - run: test -f /tmp/meshfit-benchmark-001-materialized/inputs/snapshot.yaml
       - run: test -f /tmp/meshfit-benchmark-001-materialized/inputs/target.yaml
