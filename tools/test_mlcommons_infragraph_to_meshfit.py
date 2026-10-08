@@ -87,7 +87,12 @@ class AdapterTests(unittest.TestCase):
                 encoding="utf-8",
             )
 
-            files = adapter.convert(graph_path, src, out)
+            files = adapter.convert(
+                graph_path,
+                src,
+                out,
+                hourly_costs={"node-a": 3.29, "cpu-only": 0.0},
+            )
             self.assertEqual(len(files), 3)
 
             discovery = yaml.safe_load((out / "discovery-node-a.yaml").read_text())
@@ -97,6 +102,7 @@ class AdapterTests(unittest.TestCase):
             self.assertEqual(len(discovery["hardware_identity"]["devices"]), 2)
             self.assertEqual(discovery["hardware_identity"]["devices"][0]["backend"], "cuda")
             self.assertEqual(discovery["node"]["ram_gb"], 256.0)
+            self.assertEqual(discovery["node"]["hourly_cost_usd"], 3.29)
             self.assertEqual(discovery["node"]["accelerators"][0]["relative_compute"], 0.0)
             self.assertIsNone(discovery["node"]["accelerators"][0]["free_memory_gb"])
             self.assertEqual(discovery["local_fabric"], [])
@@ -106,6 +112,7 @@ class AdapterTests(unittest.TestCase):
             self.assertEqual(cpu_discovery["node"]["accelerators"], [])
             self.assertEqual(cpu_discovery["hardware_identity"]["devices"], [])
             self.assertEqual(cpu_discovery["node"]["ram_gb"], 128.0)
+            self.assertEqual(cpu_discovery["node"]["hourly_cost_usd"], 0.0)
 
             manifest = yaml.safe_load((out / "snapshot-manifest.yaml").read_text())
             self.assertEqual(
@@ -156,7 +163,50 @@ class AdapterTests(unittest.TestCase):
             )
 
             with self.assertRaisesRegex(ValueError, "refusing to invent hardware identity"):
+                adapter.convert(
+                    graph_path,
+                    src,
+                    out,
+                    hourly_costs={"node-a": 1.0},
+                )
+
+
+    def test_refuses_to_invent_unknown_hourly_cost(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "src"
+            out = root / "out"
+            src.mkdir()
+
+            graph_path = root / "infragraph.yaml"
+            graph_path.write_text(
+                yaml.safe_dump(
+                    {
+                        "instances": [
+                            {
+                                "name": "node-a",
+                                "description": "mlperf-system-info-single-node-0",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "does not define node hourly cost"):
                 adapter.convert(graph_path, src, out)
+
+    def test_cost_map_rejects_unknown_or_missing_nodes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "costs.yaml"
+            path.write_text("node-a: 3.29\n", encoding="utf-8")
+            self.assertEqual(adapter.parse_hourly_cost_map(path), {"node-a": 3.29})
+
+            bad = root / "bad.yaml"
+            bad.write_text("node-a: -1\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "finite and non-negative"):
+                adapter.parse_hourly_cost_map(bad)
 
 
 if __name__ == "__main__":
