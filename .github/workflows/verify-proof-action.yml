@@ -47,7 +47,7 @@ jobs:
           MESHFIT_PROOF_CONFORMANCE_DIR: /tmp/meshfit-proof-conformance
         run: |
           set -euo pipefail
-          cargo test -p meshfit benchmark_proof_succeeds_for_complete_provisional_kit -- --exact --nocapture --test-threads=1
+          cargo test -p meshfit benchmark_proof_succeeds_for_complete_provisional_kit -- --nocapture --test-threads=1
           test -f "$MESHFIT_PROOF_CONFORMANCE_DIR/benchmark-proof.yaml"
 
       - name: Verify the retained provisional proof through the consumer action
