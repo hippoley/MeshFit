@@ -2011,7 +2011,8 @@ fn run() -> Result<(), String> {
             }
 
             if args.iter().any(|arg| arg == "--json") {
-                let json = serde_json::to_string_pretty(&verification).map_err(|e| e.to_string())?;
+                let json =
+                    serde_json::to_string_pretty(&verification).map_err(|e| e.to_string())?;
                 println!("{json}");
             } else {
                 let yaml = serde_yaml::to_string(&verification).map_err(|e| e.to_string())?;
@@ -5509,10 +5510,7 @@ mod tests {
 
         let json = serde_json::to_string(&verification).unwrap();
         let parsed: serde_json::Value = serde_json::from_str(&json).unwrap();
-        assert_eq!(
-            parsed["schema"],
-            "meshfit.benchmark-proof-verification/v1"
-        );
+        assert_eq!(parsed["schema"], "meshfit.benchmark-proof-verification/v1");
         assert_eq!(parsed["proof_sha256"], "a".repeat(64));
         assert_eq!(parsed["verified"], true);
         assert_eq!(parsed["evidence_publishable"], false);
