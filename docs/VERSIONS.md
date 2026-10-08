@@ -42,7 +42,7 @@ Exit gate:
 
 **Question:** Can benchmark evidence be trusted and matched to the exact execution that produced it?
 
-Status: **in progress**
+Status: **code/contract complete; reality validation pending**
 
 Delivered / current:
 
@@ -53,14 +53,14 @@ Delivered / current:
 - structured Hardware / Model Artifact / Runtime / Topology identity
 - stable execution fingerprint
 - explicit Unavailable when evidence is missing
+- model artifact SHA-256 identity
+- runtime/driver identity capture primitives
+- repeated-run statistics and stability gate
+- direct best-baseline headline with provisional/publishable separation
+- proof receipt + independent verifier + reusable CI consumer Action
 
-Remaining:
-
-- benchmark artifact schema validation
-- model artifact hash capture
-- runtime/driver capture from real execution
-- repeated-run statistics and objective-specific run stability gate (CV <= 20%)
-- direct best-baseline improvement headline with provisional/publishable separation
+Remaining is not another evidence schema: retain real campaign artifacts and
+obtain independent external consumption/review.
 
 Validation: PR CI run #463 passed fmt, clippy, workspace tests, release build, and the expanded Benchmark 001 CLI chain including candidate selection, execution-kit generation, provisional comparison, and publishability rejection.
 
@@ -193,11 +193,14 @@ Exit gate:
 
 ---
 
-## v0.6 — Adaptive Placement
+## v0.6 — Adaptive Placement (deferred option)
 
 **Question:** Should placement change when reality changes?
 
-Add:
+This is no longer an automatic next milestone. The project first needs a real
+static placement-claim proof and external consumer/reviewer behavior.
+
+Potential later scope:
 
 - live telemetry
 - failures
@@ -209,9 +212,11 @@ Add:
 
 Execution remains delegated to runtimes/orchestrators.
 
-Exit gate:
+Re-entry gate:
 
-> A measured runtime change triggers a justified re-placement proposal with before/after evidence.
+> A real operator/external consumer presents a measured change case where static
+> placement verification is insufficient and requests a justified re-placement
+> proposal with before/after evidence.
 
 ---
 
