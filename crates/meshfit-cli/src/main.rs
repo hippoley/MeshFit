@@ -323,6 +323,7 @@ struct BenchmarkExpectedRequestContract {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct BenchmarkProofReceipt {
     schema: String,
     benchmark_id: String,
@@ -337,6 +338,7 @@ struct BenchmarkProofReceipt {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct BenchmarkProofInput {
     role: String,
     path: String,
@@ -344,6 +346,7 @@ struct BenchmarkProofInput {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct BenchmarkProofCandidate {
     name: String,
     plan_id: String,
@@ -353,6 +356,7 @@ struct BenchmarkProofCandidate {
 }
 
 #[derive(Debug, Deserialize, Serialize)]
+#[serde(deny_unknown_fields)]
 struct BenchmarkProofBundle {
     path: String,
     sha256: String,
@@ -5488,6 +5492,36 @@ mod tests {
     }
 
     #[test]
+    fn benchmark_proof_wire_types_reject_unknown_fields() {
+        let input = r#"
+role: snapshot
+path: inputs/snapshot.yaml
+sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+unexpected: true
+"#;
+        assert!(serde_yaml::from_str::<BenchmarkProofInput>(input).is_err());
+
+        let bundle = r#"
+path: results/meshfit/run-01.yaml
+sha256: bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb
+benchmark_id: benchmark-001
+source_plan_id: plan-meshfit
+unexpected: true
+"#;
+        assert!(serde_yaml::from_str::<BenchmarkProofBundle>(bundle).is_err());
+
+        let candidate = r#"
+name: meshfit
+plan_id: plan-meshfit
+benchmark_host: node-a
+runtime: vllm
+bundles: []
+unexpected: true
+"#;
+        assert!(serde_yaml::from_str::<BenchmarkProofCandidate>(candidate).is_err());
+    }
+
+    #[test]
     fn benchmark_proof_sha256_is_content_addressed() {
         assert_eq!(
             sha256_hex(b"meshfit"),
@@ -5660,6 +5694,10 @@ mod tests {
 
         let receipt = build_benchmark_proof_receipt(&dir).unwrap();
         assert_eq!(receipt.schema, "meshfit.benchmark-proof/v1");
+
+        let mut receipt_with_unknown = serde_yaml::to_string(&receipt).unwrap();
+        receipt_with_unknown.push_str("unexpected_top_level: true\n");
+        assert!(serde_yaml::from_str::<BenchmarkProofReceipt>(&receipt_with_unknown).is_err());
         assert!(receipt.kit_complete);
         assert_eq!(receipt.expected_bundles, 2);
         assert_eq!(receipt.valid_bundles, 2);
