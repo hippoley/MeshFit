@@ -1,0 +1,11 @@
+path: results/run-01.yaml
+sha256: 2e0299f5505ad593fe7fc1549e7980d234dbed1b6349d2c3660b6aeb88c7a39b
+content: |
+  benchmark_id: benchmark-001
+  source_plan_id: meshfit-plan-001
+  source_commit: 0123456789abcdef0123456789abcdef01234567
+  binary_sha256: aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa
+  captured_at: unix_ms:1700000000000
+  measurements:
+    p95_ttft_ms: 128.4
+    decode_tokens_per_second: 92.1

@@ -72,6 +72,40 @@ jobs:
           json.dump(data, open("/tmp/lambda-no-common-region.json", "w"))
           PY
           ! python3 tools/lambda_capacity_gate.py /tmp/lambda-no-common-region.json
+      - run: python3 -m pip install --disable-pip-version-check PyYAML==6.0.2
+      - run: python3 -m py_compile contrib/infrabench/placement-proof-integrity/environment/tools/verify_proof.py contrib/infrabench/placement-proof-integrity/tests/verify.py
+      - run: |
+          set -euo pipefail
+          TASK="$PWD/contrib/infrabench/placement-proof-integrity"
+          TMP=/tmp/infrabench-placement-proof-integrity
+          rm -rf "$TMP"
+          mkdir -p "$TMP"
+          cp -R "$TASK/environment/campaign" "$TMP/campaign"
+
+          # The shipped incident must begin in a failing state.
+          ! python3 "$TASK/environment/tools/verify_proof.py" "$TMP/campaign"
+
+          # The reference recovery must restore the evidence chain.
+          CAMPAIGN_ROOT="$TMP/campaign" \
+          VERIFY_PROOF="$TASK/environment/tools/verify_proof.py" \
+            bash "$TASK/solution/solve.sh"
+
+          # The independent scoring verifier must award full credit.
+          CAMPAIGN_ROOT="$TMP/campaign" \
+          VERIFIER_LOG_DIR="$TMP/logs" \
+            python3 "$TASK/tests/verify.py"
+          python3 - <<'PY'
+          import json
+          data = json.load(open("/tmp/infrabench-placement-proof-integrity/logs/reward.json"))
+          assert data["reward"] == 1.0, data
+          PY
+
+          # A solver that tampers with a frozen control must lose verification.
+          printf '\n# unauthorized mutation\n' >> "$TMP/campaign/frozen/plan.yaml"
+          ! python3 "$TASK/environment/tools/verify_proof.py" "$TMP/campaign"
+          ! CAMPAIGN_ROOT="$TMP/campaign" \
+             VERIFIER_LOG_DIR="$TMP/logs-tampered" \
+               python3 "$TASK/tests/verify.py"
       - run: cargo fmt --all -- --check
       - run: cargo clippy --workspace --all-targets -- -D warnings
       - run: cargo test --workspace
