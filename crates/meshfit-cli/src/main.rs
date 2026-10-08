@@ -2710,7 +2710,7 @@ fn verify_benchmark_proof(
         meshfit_candidate: comparison.meshfit_candidate,
         objective: comparison.objective,
         candidates: recompute_candidates,
-    });
+    })?;
 
     if recomputed_report != receipt.report {
         return Err(
