@@ -448,10 +448,13 @@ Current code includes:
 
 Still missing before the first real product proof:
 
-- real multi-machine discovery + measured links
-- real heterogeneous Benchmark 001 runs across MeshFit and baseline placements
-- real GPU validation of the VRAM sampler
-- calibrated performance prediction from captured evidence
+- retained real multi-machine discovery + measured links;
+- real heterogeneous Benchmark 001 runs across MeshFit and baseline placements;
+- real GPU validation of the resource sampler on the campaign hardware.
+
+A general cross-hardware latency/throughput predictor is **not** a prerequisite for
+the first product proof. Build stronger transfer models only after retained real
+evidence shows that such prediction would change a placement decision.
 
 The current proof target is **Benchmark 001**: same real workload, simple baselines versus MeshFit, with the observed oracle and placement regret reported from retained benchmark bundles. Synthetic fixtures are never accepted as a publishable performance claim.
 
