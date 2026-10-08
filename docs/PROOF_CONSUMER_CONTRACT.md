@@ -108,6 +108,37 @@ versioned and discovered independently without coupling consumers to MeshFit's
 application release cadence.
 
 
+## Benchmark-proof-verification v1 predicate semantics
+
+The machine-readable verifier result has schema:
+
+```text
+meshfit.benchmark-proof-verification/v1
+```
+
+Its public JSON Schema is [`schemas/benchmark-proof-verification-v1.schema.json`](../schemas/benchmark-proof-verification-v1.schema.json). Downstream consumers may validate the result shape independently of the planner.
+
+The v1 verification result intentionally excludes local `proof_path` and
+`audit_root` filesystem strings. Those are invocation diagnostics, not portable
+evidence facts, and including canonical runner paths would make otherwise
+equivalent attestations differ across machines.
+
+It is suitable as an attestation predicate because the attestation subject is
+the exact verified proof digest, while the predicate records the independent
+verification result.
+
+A relying party should still apply its own signer/workflow policy. The
+verification predicate does not become trustworthy merely because it is signed.
+
+The current custom predicate TypeURI used by MeshFit examples is:
+
+```text
+https://github.com/hippoley/MeshFit/blob/main/docs/PROOF_CONSUMER_CONTRACT.md#benchmark-proof-verification-v1-predicate-semantics
+```
+
+This URI identifies the predicate semantics; it does not imply endorsement by
+GitHub, Sigstore, in-toto, or another standards body.
+
 ## Portable proof package
 
 A reviewer or downstream repository should not have to infer which files belong
