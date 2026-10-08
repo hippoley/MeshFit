@@ -1,0 +1,18 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>MeshFit Proof Explorer</title>
+<link rel="stylesheet" href="./styles.css">
+</head>
+<body>
+<main class="shell">
+<header><div><p class="eyebrow">MeshFit · Decision Observatory</p><h1>Don’t trust the placement. Inspect the proof.</h1><p class="lede">Trace a heterogeneous-inference claim from the precommitted decision to execution evidence and the verification boundary.</p></div><div class="status" id="status">DEMO CONTRACT</div></header>
+<section class="controls"><label class="drop"><input id="file" type="file" accept=".yaml,.yml,.json"><strong>Open benchmark-proof.yaml / JSON</strong><span>Local-only. Nothing is uploaded.</span></label><button id="demo">Reset demo</button></section>
+<section class="summary-grid"><article><span>Benchmark</span><strong id="benchmarkId">—</strong></article><article><span>Kit complete</span><strong id="kitComplete">—</strong></article><article><span>Publishable</span><strong id="publishable">—</strong></article><article><span>Evidence status</span><strong id="evidenceStatus">—</strong></article></section>
+<section class="chain"><button data-step="decision">1 · Decision</button><div>→</div><button data-step="inputs">2 · Frozen inputs</button><div>→</div><button data-step="execution">3 · Execution identity</button><div>→</div><button data-step="evidence">4 · Raw evidence</button><div>→</div><button data-step="claim">5 · Claim gate</button><div>→</div><button data-step="verify">6 · Verify</button></section>
+<section class="panel" id="panel"></section>
+<section class="verify-box"><div><p class="eyebrow">Independent verification</p><h2>Recompute before you believe.</h2><p>This explorer explains the chain. The trust decision belongs to the verifier, not the UI.</p></div><code>meshfit benchmark-verify-proof benchmark-proof.yaml --root &lt;materialized-kit&gt; --require-publishable</code></section>
+<section class="raw"><div class="raw-head"><h2>Raw proof</h2><button id="copy">Copy</button></div><pre id="raw"></pre></section>
+<footer><span>Explorer v0 · no synthetic performance result is presented as real evidence.</span><a href="https://github.com/hippoley/MeshFit">MeshFit repository</a></footer>
+</main><script src="./app.js"></script></body></html>
