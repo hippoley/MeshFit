@@ -69,6 +69,7 @@ benchmark claim true.
 ## Runner requirement
 
 The action builds and executes the verifier from the exact MeshFit revision named
-in `uses:`. A Rust/Cargo toolchain must be available on the runner.
+in `uses:`. A Rust/Cargo toolchain, Bash, and Python 3 must be available on the
+runner. The bundled examples and contract tests target GitHub-hosted Ubuntu.
 
 For external use, pin `uses:` to a full commit SHA rather than a mutable branch.
