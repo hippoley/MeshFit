@@ -28,6 +28,22 @@ frozen decision
 The visible verifier helps diagnosis. The scoring verifier under `tests/`
 independently checks immutable controls and rejects reward-hacking shortcuts.
 
+## Schema boundary
+
+The task fixture uses the task-local schema identifier:
+
+```text
+meshfit.infrabench-placement-proof/v1
+```
+
+It intentionally does **not** claim to be the public
+`meshfit.benchmark-proof/v1` BenchmarkProofReceipt emitted by the MeshFit CLI.
+The task fixture is a compact incident-repair contract; the production receipt
+has a broader `inputs + candidates + report + publishability` shape.
+
+Keeping those identifiers distinct prevents a synthetic evaluation fixture from
+silently redefining MeshFit's public proof contract.
+
 ## Why this is externalizable
 
 InfraBench explicitly evaluates durable state, invariants, cleanup and risk, and
