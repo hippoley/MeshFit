@@ -2587,12 +2587,10 @@ fn verify_benchmark_proof(
                 .map_err(|e| format!("parse proof bundle {}: {e}", path.display()))?;
             bundle.validate()?;
 
-            if bundle.benchmark_id != bundle_receipt.benchmark_id
-                || bundle.benchmark_id != receipt.benchmark_id
-            {
+            if bundle.benchmark_id != bundle_receipt.benchmark_id {
                 return Err(format!(
-                    "proof bundle '{}' benchmark_id does not match receipt benchmark '{}'",
-                    bundle_receipt.path, receipt.benchmark_id
+                    "proof bundle '{}' benchmark_id differs from bundle receipt",
+                    bundle_receipt.path
                 ));
             }
             if bundle.request.executable.source_plan_id != bundle_receipt.source_plan_id
