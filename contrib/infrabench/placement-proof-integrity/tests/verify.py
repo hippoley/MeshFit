@@ -3,11 +3,13 @@ from __future__ import annotations
 
 import hashlib
 import json
+import os
 from pathlib import Path
 
 import yaml
 
-ROOT = Path("/app/campaign")
+ROOT = Path(os.environ.get("CAMPAIGN_ROOT", "/app/campaign"))
+LOG_DIR = Path(os.environ.get("VERIFIER_LOG_DIR", "/logs/verifier"))
 EXPECTED = {
     "frozen/plan.yaml": "e11743937f69441bf480610274e1deaee7ccd8f7cb5ad9ffce6ad67bcf6840ed",
     "benchmark-proof.yaml": "c82f7d1dfa55a98fbcfc4393238dea25e619fed6ffec064e43a1ce76d5d45fbb",
@@ -55,10 +57,11 @@ reward = sum(1 for item in scored if item["passed"]) / len(scored)
 if any(not item["passed"] for item in checks if not item["scored"]):
     reward = 0.0
 
-Path("/logs/verifier/reward.json").write_text(
+LOG_DIR.mkdir(parents=True, exist_ok=True)
+LOG_DIR.joinpath("reward.json").write_text(
     json.dumps({"reward": reward, "checks": checks}, indent=2) + "\n"
 )
-Path("/logs/verifier/reward.txt").write_text(f"{reward}\n")
+LOG_DIR.joinpath("reward.txt").write_text(f"{reward}\n")
 
 if reward < 1.0:
     raise SystemExit(1)
