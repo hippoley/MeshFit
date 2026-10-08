@@ -58,19 +58,22 @@ Everything else is lower priority.
 
 ## 3. Current PR closure order
 
-The open implementation work is already sufficient. Close it before opening new
-framework lines:
+Only three internal lines remain worth closing before framework freeze:
 
-1. **#132** — portable proof package: source verify -> dependency materialize ->
-   exported-tree re-verify.
-2. **#133** — MLCommons/InfraGraph planning seed with unknown evidence preserved
-   as unknown.
-3. **#138** — proof-consumer/interoperability intake surface.
-4. **#139** — user-story truth audit / roadmap correction.
+1. **#133** — MLCommons/InfraGraph planning seed with unknown execution facts
+   preserved as unknown and node cost made an explicit operator declaration.
+2. **#139** — this user-story truth audit / roadmap correction.
+3. **#140** — clean current-main replay of the portable proof package originally
+   developed in #132.
 
-#134 is already merged: portable verification JSON, public schema, digest/predicate
-binding, and standard attestation composition are now mainline code/contract
-capabilities.
+Already resolved:
+
+- **#134 merged** — portable verification JSON, public schema,
+  digest/predicate binding and standard attestation composition;
+- **#135 merged** — Evidence Index factual refresh;
+- **#132 closed as superseded by #140** after verifier/mainline merge-base drift;
+- **#138 closed not planned** — no dedicated proof-consumer issue form until a
+  real external consumer demonstrates that normal GitHub issues are inadequate.
 
 Merge only after the relevant CI succeeds. A mergeable PR with queued or failed
 CI is not completed evidence.
