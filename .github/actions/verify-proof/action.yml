@@ -57,7 +57,10 @@ runs:
           args+=(--require-publishable)
         fi
 
-        cargo run --quiet           --manifest-path "$GITHUB_ACTION_PATH/../../../Cargo.toml"           -p meshfit --           "${args[@]}" > "$verification_json"
+        cargo run --quiet \
+          --manifest-path "$GITHUB_ACTION_PATH/../../../Cargo.toml" \
+          -p meshfit -- \
+          "${args[@]}" > "$verification_json"
 
         digest="$(sha256sum "$MESHFIT_PROOF" | awk '{print $1}')"
 
