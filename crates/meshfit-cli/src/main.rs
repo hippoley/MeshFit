@@ -5660,6 +5660,30 @@ mod tests {
             .flat_map(|candidate| candidate.bundles.iter())
             .all(|bundle| bundle.sha256.len() == 64));
 
+        let proof_path = dir.join("benchmark-proof.yaml");
+        fs::write(&proof_path, serde_yaml::to_string(&receipt).unwrap()).unwrap();
+        let verification = verify_benchmark_proof(&proof_path, &dir).unwrap();
+        assert!(verification.verified);
+        assert!(verification.report_matches);
+        assert_eq!(verification.inputs_verified, 6);
+        assert_eq!(verification.bundles_verified, 2);
+        assert_eq!(verification.proof_sha256.len(), 64);
+
+        let baseline_path = dir.join("results/baseline/run-01.yaml");
+        let original_baseline = fs::read(&baseline_path).unwrap();
+        fs::write(
+            &baseline_path,
+            [original_baseline.as_slice(), b"\n# tampered\n"].concat(),
+        )
+        .unwrap();
+        let error = verify_benchmark_proof(&proof_path, &dir).unwrap_err();
+        assert!(error.contains("hash mismatch"));
+        fs::write(&baseline_path, original_baseline).unwrap();
+
+        let canonical_root = dir.canonicalize().unwrap();
+        let escape = resolve_proof_path(&canonical_root, "../outside.yaml").unwrap_err();
+        assert!(escape.contains("disallowed path component"));
+
         let _ = fs::remove_dir_all(dir);
     }
 
