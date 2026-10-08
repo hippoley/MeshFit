@@ -1,0 +1,104 @@
+name: Proof consumer / interoperability
+description: Report a real MeshFit proof-consumption, verification, schema, attestation, or external-inventory compatibility problem.
+title: "[proof-consumer] "
+labels:
+  - interoperability
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Use this form when another repository, CI system, verifier, policy engine,
+        attestation workflow, benchmark harness, or infrastructure inventory tool
+        is trying to consume a MeshFit artifact.
+
+        A self-authored demo is useful for debugging, but external consumption is
+        the strongest signal. Please include the exact immutable artifact/version
+        you consumed where possible.
+
+  - type: dropdown
+    id: surface
+    attributes:
+      label: Consumption surface
+      options:
+        - meshfit.benchmark-proof/v1
+        - benchmark-verify-proof CLI
+        - verify-proof GitHub Action
+        - meshfit.benchmark-proof-verification/v1
+        - Proof Explorer
+        - benchmark-export-proof package
+        - MLCommons / InfraGraph bridge
+        - Other interoperability boundary
+    validations:
+      required: true
+
+  - type: input
+    id: meshfit_revision
+    attributes:
+      label: MeshFit revision
+      description: Prefer the full commit SHA or immutable release/tag used by the consumer.
+      placeholder: 0123456789abcdef...
+    validations:
+      required: true
+
+  - type: input
+    id: consumer
+    attributes:
+      label: Consumer
+      description: Repository, workflow, tool, policy engine, benchmark, or integration consuming MeshFit.
+      placeholder: owner/repo, workflow name, or tool
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected_contract
+    attributes:
+      label: Contract you expected
+      description: What did you expect MeshFit to accept, reject, export, or preserve?
+      placeholder: |
+        Example:
+        - verify this proof against the supplied audit root
+        - preserve CPU-only nodes from an InfraGraph import
+        - bind this attestation predicate to the exact proof digest
+    validations:
+      required: true
+
+  - type: textarea
+    id: observed
+    attributes:
+      label: What actually happened?
+      description: Include the smallest reproducible failure or incompatibility.
+      render: shell
+    validations:
+      required: true
+
+  - type: textarea
+    id: evidence
+    attributes:
+      label: Evidence / immutable references
+      description: |
+        Link or paste exact proof SHA-256, schema version, workflow run, commit,
+        external issue/PR, benchmark artifact, or sanitized error output.
+        Do not include credentials or private infrastructure identifiers.
+    validations:
+      required: true
+
+  - type: checkboxes
+    id: trust_boundary
+    attributes:
+      label: Trust-boundary checks
+      options:
+        - label: I am not treating a valid signature/attestation as proof that the benchmark claim itself is true.
+        - label: I have not replaced missing physical/runtime evidence with guessed values just to make the integration pass.
+        - label: I can share a sanitized reproducer or enough evidence for an independent reviewer to reject/confirm the issue.
+    validations:
+      required: true
+
+  - type: textarea
+    id: upstream
+    attributes:
+      label: External/upstream context
+      description: |
+        If this touches MLCommons, InfraGraph, ODSI, Sigstore, in-toto, GitHub
+        Artifact Attestations, InfraBench, Chakra, ASTRA-sim, or another upstream,
+        link the exact external artifact and say whether maintainers have responded.
+        Do not count a MeshFit-authored issue as external validation.
