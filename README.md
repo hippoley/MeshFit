@@ -227,6 +227,12 @@ verified proof bytes so downstream attestation or policy systems can bind their
 decision to an immutable subject. See
 [Proof Consumer Contract](docs/PROOF_CONSUMER_CONTRACT.md).
 
+The long-lived category boundary is intentionally narrow: MeshFit is not trying
+to own generic "decision provenance." The durable layer is
+[execution-bound placement proof](docs/PLACEMENT_PROOF_BOUNDARY.md): binding a
+precommitted placement to the physical execution and evidence later used for a
+performance/cost claim.
+
 ---
 
 ## It sits above the runtimes
