@@ -19,7 +19,10 @@ inputs:
 outputs:
   proof-sha256:
     description: SHA-256 of the exact proof bytes that were verified.
-    value: ${{ steps.digest.outputs.sha256 }}
+    value: ${{ steps.verify.outputs.sha256 }}
+  verification-json:
+    description: Path to the JSON verification result emitted by MeshFit for this proof.
+    value: ${{ steps.verify.outputs.verification-json }}
 
 runs:
   using: composite
@@ -34,42 +37,30 @@ runs:
         test -f "$MESHFIT_PROOF"
         test -d "$MESHFIT_ROOT"
 
-    - name: Verify publishable proof
-      if: ${{ inputs.require-publishable == 'true' }}
-      shell: bash
-      env:
-        MESHFIT_PROOF: ${{ inputs.proof }}
-        MESHFIT_ROOT: ${{ inputs.root }}
-      run: |
-        set -euo pipefail
-        cargo run --quiet \
-          --manifest-path "$GITHUB_ACTION_PATH/../../../Cargo.toml" \
-          -p meshfit -- \
-          benchmark-verify-proof "$MESHFIT_PROOF" \
-          --root "$MESHFIT_ROOT" \
-          --require-publishable
-
     - name: Verify proof
-      if: ${{ inputs.require-publishable != 'true' }}
+      id: verify
       shell: bash
       env:
         MESHFIT_PROOF: ${{ inputs.proof }}
         MESHFIT_ROOT: ${{ inputs.root }}
+        MESHFIT_REQUIRE_PUBLISHABLE: ${{ inputs.require-publishable }}
       run: |
         set -euo pipefail
-        cargo run --quiet \
-          --manifest-path "$GITHUB_ACTION_PATH/../../../Cargo.toml" \
-          -p meshfit -- \
-          benchmark-verify-proof "$MESHFIT_PROOF" \
-          --root "$MESHFIT_ROOT"
 
-    - name: Export verified proof digest
-      id: digest
-      shell: bash
-      env:
-        MESHFIT_PROOF: ${{ inputs.proof }}
-      run: |
-        set -euo pipefail
+        verification_json="$(mktemp "${RUNNER_TEMP:-/tmp}/meshfit-proof-verification.XXXXXX.json")"
+        args=(
+          benchmark-verify-proof "$MESHFIT_PROOF"
+          --root "$MESHFIT_ROOT"
+          --json
+        )
+        if [ "$MESHFIT_REQUIRE_PUBLISHABLE" = "true" ]; then
+          args+=(--require-publishable)
+        fi
+
+        cargo run --quiet           --manifest-path "$GITHUB_ACTION_PATH/../../../Cargo.toml"           -p meshfit --           "${args[@]}" > "$verification_json"
+
         digest="$(sha256sum "$MESHFIT_PROOF" | awk '{print $1}')"
         echo "sha256=$digest" >> "$GITHUB_OUTPUT"
+        echo "verification-json=$verification_json" >> "$GITHUB_OUTPUT"
         echo "Verified MeshFit proof SHA-256: $digest"
+        echo "Verification JSON: $verification_json"
