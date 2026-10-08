@@ -2488,7 +2488,7 @@ fn build_benchmark_proof_receipt(kit_dir: &Path) -> Result<BenchmarkProofReceipt
     })
 }
 
-fn resolve_proof_path(audit_root: &Path, rel: &str) -> Result<PathBuf, String> {
+fn normalize_proof_relative_path(rel: &str) -> Result<PathBuf, String> {
     let rel_path = Path::new(rel);
     if rel_path.as_os_str().is_empty() || rel_path.is_absolute() {
         return Err(format!(
@@ -2496,9 +2496,11 @@ fn resolve_proof_path(audit_root: &Path, rel: &str) -> Result<PathBuf, String> {
         ));
     }
 
+    let mut normalized = PathBuf::new();
     for component in rel_path.components() {
         match component {
-            Component::Normal(_) | Component::CurDir => {}
+            Component::Normal(value) => normalized.push(value),
+            Component::CurDir => {}
             _ => {
                 return Err(format!(
                     "proof path '{rel}' contains a disallowed path component"
@@ -2507,7 +2509,18 @@ fn resolve_proof_path(audit_root: &Path, rel: &str) -> Result<PathBuf, String> {
         }
     }
 
-    let candidate = audit_root.join(rel_path);
+    if normalized.as_os_str().is_empty() {
+        return Err(format!(
+            "proof path '{rel}' must contain a normal relative component"
+        ));
+    }
+
+    Ok(normalized)
+}
+
+fn resolve_proof_path(audit_root: &Path, rel: &str) -> Result<PathBuf, String> {
+    let rel_path = normalize_proof_relative_path(rel)?;
+    let candidate = audit_root.join(&rel_path);
     let canonical = candidate
         .canonicalize()
         .map_err(|e| format!("resolve proof path '{}': {e}", candidate.display()))?;
@@ -2807,13 +2820,14 @@ fn export_benchmark_proof_package(
         })?;
 
         for rel in referenced {
-            if rel == "benchmark-proof.yaml" {
+            let normalized_rel = normalize_proof_relative_path(rel)?;
+            if normalized_rel == Path::new("benchmark-proof.yaml") {
                 return Err(
                     "proof references reserved export path 'benchmark-proof.yaml'".to_string(),
                 );
             }
             let src = resolve_proof_path(&canonical_root, rel)?;
-            let dst = out_dir.join(rel);
+            let dst = out_dir.join(&normalized_rel);
             let parent = dst
                 .parent()
                 .ok_or_else(|| format!("exported proof path '{}' has no parent", dst.display()))?;
@@ -5806,6 +5820,11 @@ mod tests {
         let canonical_root = dir.canonicalize().unwrap();
         let escape = resolve_proof_path(&canonical_root, "../outside.yaml").unwrap_err();
         assert!(escape.contains("disallowed path component"));
+
+        let reserved_alias = normalize_proof_relative_path("./benchmark-proof.yaml").unwrap();
+        assert_eq!(reserved_alias, PathBuf::from("benchmark-proof.yaml"));
+        let empty_alias = normalize_proof_relative_path(".").unwrap_err();
+        assert!(empty_alias.contains("normal relative component"));
 
         let _ = fs::remove_dir_all(dir);
     }
