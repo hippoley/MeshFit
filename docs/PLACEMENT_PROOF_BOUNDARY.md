@@ -83,7 +83,9 @@ recomputable evidence/claim result.
 Kubernetes KEP-5313 is a useful boundary test because it proposes a
 vendor-neutral `PlacementDecision` API for the resolved "which clusters" answer
 while deliberately leaving scheduling logic and downstream deployment behavior
-out of scope.
+out of scope. As of 2026-10-08 its KEP metadata is still `status: provisional`
+and `stage: alpha`, so MeshFit treats it as an emerging interface boundary, not
+a stable dependency.
 
 MeshFit should treat that direction as complementary rather than inventing
 another general placement-decision API.
