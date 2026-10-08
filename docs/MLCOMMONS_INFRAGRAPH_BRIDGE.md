@@ -114,6 +114,11 @@ can suppress otherwise useful sysinfo from a node. That upstream issue matters
 to MeshFit because a heterogeneous placement system should retain CPU-only
 nodes as observed infrastructure even when they are not accelerator candidates.
 
+The adapter's regression fixture explicitly retains a CPU-only InfraGraph
+instance with an empty accelerator list. A node without an accelerator is still
+observed infrastructure and must not disappear merely because a GPU-runtime
+variation is unavailable.
+
 A useful future upstream artifact is therefore a small compatibility example,
 not a new competing schema:
 
