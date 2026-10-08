@@ -11,5 +11,6 @@ path = "src/main.rs"
 [dependencies]
 meshfit-core = { path = "../meshfit-core" }
 serde = { version = "1", features = ["derive"] }
+serde_json = "1"
 serde_yaml = "0.9"
 sha2 = "0.10"
