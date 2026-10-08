@@ -1,6 +1,6 @@
 use std::{
     env, fs,
-    path::{Path, PathBuf},
+    path::{Component, Path, PathBuf},
     process,
 };
 
@@ -322,7 +322,7 @@ struct BenchmarkExpectedRequestContract {
     config: BenchmarkConfig,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct BenchmarkProofReceipt {
     schema: String,
     benchmark_id: String,
@@ -336,14 +336,14 @@ struct BenchmarkProofReceipt {
     report: BenchmarkComparisonReport,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct BenchmarkProofInput {
     role: String,
     path: String,
     sha256: String,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct BenchmarkProofCandidate {
     name: String,
     plan_id: String,
@@ -352,7 +352,7 @@ struct BenchmarkProofCandidate {
     bundles: Vec<BenchmarkProofBundle>,
 }
 
-#[derive(Debug, Serialize)]
+#[derive(Debug, Deserialize, Serialize)]
 struct BenchmarkProofBundle {
     path: String,
     sha256: String,
@@ -364,6 +364,20 @@ struct BenchmarkProofBundle {
     binary_sha256: Option<String>,
     #[serde(skip_serializing_if = "Option::is_none")]
     captured_at: Option<String>,
+}
+
+#[derive(Debug, Serialize)]
+struct BenchmarkProofVerification {
+    schema: String,
+    proof_path: String,
+    proof_sha256: String,
+    audit_root: String,
+    inputs_verified: usize,
+    bundles_verified: usize,
+    report_matches: bool,
+    evidence_publishable: bool,
+    evidence_status: String,
+    verified: bool,
 }
 
 #[derive(Debug)]
@@ -1977,6 +1991,28 @@ fn run() -> Result<(), String> {
             let yaml = serde_yaml::to_string(&receipt).map_err(|e| e.to_string())?;
             print!("{yaml}");
         }
+        "benchmark-verify-proof" => {
+            let proof_path = args.get(2).ok_or_else(|| {
+                "usage: meshfit benchmark-verify-proof <benchmark-proof.yaml> --root <kit-dir> [--require-publishable]"
+                    .to_string()
+            })?;
+            let audit_root = option_value(&args[3..], "--root")?
+                .ok_or_else(|| "--root <kit-dir> is required".to_string())?;
+            let verification =
+                verify_benchmark_proof(Path::new(proof_path), Path::new(audit_root))?;
+
+            if args.iter().any(|arg| arg == "--require-publishable")
+                && !verification.evidence_publishable
+            {
+                return Err(format!(
+                    "verified proof is not publishable: {}",
+                    verification.evidence_status
+                ));
+            }
+
+            let yaml = serde_yaml::to_string(&verification).map_err(|e| e.to_string())?;
+            print!("{yaml}");
+        }
         "compare-benchmarks" => {
             let manifest_path = args.get(2).ok_or_else(|| {
                 "usage: meshfit compare-benchmarks <comparison.yaml> [--markdown] [--require-publishable]"
@@ -2420,6 +2456,283 @@ fn build_benchmark_proof_receipt(kit_dir: &Path) -> Result<BenchmarkProofReceipt
         inputs,
         candidates,
         report,
+    })
+}
+
+fn resolve_proof_path(audit_root: &Path, rel: &str) -> Result<PathBuf, String> {
+    let rel_path = Path::new(rel);
+    if rel_path.as_os_str().is_empty() || rel_path.is_absolute() {
+        return Err(format!(
+            "proof path '{rel}' must be a non-empty relative path"
+        ));
+    }
+
+    for component in rel_path.components() {
+        match component {
+            Component::Normal(_) | Component::CurDir => {}
+            _ => {
+                return Err(format!(
+                    "proof path '{rel}' contains a disallowed path component"
+                ))
+            }
+        }
+    }
+
+    let candidate = audit_root.join(rel_path);
+    let canonical = candidate
+        .canonicalize()
+        .map_err(|e| format!("resolve proof path '{}': {e}", candidate.display()))?;
+    if !canonical.starts_with(audit_root) {
+        return Err(format!(
+            "proof path '{rel}' escapes audit root '{}'",
+            audit_root.display()
+        ));
+    }
+    Ok(canonical)
+}
+
+fn verify_benchmark_proof(
+    proof_path: &Path,
+    audit_root: &Path,
+) -> Result<BenchmarkProofVerification, String> {
+    let proof_bytes =
+        fs::read(proof_path).map_err(|e| format!("read proof {}: {e}", proof_path.display()))?;
+    let receipt: BenchmarkProofReceipt = serde_yaml::from_slice(&proof_bytes)
+        .map_err(|e| format!("parse proof {}: {e}", proof_path.display()))?;
+
+    if receipt.schema != "meshfit.benchmark-proof/v1" {
+        return Err(format!(
+            "unsupported proof schema '{}'; expected meshfit.benchmark-proof/v1",
+            receipt.schema
+        ));
+    }
+
+    let audit_root = audit_root
+        .canonicalize()
+        .map_err(|e| format!("resolve audit root {}: {e}", audit_root.display()))?;
+    if !audit_root.is_dir() {
+        return Err(format!(
+            "audit root '{}' is not a directory",
+            audit_root.display()
+        ));
+    }
+
+    let mut input_roles = std::collections::HashMap::new();
+    for input in &receipt.inputs {
+        if input_roles.insert(input.role.as_str(), input).is_some() {
+            return Err(format!(
+                "proof contains duplicate input role '{}'",
+                input.role
+            ));
+        }
+        let path = resolve_proof_path(&audit_root, &input.path)?;
+        let bytes =
+            fs::read(&path).map_err(|e| format!("read proof input {}: {e}", path.display()))?;
+        let observed = sha256_hex(&bytes);
+        if observed != input.sha256 {
+            return Err(format!(
+                "proof input '{}' hash mismatch: receipt={} observed={}",
+                input.path, input.sha256, observed
+            ));
+        }
+    }
+
+    for role in [
+        "kit",
+        "comparison",
+        "snapshot",
+        "target",
+        "model_identity",
+        "prompt",
+    ] {
+        if !input_roles.contains_key(role) {
+            return Err(format!("proof is missing required input role '{role}'"));
+        }
+    }
+
+    let mut receipt_candidates = std::collections::HashMap::new();
+    let mut total_bundles = 0_usize;
+    for candidate in &receipt.candidates {
+        if receipt_candidates
+            .insert(candidate.name.as_str(), candidate)
+            .is_some()
+        {
+            return Err(format!(
+                "proof contains duplicate candidate '{}'",
+                candidate.name
+            ));
+        }
+
+        let mut seen_bundle_paths = std::collections::HashSet::new();
+        for bundle_receipt in &candidate.bundles {
+            if !seen_bundle_paths.insert(bundle_receipt.path.as_str()) {
+                return Err(format!(
+                    "candidate '{}' repeats proof bundle path '{}'",
+                    candidate.name, bundle_receipt.path
+                ));
+            }
+
+            let path = resolve_proof_path(&audit_root, &bundle_receipt.path)?;
+            let bytes = fs::read(&path)
+                .map_err(|e| format!("read proof bundle {}: {e}", path.display()))?;
+            let observed_hash = sha256_hex(&bytes);
+            if observed_hash != bundle_receipt.sha256 {
+                return Err(format!(
+                    "proof bundle '{}' hash mismatch: receipt={} observed={}",
+                    bundle_receipt.path, bundle_receipt.sha256, observed_hash
+                ));
+            }
+
+            let bundle: BenchmarkBundle = serde_yaml::from_slice(&bytes)
+                .map_err(|e| format!("parse proof bundle {}: {e}", path.display()))?;
+            bundle.validate()?;
+
+            if bundle.benchmark_id != bundle_receipt.benchmark_id {
+                return Err(format!(
+                    "proof bundle '{}' benchmark_id differs from bundle receipt",
+                    bundle_receipt.path
+                ));
+            }
+            if bundle.request.executable.source_plan_id != bundle_receipt.source_plan_id
+                || bundle_receipt.source_plan_id != candidate.plan_id
+            {
+                return Err(format!(
+                    "proof bundle '{}' plan binding does not match candidate '{}'",
+                    bundle_receipt.path, candidate.plan_id
+                ));
+            }
+            if bundle.provenance.commit != bundle_receipt.source_commit {
+                return Err(format!(
+                    "proof bundle '{}' source commit differs from receipt",
+                    bundle_receipt.path
+                ));
+            }
+            if bundle.provenance.binary_sha256 != bundle_receipt.binary_sha256 {
+                return Err(format!(
+                    "proof bundle '{}' binary SHA-256 differs from receipt",
+                    bundle_receipt.path
+                ));
+            }
+            if bundle.provenance.captured_at != bundle_receipt.captured_at {
+                return Err(format!(
+                    "proof bundle '{}' capture timestamp differs from receipt",
+                    bundle_receipt.path
+                ));
+            }
+
+            total_bundles += 1;
+        }
+    }
+
+    if !receipt.kit_complete
+        || receipt.expected_bundles != total_bundles
+        || receipt.valid_bundles != total_bundles
+    {
+        return Err(format!(
+            "proof completeness mismatch: kit_complete={} expected={} valid={} referenced={}",
+            receipt.kit_complete, receipt.expected_bundles, receipt.valid_bundles, total_bundles
+        ));
+    }
+
+    let comparison_input = input_roles
+        .get("comparison")
+        .ok_or_else(|| "proof is missing comparison input".to_string())?;
+    let comparison_path = resolve_proof_path(&audit_root, &comparison_input.path)?;
+    let comparison_raw = fs::read_to_string(&comparison_path)
+        .map_err(|e| format!("read {}: {e}", comparison_path.display()))?;
+    let comparison: BenchmarkComparisonManifest = serde_yaml::from_str(&comparison_raw)
+        .map_err(|e| format!("parse {}: {e}", comparison_path.display()))?;
+
+    if comparison.benchmark_id != receipt.benchmark_id {
+        return Err(format!(
+            "comparison benchmark_id '{}' does not match proof '{}'",
+            comparison.benchmark_id, receipt.benchmark_id
+        ));
+    }
+    if comparison.candidates.len() != receipt.candidates.len() {
+        return Err(format!(
+            "comparison candidate count {} does not match proof {}",
+            comparison.candidates.len(),
+            receipt.candidates.len()
+        ));
+    }
+
+    let mut recompute_candidates = Vec::new();
+    for manifest_candidate in comparison.candidates {
+        let proof_candidate = receipt_candidates
+            .get(manifest_candidate.name.as_str())
+            .ok_or_else(|| {
+                format!(
+                    "comparison candidate '{}' is missing from proof",
+                    manifest_candidate.name
+                )
+            })?;
+
+        let proof_bundle_paths = proof_candidate
+            .bundles
+            .iter()
+            .map(|bundle| bundle.path.as_str())
+            .collect::<Vec<_>>();
+        let manifest_bundle_paths = manifest_candidate
+            .bundles
+            .iter()
+            .map(String::as_str)
+            .collect::<Vec<_>>();
+        if proof_bundle_paths != manifest_bundle_paths {
+            return Err(format!(
+                "comparison bundle list for candidate '{}' differs from proof",
+                manifest_candidate.name
+            ));
+        }
+
+        let mut bundles = Vec::new();
+        for bundle_rel in &manifest_candidate.bundles {
+            let path = resolve_proof_path(&audit_root, bundle_rel)?;
+            let bytes = fs::read(&path)
+                .map_err(|e| format!("read comparison bundle {}: {e}", path.display()))?;
+            let bundle: BenchmarkBundle = serde_yaml::from_slice(&bytes)
+                .map_err(|e| format!("parse comparison bundle {}: {e}", path.display()))?;
+            bundles.push(bundle);
+        }
+
+        recompute_candidates.push(BenchmarkCandidate {
+            name: manifest_candidate.name,
+            strategy: manifest_candidate.strategy,
+            hourly_cost_usd: manifest_candidate.hourly_cost_usd,
+            bundles,
+        });
+    }
+
+    let recomputed_report = compare_benchmarks(&BenchmarkComparisonRequest {
+        benchmark_id: comparison.benchmark_id,
+        meshfit_candidate: comparison.meshfit_candidate,
+        objective: comparison.objective,
+        candidates: recompute_candidates,
+    })?;
+
+    if recomputed_report != receipt.report {
+        return Err(
+            "proof report does not match report recomputed from verified comparison and bundles"
+                .to_string(),
+        );
+    }
+    if receipt.evidence_publishable != recomputed_report.publishable
+        || receipt.evidence_status != recomputed_report.evidence_status
+    {
+        return Err("proof publishability metadata does not match recomputed report".to_string());
+    }
+
+    Ok(BenchmarkProofVerification {
+        schema: "meshfit.benchmark-proof-verification/v1".to_string(),
+        proof_path: proof_path.display().to_string(),
+        proof_sha256: sha256_hex(&proof_bytes),
+        audit_root: audit_root.display().to_string(),
+        inputs_verified: receipt.inputs.len(),
+        bundles_verified: total_bundles,
+        report_matches: true,
+        evidence_publishable: recomputed_report.publishable,
+        evidence_status: recomputed_report.evidence_status,
+        verified: true,
     })
 }
 
@@ -4456,6 +4769,9 @@ fn render_benchmark_runbook(kit: &BenchmarkExecutionKit) -> String {
     out.push_str("meshfit benchmark-status . --require-complete\n");
     out.push_str("meshfit benchmark-finalize . --markdown --require-publishable\n");
     out.push_str("meshfit benchmark-proof . --require-publishable > benchmark-proof.yaml\n");
+    out.push_str(
+        "meshfit benchmark-verify-proof benchmark-proof.yaml --root . --require-publishable\n",
+    );
     out.push_str("```\n\n");
 
     out.push_str("## Low-level comparison\n\n");
@@ -5349,6 +5665,30 @@ mod tests {
             .iter()
             .flat_map(|candidate| candidate.bundles.iter())
             .all(|bundle| bundle.sha256.len() == 64));
+
+        let proof_path = dir.join("benchmark-proof.yaml");
+        fs::write(&proof_path, serde_yaml::to_string(&receipt).unwrap()).unwrap();
+        let verification = verify_benchmark_proof(&proof_path, &dir).unwrap();
+        assert!(verification.verified);
+        assert!(verification.report_matches);
+        assert_eq!(verification.inputs_verified, 6);
+        assert_eq!(verification.bundles_verified, 2);
+        assert_eq!(verification.proof_sha256.len(), 64);
+
+        let baseline_path = dir.join("results/baseline/run-01.yaml");
+        let original_baseline = fs::read(&baseline_path).unwrap();
+        fs::write(
+            &baseline_path,
+            [original_baseline.as_slice(), b"\n# tampered\n"].concat(),
+        )
+        .unwrap();
+        let error = verify_benchmark_proof(&proof_path, &dir).unwrap_err();
+        assert!(error.contains("hash mismatch"));
+        fs::write(&baseline_path, original_baseline).unwrap();
+
+        let canonical_root = dir.canonicalize().unwrap();
+        let escape = resolve_proof_path(&canonical_root, "../outside.yaml").unwrap_err();
+        assert!(escape.contains("disallowed path component"));
 
         let _ = fs::remove_dir_all(dir);
     }
