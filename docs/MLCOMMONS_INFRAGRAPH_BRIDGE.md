@@ -32,10 +32,16 @@ It does not treat the imported material as final execution attestation.
 ## Adapter
 
 ```bash
+cat > hourly-costs.yaml <<'YAML'
+node-a: 3.29
+node-b: 6.99
+YAML
+
 python3 tools/mlcommons_infragraph_to_meshfit.py \
   --infragraph-yaml infragraph.yaml \
   --sysinfo-dir /path/to/mlperf-node-captures \
-  --out-dir meshfit-seed
+  --out-dir meshfit-seed \
+  --hourly-cost-map hourly-costs.yaml
 ```
 
 The adapter writes:
@@ -63,6 +69,20 @@ When present and parseable, the bridge carries:
 - OS family;
 - CPU architecture from the paired lstopo XML.
 
+Node hourly cost is **not** imported from MLCommons sysinfo because the upstream
+capture does not define that fact. MeshFit's current `HardwareNodeIR` uses a
+non-optional `hourly_cost_usd`, where `0.0` means an explicitly declared
+zero marginal compute cost rather than "unknown". The bridge therefore refuses
+implicit zero and requires one of:
+
+- `--hourly-cost-map <yaml/json>` with an exact `instance.name -> USD/hour`
+  entry for every imported node; or
+- `--assume-zero-hourly-cost` when the operator intentionally declares zero
+  marginal compute cost for the entire imported estate.
+
+For cloud/hybrid estates, prefer the cost map. The zero-cost flag is an explicit
+semantic assertion, not a convenience default.
+
 ## Facts intentionally *not* promoted
 
 The bridge deliberately leaves:
@@ -71,7 +91,9 @@ The bridge deliberately leaves:
 - `free_memory_gb = null`;
 - `relative_compute = 0`;
 - `local_fabric = []`;
-- peer probes empty.
+- peer probes empty;
+- node hourly cost from upstream inventory (the operator must declare it
+  separately).
 
 Why:
 
@@ -84,6 +106,8 @@ Why:
    inter-node fabric.
 5. Execution readiness must be checked on the machine that actually runs the
    candidate.
+6. MLCommons sysinfo does not establish a node's marginal hourly compute cost;
+   silently mapping absence to `0.0` would manufacture a cost claim.
 
 ## Required upgrade before real execution
 
