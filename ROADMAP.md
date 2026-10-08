@@ -80,21 +80,28 @@ MeshFit's roadmap is ordered by the shortest path to a real closed loop.
 - [ ] latency / throughput model
 - [x] declared marginal cost estimation contract — PlanIR hourly cost + explicit predicted output tok/s + modeled communication egress → $/1M output tokens; synthetic full-stack CI Reality Verified on run #1010; full TCO and observed-cost calibration pending
 - [x] estimate vs observed error — VRAM plus exact-identity p95 TTFT / mean decode throughput error contracts, direction-aware optimistic error and conservative correction ratios; synthetic full-stack CI Reality Verified on runs #877/#900/#956; real GPU performance calibration pending
-- [ ] bounded evidence transfer
+- [x] bounded evidence transfer — host evidence export/import with typed hashes + coordinator re-attestation is implemented; real campaign validation remains pending
 
 ## 6. Ask for the missing evidence — v0.5
 
 - [x] uncertainty-aware probe selection — evidence-gap rejections ranked by decision value, affected-candidate breadth, and blocked-decision state; real unmeasured-snapshot CLI Reality Verified on CI #1068/#1084
-- [ ] targeted network probe
-- [ ] targeted compute probe
-- [ ] decision-changing probe validation
+- [x] network probe primitive — `meshfit probe <peer> --bandwidth` exists and is freshness/provenance gated
+- [x] compute probe primitive — `tools/compute_proxy.py` emits measured relative-compute evidence for Reality Campaign ordering
+- [ ] actionable probe closure — recommendation must identify enough concrete target context to run the minimum probe and demonstrate a before/after decision change; do not build duplicate probe engines
 
-## 7. Adapt — v0.6
+## 7. Adapt — v0.6 (deferred until external demand)
 
-- [ ] live telemetry
-- [ ] re-placement
-- [ ] failure / load / cost events
-- [ ] counterfactual plan comparison
+These stories are intentionally **not** near-term commitments while the static
+placement-claim loop remains reality-blocked and externally unconsumed.
+
+- [ ] live telemetry — defer
+- [ ] re-placement — defer
+- [ ] failure / load / cost events — defer
+- [ ] counterfactual plan comparison — defer
+
+Re-open this milestone only after a real operator or external consumer
+demonstrates that continuous adaptation is more valuable than closing the first
+real proof/review loop.
 
 See [docs/VERSIONS.md](docs/VERSIONS.md) for exit criteria.
 
