@@ -2,10 +2,10 @@
 
 # MeshFit
 
-### Placement intelligence for heterogeneous inference.
+### Verifiable placement decisions for heterogeneous inference.
 
 Give MeshFit the machines you actually have.  
-It searches **where the model belongs, how it should be split, what it will cost, and what should be left out.**
+It searches **where the model belongs** and then makes the resulting placement claim **falsifiable against physical execution evidence**.
 
 <br>
 
@@ -42,7 +42,10 @@ Deciding whether those machines should **cooperate** is not.
 
 ## Target UX
 
-The interaction below is the product target, not the current pre-alpha CLI.
+The interaction below is an **illustrative long-term product target**, not output
+emitted by the current CLI. In particular, the latency/throughput/confidence and
+dominant-bottleneck values shown here are not claims that a general predictor or
+bottleneck-diagnosis engine is already implemented.
 
 ~~~text
 meshfit plan infra.yaml \
@@ -118,7 +121,7 @@ edge
 └─ egress
 ~~~
 
-Then it searches for a mapping:
+The **long-term** search space is broader than the current executable contract:
 
 ~~~text
 model graph
@@ -132,7 +135,15 @@ latency × throughput × memory × network × cost
 ranked deployment plans
 ~~~
 
-This is the project.
+Current end-to-end coverage is intentionally narrower: single-host placement,
+local TP, conservative cross-node TP feasibility reasoning, and CPU offload,
+with runtime compilation for the supported vLLM / llama.cpp subsets. PP, EP,
+replication and generic multi-node orchestration remain vision-level/deferred
+capabilities until reality or an external consumer justifies them.
+
+The durable current product boundary is not "every placement mode." It is that a
+supported placement can be observed, precommitted, executed, evidenced and
+independently verified without silently inventing missing physical facts.
 
 ---
 
@@ -274,7 +285,9 @@ MeshFit starts by learning from systems that already solved important pieces wel
 
 The goal is not a collage of their features.
 
-The goal is a better abstraction over the **placement problem**.
+The planner is useful, but the durable boundary is narrower: a placement must
+remain auditable from the observed infrastructure and precommitted decision
+through the physical execution and final claim.
 
 ---
 
@@ -446,14 +459,21 @@ Current code includes:
 
 Still missing before the first real product proof:
 
-- real multi-machine discovery + measured links
-- real heterogeneous Benchmark 001 runs across MeshFit and baseline placements
-- real GPU validation of the VRAM sampler
-- calibrated performance prediction from captured evidence
+- retained real multi-machine discovery + measured links;
+- real heterogeneous Benchmark 001 runs across MeshFit and baseline placements;
+- real GPU validation of the resource sampler on the campaign hardware.
+
+A general cross-hardware latency/throughput predictor is **not** a prerequisite for
+the first product proof. Build stronger transfer models only after retained real
+evidence shows that such prediction would change a placement decision.
 
 The current proof target is **Benchmark 001**: same real workload, simple baselines versus MeshFit, with the observed oracle and placement regret reported from retained benchmark bundles. Synthetic fixtures are never accepted as a publishable performance claim.
 
-See [`docs/BENCHMARK_001.md`](docs/BENCHMARK_001.md) for the frozen protocol and [`docs/DIRECTION_AUDIT.md`](docs/DIRECTION_AUDIT.md) for the Reality Gates that keep the project on course.
+See [`docs/BENCHMARK_001.md`](docs/BENCHMARK_001.md) for the frozen protocol,
+[`docs/DIRECTION_AUDIT.md`](docs/DIRECTION_AUDIT.md) for the Reality Gates, and
+[`docs/USER_STORY_AUDIT.md`](docs/USER_STORY_AUDIT.md) for the current truth
+table separating implemented, reality-blocked, partial, and deliberately deferred
+user stories.
 
 ---
 

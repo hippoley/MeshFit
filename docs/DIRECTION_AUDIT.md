@@ -66,7 +66,13 @@ If not, return Unavailable rather than inventing precision.
 
 ### 5. Layer discipline
 
-MeshFit is placement intelligence.
+MeshFit still performs placement intelligence, but its harder-to-substitute
+boundary is **placement-claim conformance**: observed infrastructure ->
+precommitted placement -> physical execution -> evidence -> independently
+reviewable claim.
+
+Planner intelligence is replaceable by a stronger optimizer, LLM, agent, or
+human. Evidence/conformance work is preferred when the two compete for effort.
 
 It should not become:
 
@@ -146,7 +152,27 @@ Defer a feature when:
 - it produces a precise number with no evidence path;
 - it adds a backend before the first two backends close the full loop;
 - it duplicates execution work already owned by vLLM/SGLang/llama.cpp/exo/Ray;
-- it does not improve placement quality, evidence quality, or execution quality.
+- it does not improve placement quality, evidence quality, execution quality, or external consumability;
+- it exists mainly to complete an old roadmap checkbox after the product boundary has moved;
+- a real campaign or external consumer has not demonstrated the need for it.
+
+## Pivot / valuation rule
+
+Long-termism is not a commitment to one repository or one roadmap.
+
+Revalue the next action when an adjacent node offers a materially better
+combination of:
+
+- active external maintainers / governance;
+- unresolved technical white space;
+- reuse of MeshFit's existing evidence assets;
+- probability of third-party review/adoption;
+- 5–10 year institutional portability;
+- low cost to test the hypothesis.
+
+MeshFit may become the implementation/evidence vehicle for a higher-value node
+such as MLCommons Benchmark Infra or an emerging placement-assurance standard.
+Do not preserve low-value internal scope for sunk-cost reasons.
 
 ## North-star Reality Gate
 

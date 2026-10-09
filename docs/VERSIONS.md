@@ -42,7 +42,7 @@ Exit gate:
 
 **Question:** Can benchmark evidence be trusted and matched to the exact execution that produced it?
 
-Status: **in progress**
+Status: **code/contract complete; reality validation pending**
 
 Delivered / current:
 
@@ -53,14 +53,14 @@ Delivered / current:
 - structured Hardware / Model Artifact / Runtime / Topology identity
 - stable execution fingerprint
 - explicit Unavailable when evidence is missing
+- model artifact SHA-256 identity
+- runtime/driver identity capture primitives
+- repeated-run statistics and stability gate
+- direct best-baseline headline with provisional/publishable separation
+- proof receipt + independent verifier + reusable CI consumer Action
 
-Remaining:
-
-- benchmark artifact schema validation
-- model artifact hash capture
-- runtime/driver capture from real execution
-- repeated-run statistics and objective-specific run stability gate (CV <= 20%)
-- direct best-baseline improvement headline with provisional/publishable separation
+Remaining is not another evidence schema: retain real campaign artifacts and
+obtain independent external consumption/review.
 
 Validation: PR CI run #463 passed fmt, clippy, workspace tests, release build, and the expanded Benchmark 001 CLI chain including candidate selection, execution-kit generation, provisional comparison, and publishability rejection.
 
@@ -150,7 +150,8 @@ Add:
 - exact-evidence 95% next-observation intervals with sample stddev/CV; cross-hardware intervals pending
 - declared marginal cost estimation contract: plan hourly cost + explicit predicted output throughput + modeled communication egress; full TCO and observed-cost calibration pending
 - memory calibration contract and CLI: required-memory vs observed peak-VRAM error/correction ratios (synthetic CI verified; real GPU repeated calibration pending)
-- latency / throughput predictors
+- exact-identity latency / throughput calibration; broader cross-hardware
+  predictors are demand-gated until real evidence shows they change a decision
 - estimate-vs-observed reports — VRAM plus exact-identity p95 TTFT / mean decode throughput calibration contracts implemented; real GPU performance calibration pending
 - carefully bounded cross-hardware transfer
 
@@ -176,28 +177,44 @@ Exit gate:
 
 **Question:** What is the minimum additional measurement needed to choose between plans?
 
-Add probes chosen by uncertainty:
+Current state:
 
-- iperf3
-- RTT / jitter
-- GPU microbenchmark
-- storage throughput
-- runtime capability probe
-- model artifact inspection
+- `recommend-probes` ranks solver evidence gaps;
+- RTT/jitter + optional iperf3 bandwidth probing already exist;
+- the Reality Campaign compute proxy already supplies measured compute ordering;
+- model artifact inspection and runtime inventory already exist.
 
-MeshFit should request the **minimum probe that can change the decision**.
+The remaining user-story gap is **orchestration**, not more probe primitives:
+
+```text
+rejection / uncertainty
+  -> structured source/peer/device target
+  -> exact executable measurement
+  -> updated snapshot/evidence
+  -> re-run solver
+  -> explicit decision delta
+```
+
+Do not parse human/display candidate strings into probe commands. Introduce a
+structured probe target only when a real campaign shows this is a material
+operator blocker.
 
 Exit gate:
 
-> A previously ambiguous placement choice changes because a targeted probe supplied missing evidence.
+> A previously ambiguous placement choice changes (or is conclusively shown not
+> to change) because one targeted, provenance-bound measurement supplied the
+> missing evidence.
 
 ---
 
-## v0.6 — Adaptive Placement
+## v0.6 — Adaptive Placement (deferred option)
 
 **Question:** Should placement change when reality changes?
 
-Add:
+This is no longer an automatic next milestone. The project first needs a real
+static placement-claim proof and external consumer/reviewer behavior.
+
+Potential later scope:
 
 - live telemetry
 - failures
@@ -209,9 +226,11 @@ Add:
 
 Execution remains delegated to runtimes/orchestrators.
 
-Exit gate:
+Re-entry gate:
 
-> A measured runtime change triggers a justified re-placement proposal with before/after evidence.
+> A real operator/external consumer presents a measured change case where static
+> placement verification is insufficient and requests a justified re-placement
+> proposal with before/after evidence.
 
 ---
 
