@@ -1,0 +1,213 @@
+import importlib.util
+import json
+import tempfile
+import unittest
+from pathlib import Path
+
+import yaml
+
+MODULE_PATH = Path(__file__).with_name("mlcommons_infragraph_to_meshfit.py")
+SPEC = importlib.util.spec_from_file_location("mlcommons_infragraph_to_meshfit", MODULE_PATH)
+adapter = importlib.util.module_from_spec(SPEC)
+assert SPEC.loader is not None
+SPEC.loader.exec_module(adapter)
+
+
+class AdapterTests(unittest.TestCase):
+    def test_converts_instances_without_inventing_runtime_evidence(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "src"
+            out = root / "out"
+            src.mkdir()
+
+            graph = {
+                "name": "two-node",
+                "instances": [
+                    {
+                        "name": "node-a",
+                        "device": "host-type",
+                        "count": 1,
+                        "description": "mlperf-system-info-single-node-0",
+                    },
+                    {
+                        "name": "cpu-only",
+                        "device": "cpu-host-type",
+                        "count": 1,
+                        "description": "mlperf-system-info-single-node-1",
+                    },
+                ],
+            }
+            graph_path = root / "infragraph.yaml"
+            graph_path.write_text(yaml.safe_dump(graph), encoding="utf-8")
+
+            stem = "mlperf-system-info-single-node-0"
+            (src / f"{stem}.json").write_text(
+                json.dumps(
+                    {
+                        "host_processor_model_name": "AMD EPYC 9654",
+                        "host_memory_capacity": "256GiB",
+                        "accelerator_model_name": "NVIDIA H100 80GB HBM3",
+                        "accelerators_per_node": 2,
+                        "accelerator_memory_capacity": "80GiB",
+                        "inference_backend": "CUDA 12.9",
+                        "driver": "Driver 575.57.08",
+                        "operating_system": "ubuntu 24.04",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (src / f"{stem}.lstopo.xml").write_text(
+                """<topology><object type="Machine"><info name="HostName" value="node-a"/>
+                <info name="Architecture" value="x86_64"/>
+                <info name="OSName" value="Linux"/></object></topology>""",
+                encoding="utf-8",
+            )
+
+            cpu_stem = "mlperf-system-info-single-node-1"
+            (src / f"{cpu_stem}.json").write_text(
+                json.dumps(
+                    {
+                        "host_processor_model_name": "Intel Xeon Platinum",
+                        "host_memory_capacity": "128GiB",
+                        "accelerator_model_name": "",
+                        "accelerators_per_node": 0,
+                        "accelerator_memory_capacity": "",
+                        "inference_backend": "",
+                        "driver": "",
+                        "operating_system": "ubuntu 24.04",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (src / f"{cpu_stem}.lstopo.xml").write_text(
+                """<topology><object type="Machine"><info name="HostName" value="cpu-only"/>
+                <info name="Architecture" value="x86_64"/>
+                <info name="OSName" value="Linux"/></object></topology>""",
+                encoding="utf-8",
+            )
+
+            files = adapter.convert(
+                graph_path,
+                src,
+                out,
+                hourly_costs={"node-a": 3.29, "cpu-only": 0.0},
+            )
+            self.assertEqual(len(files), 3)
+
+            discovery = yaml.safe_load((out / "discovery-node-a.yaml").read_text())
+            self.assertEqual(discovery["hardware_identity"]["architecture"], "x86_64")
+            self.assertEqual(discovery["hardware_identity"]["operating_system"], "linux")
+            self.assertIsNone(discovery["hardware_identity"]["ram_mib"])
+            self.assertEqual(len(discovery["hardware_identity"]["devices"]), 2)
+            self.assertEqual(discovery["hardware_identity"]["devices"][0]["backend"], "cuda")
+            self.assertEqual(discovery["node"]["ram_gb"], 256.0)
+            self.assertEqual(discovery["node"]["hourly_cost_usd"], 3.29)
+            self.assertEqual(discovery["node"]["accelerators"][0]["relative_compute"], 0.0)
+            self.assertIsNone(discovery["node"]["accelerators"][0]["free_memory_gb"])
+            self.assertEqual(discovery["local_fabric"], [])
+            self.assertTrue(any("not execution attestation" in w for w in discovery["warnings"]))
+
+            cpu_discovery = yaml.safe_load((out / "discovery-cpu-only.yaml").read_text())
+            self.assertEqual(cpu_discovery["node"]["accelerators"], [])
+            self.assertEqual(cpu_discovery["hardware_identity"]["devices"], [])
+            self.assertEqual(cpu_discovery["node"]["ram_gb"], 128.0)
+            self.assertEqual(cpu_discovery["node"]["hourly_cost_usd"], 0.0)
+
+            manifest = yaml.safe_load((out / "snapshot-manifest.yaml").read_text())
+            self.assertEqual(
+                manifest["discovery_files"],
+                ["discovery-node-a.yaml", "discovery-cpu-only.yaml"],
+            )
+            self.assertEqual(manifest["probes"], [])
+
+    def test_refuses_missing_architecture(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "src"
+            out = root / "out"
+            src.mkdir()
+
+            graph_path = root / "infragraph.yaml"
+            graph_path.write_text(
+                yaml.safe_dump(
+                    {
+                        "instances": [
+                            {
+                                "name": "node-a",
+                                "description": "mlperf-system-info-single-node-0",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+            stem = "mlperf-system-info-single-node-0"
+            (src / f"{stem}.json").write_text(
+                json.dumps(
+                    {
+                        "host_processor_model_name": "AMD EPYC",
+                        "host_memory_capacity": "256GiB",
+                        "accelerator_model_name": "NVIDIA H100",
+                        "accelerators_per_node": 1,
+                        "accelerator_memory_capacity": "80GiB",
+                        "inference_backend": "CUDA",
+                        "operating_system": "linux",
+                    }
+                ),
+                encoding="utf-8",
+            )
+            (src / f"{stem}.lstopo.xml").write_text(
+                "<topology><object type=\"Machine\"></object></topology>",
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "refusing to invent hardware identity"):
+                adapter.convert(
+                    graph_path,
+                    src,
+                    out,
+                    hourly_costs={"node-a": 1.0},
+                )
+
+
+    def test_refuses_to_invent_unknown_hourly_cost(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            src = root / "src"
+            out = root / "out"
+            src.mkdir()
+
+            graph_path = root / "infragraph.yaml"
+            graph_path.write_text(
+                yaml.safe_dump(
+                    {
+                        "instances": [
+                            {
+                                "name": "node-a",
+                                "description": "mlperf-system-info-single-node-0",
+                            }
+                        ]
+                    }
+                ),
+                encoding="utf-8",
+            )
+
+            with self.assertRaisesRegex(ValueError, "does not define node hourly cost"):
+                adapter.convert(graph_path, src, out)
+
+    def test_cost_map_rejects_unknown_or_missing_nodes(self):
+        with tempfile.TemporaryDirectory() as tmp:
+            root = Path(tmp)
+            path = root / "costs.yaml"
+            path.write_text("node-a: 3.29\n", encoding="utf-8")
+            self.assertEqual(adapter.parse_hourly_cost_map(path), {"node-a": 3.29})
+
+            bad = root / "bad.yaml"
+            bad.write_text("node-a: -1\n", encoding="utf-8")
+            with self.assertRaisesRegex(ValueError, "finite and non-negative"):
+                adapter.parse_hourly_cost_map(bad)
+
+
+if __name__ == "__main__":
+    unittest.main()
