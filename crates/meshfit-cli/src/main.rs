@@ -5852,6 +5852,87 @@ mod tests {
             .flat_map(|candidate| candidate.bundles.iter())
             .all(|bundle| bundle.sha256.len() == 64));
 
+        // Keep the public receipt schema mechanically aligned with the actual
+        // serialized Rust contract without adding a JSON-Schema runtime
+        // dependency to the CLI.
+        let receipt_value = serde_json::to_value(&receipt).unwrap();
+        let receipt_object = receipt_value.as_object().unwrap();
+        let receipt_schema: serde_json::Value = serde_json::from_str(include_str!(
+            "../../../schemas/benchmark-proof-v1.schema.json"
+        ))
+        .unwrap();
+
+        let key_set = |value: &serde_json::Value, field: &str| {
+            value[field]
+                .as_object()
+                .unwrap()
+                .keys()
+                .cloned()
+                .collect::<std::collections::BTreeSet<_>>()
+        };
+        let required_set = |value: &serde_json::Value| {
+            value["required"]
+                .as_array()
+                .unwrap()
+                .iter()
+                .map(|item| item.as_str().unwrap().to_string())
+                .collect::<std::collections::BTreeSet<_>>()
+        };
+
+        let receipt_keys = receipt_object
+            .keys()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        assert_eq!(receipt_keys, required_set(&receipt_schema));
+        assert_eq!(receipt_keys, key_set(&receipt_schema, "properties"));
+        assert_eq!(
+            receipt_schema["properties"]["schema"]["const"],
+            receipt_value["schema"]
+        );
+
+        let input_value = receipt_value["inputs"].as_array().unwrap().first().unwrap();
+        let input_keys = input_value
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        let input_schema = &receipt_schema["$defs"]["input"];
+        assert_eq!(input_keys, required_set(input_schema));
+        assert_eq!(input_keys, key_set(input_schema, "properties"));
+
+        let candidate_value = receipt_value["candidates"]
+            .as_array()
+            .unwrap()
+            .first()
+            .unwrap();
+        let candidate_keys = candidate_value
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        let candidate_schema = &receipt_schema["$defs"]["candidate"];
+        assert_eq!(candidate_keys, required_set(candidate_schema));
+        assert_eq!(candidate_keys, key_set(candidate_schema, "properties"));
+
+        let bundle_value = candidate_value["bundles"]
+            .as_array()
+            .unwrap()
+            .first()
+            .unwrap();
+        let bundle_keys = bundle_value
+            .as_object()
+            .unwrap()
+            .keys()
+            .cloned()
+            .collect::<std::collections::BTreeSet<_>>();
+        let bundle_schema = &receipt_schema["$defs"]["bundle"];
+        let bundle_required = required_set(bundle_schema);
+        let bundle_properties = key_set(bundle_schema, "properties");
+        assert!(bundle_required.is_subset(&bundle_keys));
+        assert!(bundle_keys.is_subset(&bundle_properties));
+
         let proof_path = dir.join("benchmark-proof.yaml");
         fs::write(&proof_path, serde_yaml::to_string(&receipt).unwrap()).unwrap();
         let verification = verify_benchmark_proof(&proof_path, &dir).unwrap();
