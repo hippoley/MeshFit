@@ -1,6 +1,6 @@
 # Action Guide — Reality First, Pivot When Value Moves
 
-_Last updated: 2026-10-08_
+_Last updated: 2026-10-09_
 
 This guide converts the user-story audit into operating rules.
 
@@ -58,25 +58,23 @@ Everything else is lower priority.
 
 ## 3. Current PR closure order
 
-Only three internal lines remain worth closing before framework freeze:
-
-1. **#133** — MLCommons/InfraGraph planning seed with unknown execution facts
-   preserved as unknown and node cost made an explicit operator declaration.
-2. **#139** — this user-story truth audit / roadmap correction.
-3. **#140** — clean current-main replay of the portable proof package originally
-   developed in #132.
+Only **#139** remains as an internal closure item before framework freeze.
 
 Already resolved:
 
+- **#133 merged** — MLCommons/InfraGraph planning seed with fail-conservative
+  runtime/network handling and explicit node-cost ownership;
 - **#134 merged** — portable verification JSON, public schema,
   digest/predicate binding and standard attestation composition;
 - **#135 merged** — Evidence Index factual refresh;
+- **#140 merged** — portable self-contained proof materialization and
+  re-verification from current main;
 - **#132 closed as superseded by #140** after verifier/mainline merge-base drift;
 - **#138 closed not planned** — no dedicated proof-consumer issue form until a
   real external consumer demonstrates that normal GitHub issues are inadequate.
 
-Merge only after the relevant CI succeeds. A mergeable PR with queued or failed
-CI is not completed evidence.
+After #139 passes CI, merge it and stop opening internal PRs unless a real run or
+independent consumer exposes a concrete integrity/execution/interop blocker.
 
 ## 4. Reality Campaign 001 is the product gate
 
@@ -158,27 +156,43 @@ external maintainer/governance activity
 
 ### Current allocation
 
-**Primary institutional node: MLCommons Benchmark Infra**
+**Product reality gate: MeshFit Reality Campaign #82**
+
+No internal feature substitutes for authenticated live capacity, real
+heterogeneous hosts, real repeated bundles and the first verified positive or
+negative claim.
+
+**Highest near-term feedback node: MLPerf Endpoints submission/review tooling**
+
+Why:
+
+- v1.0 rolling submission begins 2026-10-12;
+- the official runner -> submission CLI seam is already documented in
+  `mlcommons/endpoints-submission-cli#77`;
+- real submissions force runner, packaging, checker, reproducibility and review
+  semantics to meet;
+- a small fail-closed handoff/conformance contribution would create more
+  externally reviewable identity capital than another MeshFit-internal feature.
+
+Current limitation: the connected GitHub integration cannot write to the
+upstream repository (403), and no `hippoley/endpoints-submission-cli` fork is
+available through the current connection. Therefore this is a high-value node,
+not yet an achieved contribution.
+
+**Architectural/governance node: MLCommons Benchmark Infra / InfraGraph**
 
 Why:
 
 - reproducibility and system-spec ownership are explicit;
-- logging/reporting and benchmark documentation are explicit deliverables;
-- MeshFit evidence can be projected into an externally governed environment;
-- accepted contribution/review would produce stronger identity capital than
-  additional self-authored framework work.
+- active #1088 work provides a real multi-node infrastructure boundary;
+- MeshFit can compose decision/execution evidence without duplicating inventory;
+- accepted contribution/review would be a durable institutional credential.
 
-**High-upside option: IETF CATS / CATPTS**
+**High-upside standards option: IETF CATS / CATPTS**
 
-Why:
-
-- active work on heterogeneous compute-aware task placement;
-- explicit placement lifecycle / decision-epoch concepts;
-- potential white space around portable placement commitment -> realized
-  execution assurance.
-
-Caveat: CATPTS is an active individual Internet-Draft, not an adopted standard.
-Keep the option cheap until authors/WG discussion creates pull.
+CATPTS remains a cheap option around placement commitment -> realized execution
+assurance. Do not make it primary while Endpoints has a live submission window
+and no CATPTS author/WG pull exists.
 
 ## 7. Pivot triggers
 
