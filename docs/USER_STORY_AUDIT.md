@@ -1,6 +1,6 @@
 # User-Story Truth Audit
 
-_Last audited: 2026-10-08_
+_Last audited: 2026-10-09_
 
 This document is the product truth table for MeshFit.
 
@@ -49,9 +49,9 @@ conformance**.
 | US-05 | As an operator, a placement can compile into something a runtime can execute. | **REALITY-BLOCKED** | llama.cpp and vLLM compilers, device binding, executable plan contract and host/run preflight exist. | One generated plan must launch on real hardware from the frozen campaign artifact. |
 | US-06 | As an experiment owner, execution writes provenance-complete benchmark evidence automatically. | **REALITY-BLOCKED** | BenchmarkBundle, ExecutionIdentity, source/binary identity, request/wave measurements, repeated-run execution and re-attestation exist. | Produce retained real BenchmarkBundles for all Benchmark 001 candidates. |
 | US-07 | As a reviewer, I can tell whether a published placement claim is supported by the exact frozen evidence. | **CLOSED — CODE + CONTRACT** | `benchmark-proof.yaml`, independent verifier, fail-closed publication checks and proof-consumer Action exist; positive/negative wrapper conformance is merged. | External consumer/reviewer must independently run or consume it before this becomes institutionally countersigned. |
-| US-08 | As a reviewer, I can receive a proof without reconstructing MeshFit's internal directory layout. | **PARTIAL** | Proof already indexes all frozen inputs/bundles. #132 was superseded after verifier/mainline drift; replacement PR #140 cleanly replays self-contained materialization + re-verification from current main. | Merge #140 after CI; then exercise the exported package outside the producing working tree. |
+| US-08 | As a reviewer, I can receive a proof without reconstructing MeshFit's internal directory layout. | **CLOSED — CODE + CONTRACT** | #140 is merged. `benchmark-export-proof` verifies the source proof, materializes only proof-referenced dependencies into a fresh directory, normalizes/fail-closes relative paths, re-verifies the exported tree, and requires the exported proof digest to equal the source digest. | Code/contract is closed. Real third-party transport/consumption remains external validation under US-15. |
 | US-09 | As a downstream CI/policy system, I can consume a stable machine verification result. | **CLOSED — CODE + CONTRACT** | Proof Action is merged; #134 is merged with portable JSON verification, public schema, exact subject/predicate digest binding and standard attestation composition. | Code/contract is closed. Independent downstream consumption is tracked separately under US-15 and must not be self-certified. |
-| US-10 | As an MLCommons/InfraGraph consumer, I can reuse observed inventory without MeshFit inventing inter-host fabric or runtime evidence. | **PARTIAL** | PR #133 implements a fail-conservative planning-seed bridge, preserves CPU-only nodes, keeps unknown runtime/network facts unknown, and round-trips through `snapshot-manifest`. | Merge after CI, then validate the pairing identifier with MLCommons/InfraGraph maintainers or adapt to the upstream answer. |
+| US-10 | As an MLCommons/InfraGraph consumer, I can reuse observed inventory without MeshFit inventing inter-host fabric, runtime evidence, or cost facts. | **CLOSED — CODE + CONTRACT** | #133 is merged. The bridge consumes the current #1088 stem-pairing boundary, preserves CPU-only nodes, keeps runtime/network facts unknown, requires explicit hourly-cost semantics, and round-trips through `snapshot-manifest`. | Code/contract is closed. MLCommons-specific review/adoption remains external validation under US-15. |
 | US-11 | As a contributor/consumer, I have a standard way to report proof/interoperability failures with immutable evidence. | **DEFER / KILL NEAR-TERM** | PR #138 was closed not planned. No independent proof consumer currently exists, and a normal GitHub issue is sufficient for the first real report. Pre-building a 100+ line intake schema would optimize hypothetical friction. | Re-open only after an independent consumer reports a real compatibility problem; derive the intake fields from observed reporting behavior. |
 | US-12 | As an operator, MeshFit asks for the minimum missing evidence and tells me what measurement to run. | **PARTIAL** | `recommend-probes` ranks evidence gaps and explains suggested actions. `meshfit probe` and `compute_proxy.py` exist separately. Current `RejectionIR` does not carry a structured probe target. | Only promote this story when recommendations carry explicit source/peer/device target identity and a before/after decision delta can be demonstrated. Do **not** parse solver candidate display strings into commands: node IDs currently have no restricted grammar, so that would create a brittle interface. |
 | US-13 | As a user, MeshFit predicts latency/throughput for unseen placements with calibrated uncertainty. | **DEFER / KILL NEAR-TERM** | Exact-identity empirical calibration exists; a general cross-hardware latency/throughput predictor does not. | Do not implement before Benchmark 001 real evidence demonstrates a decision where such transfer would change the outcome. |
@@ -115,13 +115,16 @@ surface.
 
 ## Near-term action order
 
-1. **Reality Campaign 001 (#82)** — no substitute.
-2. Merge already-implemented consumption/interop work after CI:
-   #132, #133, #134, #135, #138.
-3. Obtain one external semantic answer / consumer behavior:
-   MLCommons Benchmark Infra first; CATPTS/CATS as a high-upside option.
-4. Only if a real campaign exposes a concrete operational gap, implement that
-   blocker.
+1. **Reality Campaign 001 (#82)** — no internal substitute; authenticated
+   provider capacity / actual launch is the remaining product gate.
+2. Merge this truth audit (#139) after CI, then freeze speculative internal
+   framework expansion.
+3. Pursue the highest-feedback external node that can reuse MeshFit's evidence
+   discipline. As of 2026-10-09, the near-term window is MLPerf Endpoints
+   runner -> submission -> checker/review interoperability; Benchmark Infra /
+   InfraGraph remains the stronger architectural/governance seam.
+4. Only if a real campaign or independent consumer exposes a concrete defect,
+   implement the smallest blocker fix.
 5. Do not start v0.6 adaptive placement or a general latency/throughput predictor
    merely to complete the old roadmap.
 
